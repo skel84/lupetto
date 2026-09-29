@@ -6,7 +6,7 @@
 
 The original operator-documentation request supplies the workflow targets below. Product-specific command and environment names here are adapted to Lupetto, not recovered historical spellings. The request is not executable proof. The lost source, tests, defaults, and database schema are unavailable; the overwritten checkout must not be used to fill those gaps.
 
-Architecture and selection rules proposed for the rebuild are identified separately. The CLI currently parses exact requests and checks local tool availability, but does not select from a catalog or build images.
+Architecture and selection rules proposed for the rebuild are identified separately. The CLI currently creates PostgreSQL 17 OCI images from the live Wolfi index and checks local tool availability. Other package families, catalog ingestion, Docker loading, and signed evidence remain unimplemented.
 
 ## Local workflow to restore
 
@@ -22,7 +22,7 @@ This is image composition from APK packages, not source compilation of those pac
 
 ## CLI compatibility targets
 
-The following are syntax templates for the renamed Lupetto interface, not runnable examples or evidence of historical spellings. Angle-bracket terms must be replaced with actual values once the CLI exists.
+The PostgreSQL 17 major/minor and exact-APK forms below have an image-only implementation. Other packages and the `sbom` command remain syntax targets, not runnable examples or evidence of historical spellings. Angle-bracket terms must be replaced with actual values.
 
 ```text
 lupetto build <package> <major>

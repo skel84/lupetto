@@ -2,7 +2,7 @@
 
 [Documentation home](../README.md) · [Scope](scope.md) · [Verification](verification.md)
 
-This is a rebuild proposal, not recovered source structure. A local Go module now contains a standalone CLI bootstrap; external dependencies and runtime build defaults have not been selected yet.
+This is a rebuild proposal, not recovered source structure. A local Go module now contains a standalone CLI and a narrow PostgreSQL 17 OCI image path; broader dependencies and runtime build defaults remain undecided.
 
 ## Components
 
@@ -64,7 +64,7 @@ A separate Explorer product does not inherently require a remote service. Keep t
 
 ## External tools
 
-Initially invoke pinned apko, Docker, and Cosign tools rather than embedding their internals. The choice of native versus containerized apko needs an exercised build before it is finalized.
+The first image path invokes native apko 1.4.5 with a signed Wolfi index/key and an exact package lock, producing a local OCI layout without Docker. Docker loading and Cosign signing remain future stages; no containerized apko build has been exercised.
 
 Use explicit argument arrays, not shell interpolation. Propagate cancellation, capture failures, and avoid logging secret-bearing environment values. Prefer structured output and artifact files where available. Any necessary parsing of Docker push output needs fixtures for supported tool versions and must fail if a valid digest cannot be established.
 

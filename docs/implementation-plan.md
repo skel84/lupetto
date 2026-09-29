@@ -2,7 +2,7 @@
 
 [Documentation home](../README.md) · [Decisions](decisions.md) · [Verification](verification.md)
 
-This is the single implementation checklist. The standalone CLI and tool-availability check are complete; the build pipeline and remaining implementation items are pending. Mark an item complete only after its observable behavior is verified; record the command/result or evidence reference beside it. Track blockers beside the affected item and design choices in the decision record, rather than creating a second status list.
+This is the single implementation checklist. The standalone CLI, tool check, and a scoped PostgreSQL 17 image-only build are complete; the full build/evidence pipeline and remaining implementation items are pending. Mark an item complete only after its observable behavior is verified; record the command/result or evidence reference beside it. Track blockers beside the affected item and design choices in the decision record, rather than creating a second status list.
 
 The CLI and Explorer are separate workstreams. The CLI can ship after its implementation and release checks below; it does not wait for Explorer. Explorer remains part of the full compatibility scope, but its product/repository/module packaging is undecided.
 
@@ -12,8 +12,9 @@ The CLI and Explorer are separate workstreams. The CLI can ship after its implem
 
 - [ ] Resolve the first-build decisions: Go/module identity, pinned apko, invocation mode, host/target architecture, repository/keyring trust, and image configuration.
 - [ ] Define workspace ownership, artifact retention, output names, and the machine-readable build result.
-- [x] Establish the Go module and standalone `lupetto` entry point without Explorer dependencies. Verified with `go test ./...` (pass), `go run ./cmd/lupetto --help` (exit 0), and `go run ./cmd/lupetto build wolfi-base --apk-version 1.2.3-r12` (explicit failure, no image/SBOM); the parser does not build yet.
+- [x] Establish the Go module and standalone `lupetto` entry point without Explorer dependencies. At bootstrap `go test ./...` passed, `go run ./cmd/lupetto --help` exited 0, and builds explicitly failed before implementation. The PostgreSQL 17 image-only path is separately verified below; broader CLI functionality remains pending.
 - [x] Report missing apko/Docker and optional Cosign executables with OS-specific install guidance. `go run ./cmd/lupetto doctor` reported missing apko and exit 1 before installation, then all three found and exit 0 after `brew install apko`; `apko version` reported 1.4.5 on darwin/amd64. This checks `PATH`, not tool compatibility or the Docker daemon.
+- [x] First-image slice: resolve `postgresql 17` and available `17.N` to an exact Wolfi `postgresql-17` revision and create a local OCI layout with apko 1.4.5. `go run ./cmd/lupetto build postgresql 17` selected `17.10-r1` and exited 0 on darwin/amd64; independent OCI-layer inspection found `postgresql-17` `17.10-r1` for `x86_64`. `17.1`, `17.2`, `17.3` each returned an explicit unavailable-version error (exit 1), while available `17.10` built successfully. This does not complete the generic catalog, validated SBOM, Docker-load, or full exact-build checklist items below.
 - [ ] Implement exact APK version selection, including the packaging revision, without silently substituting versions.
 - [ ] Implement apko configuration, dependency locking, and image composition; retain the inputs and resulting artifacts.
 - [ ] Define and implement SPDX/lock consistency rules, including architecture identity and legitimate non-APK SPDX entries.

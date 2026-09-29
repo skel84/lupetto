@@ -2,7 +2,7 @@
 
 Lupetto is being rebuilt as a local tool for selecting Wolfi APK packages, composing OCI images with apko, and retaining verifiable build evidence. Optional publication and Cosign signing extend the local build workflow.
 
-**Status: CLI bootstrap only.** A standalone Go entry point checks external tools and accepts exact APK request syntax, but image builds, SBOMs, catalog access, publication, and Explorer are not implemented. An accepted build request fails explicitly without creating an image.
+**Status: first local image only.** `lupetto build postgresql 17` creates an OCI layout from a selected exact Wolfi APK revision; available PostgreSQL 17 minor and exact APK-version requests use the same build path. SBOM validation, Docker loading, publication, signing, catalog/Explorer, and runnable PostgreSQL recipes are not implemented.
 
 The source of the rebuild specification is the operator-documentation request supplied for the lost implementation. The overwritten older checkout is excluded from this project’s evidence and design. No claim about the lost implementation has been verified against its source or executable.
 
@@ -12,7 +12,19 @@ The source of the rebuild specification is the operator-documentation request su
 go run ./cmd/lupetto doctor
 ```
 
-The check reports whether `apko` and `docker` (required for the planned default build workflow) and `cosign` (optional for signing) are on `PATH`. It suggests OS-specific installation steps for missing tools. It does not install anything, verify tool versions, or check whether the Docker daemon is running. Exit status is 1 if a required tool is missing, 0 otherwise.
+The check reports whether `apko` and `docker` (required for the planned default Docker-load workflow) and `cosign` (optional for signing) are on `PATH`. It suggests OS-specific installation steps for missing tools. It does not install anything, verify tool versions, or check whether the Docker daemon is running. Exit status is 1 if a required tool is missing, 0 otherwise. The image-only build below does not use Docker or Cosign.
+
+## Build a local PostgreSQL 17 OCI image
+
+With Go 1.27.1, native apko 1.4.5, and access to the public Wolfi package repository:
+
+```bash
+go run ./cmd/lupetto build postgresql 17
+```
+
+`17` resolves to the highest available numeric 17.x APK version and packaging revision for the host architecture. `17.N` selects the highest revision of that upstream minor, and `--apk-version 17.N-rM` requests an exact APK revision. For example, `go run ./cmd/lupetto build postgresql 17.10` and `go run ./cmd/lupetto build postgresql --apk-version 17.10-r1` were available in the observed amd64 index; availability can change. At the observed snapshot, `17.1`, `17.2`, and `17.3` returned explicit unavailable-version errors rather than another version.
+
+On success the command prints the exact selected APK version, the APKINDEX SHA-256, and a local OCI layout directory. A unique workspace under the user's cache directory retains `APKINDEX.tar.gz`, its checksum, the pinned public key, `apko.yaml`, `lock.json`, and `image/` with `index.json` and OCI blobs. The image's installed APK database is checked for the selected package/version/architecture before success is reported. The lock is retained and checked for the top-level package identity, **not** validated as SBOM evidence. Nothing is loaded into Docker or pushed to a registry, and this minimal image is not claimed to be a runnable PostgreSQL service.
 
 ## Documentation map
 

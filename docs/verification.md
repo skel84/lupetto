@@ -2,13 +2,17 @@
 
 [Documentation home](../README.md) · [Scope](scope.md) · [Implementation checklist](implementation-plan.md)
 
-**Current status: CLI syntax and tool discovery only.** The standalone Go CLI has exercised help, exact-version parsing, fail-closed build requests, and executable discovery. No actual Wolfi image, SBOM, registry, or Explorer verification has been exercised; the sections below remain future acceptance criteria.
+**Current status: scoped local image only.** The standalone CLI has exercised PostgreSQL 17 exact-selector resolution, an apko OCI layout build, and installed-package identity checks. The full Wolfi snapshot catalog, SPDX validation, Docker load, registry, and Explorer scenarios below remain future acceptance criteria.
 
 Use focused regression tests for uncertain behavior and real smoke runs for external-tool integration. Do not replace a real build or registry check with mocks that merely echo arguments.
 
 ## Tool availability
 
 On macOS/amd64, `go run ./cmd/lupetto doctor` initially reported missing apko (exit 1) with `brew install apko`, while Docker and Cosign were found. After `HOMEBREW_NO_AUTO_UPDATE=1 brew install apko`, `apko version` reported 1.4.5 and `go run ./cmd/lupetto doctor` reported all three present (exit 0). `docker --version` reported 27.4.0 and `cosign version` reported v3.1.3. These are executable checks, not build compatibility, Docker daemon availability, or signing verification.
+
+## Scoped PostgreSQL 17 image evidence
+
+On darwin/amd64 targeting linux/amd64, with apko 1.4.5, `go run ./cmd/lupetto build postgresql 17` exited 0 after verifying the downloaded APKINDEX signature with the pinned Wolfi key. It selected `postgresql-17@17.10-r1` from APKINDEX SHA-256 `d296da0b216382d0e825cd1a71bebeaf0fb06e887f3e8b6b9ba15db544d5a27e`. The workspace was `/Users/skel/Library/Caches/lupetto/builds/postgresql-17-2725349457`, outside the repository. Independent inspection of the OCI manifest/layer, apko lock, and `usr/lib/apk/db/installed` found exactly `postgresql-17` `17.10-r1` on `x86_64`; the OCI layer digest matched its bytes. `go run ./cmd/lupetto build postgresql 17.10` and `go run ./cmd/lupetto build postgresql --apk-version 17.10-r1` also exited 0 with `17.10-r1` after signature verification. Each of `go run ./cmd/lupetto build postgresql 17.1`, `17.2`, and `17.3` exited 1 with an explicit unavailable-version error, without producing an image. This is not SBOM/lock consistency validation, historical version archival, Docker loading, or evidence of a runnable database image.
 
 ## Selection and snapshots
 
