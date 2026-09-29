@@ -33,6 +33,12 @@ Status vocabulary:
 - Use native apko 1.4.5 with an `x86_64` target on the exercised darwin/amd64 host, emit a local OCI layout, and retain its input config, index, key, and apko dependency lock in a unique user-cache build workspace. No runnable PostgreSQL recipe, Docker load, publication, signing, or validated SBOM is implied. Other host/target pairs remain unverified.
 - Probe evidence: `apko lock --arch x86_64 --output <lock> <config>` and `apko build --arch x86_64 --sbom=false --vcs=false --lockfile <lock> <config> <tag> <existing-output-directory>/` produced an OCI layout with `postgresql-17` version `17.10-r1` in `usr/lib/apk/db/installed`. At the observed amd64 index snapshot, `17.1`, `17.2`, and `17.3` were absent. These upstream apko probes preceded the separate Lupetto build recorded in [verification](verification.md#scoped-postgresql-17-image-evidence).
 
+## Generic signed-index selection (next image slice)
+
+- Resolve a requested name from signed APKINDEX records whose APK `P` name matches exactly **or** whose `p` provides field declares that name at the same exact APK version. This avoids package-specific aliases: Wolfi currently advertises `postgresql` through versioned APKs, `nginx` through mainline/stable APKs, and `valkey` through both unversioned and versioned APKs. Do not guess from arbitrary name prefixes or silently choose between equally ranked providers.
+- A dotted numeric selector (major, minor, or patch) matches the corresponding leading upstream numeric components; choose the highest matching APK version and packaging revision using apko's pinned APK-compatible version comparator, not lexical or generic SemVer sorting. `--apk-version` requires an exact revision. No match is an explicit unavailable-version error; equal-ranked distinct package/byte candidates are ambiguous errors. The signed index is retained and apko still locks the exact selected package and checksum before image composition.
+- Keep the same image-only apko pipeline and user-cache workspace for every requested package. nginx and Valkey are real interoperability checks, not source-level package allowlists or product recipes. Numeric selector support does not imply full package-family mapping for every Wolfi naming convention, a generic catalog, or runnable images.
+
 ## Proposed design choices
 
 | ID | Proposal | Tradeoff |
