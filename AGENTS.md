@@ -1,10 +1,10 @@
-# Forgeflux agent instructions
+# Lupetto agent instructions
 
 ## Project context
 
 This is a clean-room rebuild of a lost local Wolfi-to-OCI tool. The documentation currently precedes implementation. Do not claim a command, default, schema, or workflow is implemented without checking source and exercising behavior.
 
-The overwritten older Forgeflux checkout is explicitly excluded. Do not inspect, copy, or use it to infer the lost implementation. Do not modify sibling repositories or use their deployment state or credentials.
+The overwritten older checkout is explicitly excluded. Do not inspect, copy, or use it to infer the lost implementation. Do not modify sibling repositories or use their deployment state or credentials.
 
 ## Read before working
 
