@@ -2,9 +2,17 @@
 
 Lupetto is being rebuilt as a local tool for selecting Wolfi APK packages, composing OCI images with apko, and retaining verifiable build evidence. Optional publication and Cosign signing extend the local build workflow.
 
-**Status: CLI bootstrap only.** A standalone Go entry point accepts exact APK request syntax and rejects missing revisions, but image builds, SBOMs, catalog access, publication, and Explorer are not implemented. An accepted request fails explicitly without creating an image.
+**Status: CLI bootstrap only.** A standalone Go entry point checks external tools and accepts exact APK request syntax, but image builds, SBOMs, catalog access, publication, and Explorer are not implemented. An accepted build request fails explicitly without creating an image.
 
 The source of the rebuild specification is the operator-documentation request supplied for the lost implementation. The overwritten older checkout is excluded from this project’s evidence and design. No claim about the lost implementation has been verified against its source or executable.
+
+## Check external tools
+
+```bash
+go run ./cmd/lupetto doctor
+```
+
+The check reports whether `apko` and `docker` (required for the planned default build workflow) and `cosign` (optional for signing) are on `PATH`. It suggests OS-specific installation steps for missing tools. It does not install anything, verify tool versions, or check whether the Docker daemon is running. Exit status is 1 if a required tool is missing, 0 otherwise.
 
 ## Documentation map
 

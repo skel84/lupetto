@@ -23,7 +23,8 @@ Status vocabulary:
 
 - The first standalone CLI uses Go 1.27.1 (the locally exercised toolchain), the temporary local module path `lupetto`, and the standard library only. A public module identity and older supported Go versions remain undecided.
 - Exact-request parsing requires an APK revision (`-rN`) and preserves the input version unchanged. This is syntax validation, not catalog lookup or proof that the APK exists. Major selection and all build stages remain unimplemented; accepted build requests fail without reporting image or SBOM success.
-- No apko executable was available during this bootstrap. Pinning apko and resolving repository/keyring, image configuration, and build evidence decisions remain prerequisites for a real build.
+- apko was absent at CLI bootstrap and was subsequently installed locally through Homebrew as 1.4.5 on macOS/amd64. Installing a tool does not pin the version for Lupetto builds or settle repository/keyring, image configuration, and build-evidence decisions.
+- The `doctor` command checks executable discovery on `PATH` for apko and Docker (needed by the planned default image-build/load path), with Cosign optional for signing. Missing required tools produce a nonzero status; missing optional Cosign is reported without blocking. Advice is OS-specific, but the command never installs tools or asserts version/daemon compatibility. The apko version for a real build remains to be pinned and exercised.
 
 ## Proposed design choices
 

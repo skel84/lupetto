@@ -2,9 +2,13 @@
 
 [Documentation home](../README.md) · [Scope](scope.md) · [Implementation checklist](implementation-plan.md)
 
-**Current status: CLI syntax only.** The standalone Go CLI has exercised help, exact-version parsing, and fail-closed build requests. No actual Wolfi image, SBOM, registry, or Explorer verification has been exercised; the sections below remain future acceptance criteria.
+**Current status: CLI syntax and tool discovery only.** The standalone Go CLI has exercised help, exact-version parsing, fail-closed build requests, and executable discovery. No actual Wolfi image, SBOM, registry, or Explorer verification has been exercised; the sections below remain future acceptance criteria.
 
 Use focused regression tests for uncertain behavior and real smoke runs for external-tool integration. Do not replace a real build or registry check with mocks that merely echo arguments.
+
+## Tool availability
+
+On macOS/amd64, `go run ./cmd/lupetto doctor` initially reported missing apko (exit 1) with `brew install apko`, while Docker and Cosign were found. After `HOMEBREW_NO_AUTO_UPDATE=1 brew install apko`, `apko version` reported 1.4.5 and `go run ./cmd/lupetto doctor` reported all three present (exit 0). `docker --version` reported 27.4.0 and `cosign version` reported v3.1.3. These are executable checks, not build compatibility, Docker daemon availability, or signing verification.
 
 ## Selection and snapshots
 

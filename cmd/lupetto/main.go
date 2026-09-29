@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const usage = "Usage: lupetto build <package> --apk-version <exact-version>\n\nAn exact version includes its APK revision (for example, 1.2.3-r0).\nImage builds are not implemented yet."
+const usage = "Usage:\n  lupetto doctor\n  lupetto build <package> --apk-version <exact-version>\n\nDoctor checks apko, Docker, and optional Cosign on PATH and suggests installation steps.\nAn exact version includes its APK revision (for example, 1.2.3-r0).\nImage builds are not implemented yet."
 
 var (
 	packageName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+._-]*$`)
@@ -34,6 +34,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "help", "-h", "--help":
 		fmt.Fprintln(stdout, usage)
 		return 0
+	case "doctor":
+		return runDoctor(stdout, stderr, args[1:])
 	case "build":
 		_, err := parseBuild(args[1:])
 		if err != nil {
