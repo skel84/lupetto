@@ -6,7 +6,7 @@
 
 The original operator-documentation request supplies the workflow targets below. Product-specific command and environment names here are adapted to Lupetto, not recovered historical spellings. The request is not executable proof. The lost source, tests, defaults, and database schema are unavailable; the overwritten checkout must not be used to fill those gaps.
 
-Architecture and selection rules proposed for the rebuild are identified separately. There are no implemented features yet.
+Architecture and selection rules proposed for the rebuild are identified separately. The CLI currently parses exact requests but does not select from a catalog or build images.
 
 ## Local workflow to restore
 

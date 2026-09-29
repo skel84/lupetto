@@ -2,7 +2,7 @@
 
 Lupetto is being rebuilt as a local tool for selecting Wolfi APK packages, composing OCI images with apko, and retaining verifiable build evidence. Optional publication and Cosign signing extend the local build workflow.
 
-**Status: documentation only. There is no application implementation in this workspace.** Commands described in these documents are compatibility targets, not commands that can be run here today.
+**Status: CLI bootstrap only.** A standalone Go entry point accepts exact APK request syntax and rejects missing revisions, but image builds, SBOMs, catalog access, publication, and Explorer are not implemented. An accepted request fails explicitly without creating an image.
 
 The source of the rebuild specification is the operator-documentation request supplied for the lost implementation. The overwritten older checkout is excluded from this project’s evidence and design. No claim about the lost implementation has been verified against its source or executable.
 
@@ -57,4 +57,4 @@ Whether Explorer lives beside the CLI or becomes a separate product, repository,
 
 ## Operator documentation later
 
-Once the implementation and its CLI help exist, replace this landing page with the verified operator guide and add `docs/registry-signing.md` for detailed publication and verification instructions. Preserve links to the rebuild documents. Do not publish invented defaults or unexercised commands as current operator instructions.
+Once the build workflow is implemented and exercised, replace this landing page with the verified operator guide and add `docs/registry-signing.md` for detailed publication and verification instructions. Preserve links to the rebuild documents. Do not publish invented defaults or unexercised commands as current operator instructions.

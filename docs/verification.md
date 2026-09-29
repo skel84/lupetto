@@ -2,7 +2,7 @@
 
 [Documentation home](../README.md) · [Scope](scope.md) · [Implementation checklist](implementation-plan.md)
 
-**Current status: not exercised.** There is no Lupetto implementation or Go module in this workspace. This document defines future acceptance evidence, not test results.
+**Current status: CLI syntax only.** The standalone Go CLI has exercised help, exact-version parsing, and fail-closed build requests. No actual Wolfi image, SBOM, registry, or Explorer verification has been exercised; the sections below remain future acceptance criteria.
 
 Use focused regression tests for uncertain behavior and real smoke runs for external-tool integration. Do not replace a real build or registry check with mocks that merely echo arguments.
 

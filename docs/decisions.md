@@ -16,8 +16,14 @@ Status vocabulary:
 | C2 | Restore the local apko-based image workflow, not remote Konflux execution. | This is the workflow described by the operator request. |
 | C3 | Preserve exact APK selection and major-selector compatibility targets. | Both command forms are explicitly named; convenience selection must resolve to an exact build request. |
 | C4 | Keep generic OCI publication and digest-bound signed SPDX attestations. | No registry vendor is required; unsigned attachment is not equivalent evidence. |
-| C5 | Separate specification, proposals, and verified behavior. | No surviving implementation is available in this workspace. |
+| C5 | Separate specification, proposals, and verified behavior. | No surviving implementation of the lost tool is available in this workspace. |
 | C6 | Keep Explorer optional and structurally separate from the CLI. | The CLI must stand alone; whether Explorer is colocated or a separate product is intentionally undecided. |
+
+## Scoped bootstrap decisions
+
+- The first standalone CLI uses Go 1.27.1 (the locally exercised toolchain), the temporary local module path `lupetto`, and the standard library only. A public module identity and older supported Go versions remain undecided.
+- Exact-request parsing requires an APK revision (`-rN`) and preserves the input version unchanged. This is syntax validation, not catalog lookup or proof that the APK exists. Major selection and all build stages remain unimplemented; accepted build requests fail without reporting image or SBOM success.
+- No apko executable was available during this bootstrap. Pinning apko and resolving repository/keyring, image configuration, and build evidence decisions remain prerequisites for a real build.
 
 ## Proposed design choices
 

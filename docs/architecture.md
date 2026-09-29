@@ -2,7 +2,7 @@
 
 [Documentation home](../README.md) · [Scope](scope.md) · [Verification](verification.md)
 
-This is a rebuild proposal, not recovered source structure. Go is the recommended language; no module, dependencies, or runtime defaults have been selected yet.
+This is a rebuild proposal, not recovered source structure. A local Go module now contains a standalone CLI bootstrap; external dependencies and runtime build defaults have not been selected yet.
 
 ## Components
 
