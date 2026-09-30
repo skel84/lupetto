@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -22,18 +21,58 @@ const apkoBuildVersion = "1.4.5"
 var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 type buildResult struct {
-	packageName, version, indexSHA256, workspace, imageDir string
+	packageName, version, arch, indexSHA256, workspace, imageDir, spdxPath, spdxSHA256 string
+	imageReference, buildReference, dockerLoad, dockerImageID                          string
+}
+
+type evidenceResult struct {
+	Version        int    `json:"version"`
+	PackageName    string `json:"packageName"`
+	PackageVersion string `json:"packageVersion"`
+	Architecture   string `json:"architecture"`
+	IndexSHA256    string `json:"indexSHA256"`
+	ApkoVersion    string `json:"apkoVersion"`
+	ImageDirectory string `json:"imageDirectory"`
+	LockPath       string `json:"lockPath"`
+	SPDXPath       string `json:"spdxPath"`
+	SPDXSHA256     string `json:"spdxSHA256"`
+	SPDXValidated  bool   `json:"spdxValidated"`
+	ImageReference string `json:"imageReference"`
+	BuildReference string `json:"buildReference"`
+	DockerLoad     string `json:"dockerLoad"`
+	DockerImageID  string `json:"dockerImageID,omitempty"`
 }
 
 func buildLocal(ctx context.Context, request buildRequest) (buildResult, error) {
+	return buildLocalWith(ctx, request, buildServices{
+		command: executeLocalCommand, cacheDir: os.UserCacheDir,
+		publicFile: getPublicFile, signingKey: getWolfiSigningKey,
+	})
+}
+
+// Only external boundaries are replaceable; selection and artifact validation
+// always use the same implementation.
+type buildServices struct {
+	command    localCommand
+	cacheDir   func() (string, error)
+	publicFile func(context.Context, string, int64) ([]byte, error)
+	signingKey func(context.Context) ([]byte, error)
+}
+
+func buildLocalWith(ctx context.Context, request buildRequest, services buildServices) (buildResult, error) {
+	if err := ctx.Err(); err != nil {
+		return buildResult{}, err
+	}
+	buildStage(ctx, "Checking build tools")
 	arch, err := targetArch()
 	if err != nil {
 		return buildResult{}, err
 	}
-	if err := requireApkoVersion(ctx); err != nil {
+	if err := requireApkoVersion(ctx, services.command); err != nil {
 		return buildResult{}, err
 	}
-	cacheDir, err := os.UserCacheDir()
+	buildStage(ctx, "Creating build workspace")
+	cacheDir, err := services.cacheDir()
 	if err != nil {
 		return buildResult{}, fmt.Errorf("find user cache: %w", err)
 	}
@@ -41,16 +80,18 @@ func buildLocal(ctx context.Context, request buildRequest) (buildResult, error) 
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return buildResult{}, fmt.Errorf("create build directory: %w", err)
 	}
-	workspace, err := os.MkdirTemp(root, "postgresql-17-")
+	workspace, err := os.MkdirTemp(root, "image-")
 	if err != nil {
 		return buildResult{}, fmt.Errorf("create build workspace: %w", err)
 	}
+	buildReference := "lupetto/local:build-" + strings.TrimPrefix(filepath.Base(workspace), "image-")
 	fail := func(err error) (buildResult, error) {
 		return buildResult{}, fmt.Errorf("%w (workspace: %s)", err, workspace)
 	}
 
+	buildStage(ctx, "Fetching signed APKINDEX")
 	indexURL := fmt.Sprintf("%s/%s/APKINDEX.tar.gz", wolfiRepository, arch)
-	index, err := getPublicFile(ctx, indexURL, 32<<20)
+	index, err := services.publicFile(ctx, indexURL, 32<<20)
 	if err != nil {
 		return fail(err)
 	}
@@ -61,58 +102,101 @@ func buildLocal(ctx context.Context, request buildRequest) (buildResult, error) 
 	if err := os.WriteFile(filepath.Join(workspace, "APKINDEX.sha256"), []byte(indexDigest+"\n"), 0600); err != nil {
 		return fail(fmt.Errorf("retain APKINDEX checksum: %w", err))
 	}
-	key, err := getPublicFile(ctx, wolfiKeyURL, 16<<10)
+	buildStage(ctx, "Fetching Wolfi signing key")
+	key, err := services.signingKey(ctx)
 	if err != nil {
 		return fail(err)
-	}
-	if sha256Hex(key) != wolfiKeySHA256 {
-		return fail(fmt.Errorf("Wolfi signing key fingerprint changed; refusing to use untrusted key"))
 	}
 	keyPath := filepath.Join(workspace, "wolfi-signing.rsa.pub")
 	if err := os.WriteFile(keyPath, key, 0600); err != nil {
 		return fail(fmt.Errorf("retain Wolfi key: %w", err))
 	}
+	buildStage(ctx, "Verifying APKINDEX signature")
 	verifiedIndex, err := verifyAPKINDEX(index, key)
 	if err != nil {
 		return fail(err)
 	}
-	packages, err := parseAPKINDEX(verifiedIndex)
+	buildStage(ctx, "Selecting exact APK")
+	packages, err := parseAPKINDEX(verifiedIndex, request.packageName)
 	if err != nil {
 		return fail(err)
 	}
-	selected, err := selectPostgres(packages, request, arch)
+	selected, err := selectPackage(packages, request, arch)
 	if err != nil {
 		return fail(err)
 	}
+	imageReference, err := readableImageReference(selected, arch)
+	if err != nil {
+		return fail(err)
+	}
+	buildMessage(ctx, "Selected %s@%s; local reference %s; build reference %s", selected.name, selected.version, imageReference, buildReference)
 	configPath := filepath.Join(workspace, "apko.yaml")
-	config := fmt.Sprintf("contents:\n  keyring:\n    - %s\n  repositories:\n    - %s\n  packages:\n    - %s\narchs:\n  - %s\n", strconv.Quote(keyPath), wolfiRepository, strconv.Quote(postgresAPK+"="+selected.version), arch)
+	config := fmt.Sprintf("contents:\n  keyring:\n    - %s\n  repositories:\n    - %s\n  packages:\n    - %s\narchs:\n  - %s\n", strconv.Quote(keyPath), wolfiRepository, strconv.Quote(selected.name+"="+selected.version), arch)
 	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
 		return fail(fmt.Errorf("retain apko config: %w", err))
 	}
 	lockPath := filepath.Join(workspace, "lock.json")
-	if err := runApko(ctx, "lock", "--arch", arch, "--output", lockPath, configPath); err != nil {
+	buildStage(ctx, "Locking apko dependencies")
+	if err := runApko(ctx, services.command, "lock", "--arch", arch, "--output", lockPath, configPath); err != nil {
 		return fail(err)
 	}
 	if err := checkSelectedLock(lockPath, selected); err != nil {
 		return fail(err)
 	}
 
+	sbomDir := filepath.Join(workspace, "sbom")
+	if err := os.Mkdir(sbomDir, 0700); err != nil {
+		return fail(fmt.Errorf("create SPDX directory: %w", err))
+	}
 	imageDir := filepath.Join(workspace, "image")
 	if err := os.Mkdir(imageDir, 0700); err != nil {
 		return fail(fmt.Errorf("create OCI layout directory: %w", err))
 	}
-	tag := "lupetto/postgresql:" + selected.version
-	if err := runApko(ctx, "build", "--arch", arch, "--sbom=false", "--vcs=false", "--lockfile", lockPath, configPath, tag, imageDir+string(os.PathSeparator)); err != nil {
+	buildStage(ctx, "Composing OCI image with apko")
+	if err := runApko(ctx, services.command, "build", "--arch", arch, "--sbom-path", sbomDir, "--sbom-formats", "spdx", "--vcs=false", "--lockfile", lockPath, configPath, buildReference, imageDir+string(os.PathSeparator)); err != nil {
 		return fail(err)
 	}
+	buildStage(ctx, "Checking installed APK")
 	if err := checkImagePackage(imageDir, selected); err != nil {
 		return fail(err)
 	}
-	return buildResult{packageName: postgresAPK, version: selected.version, indexSHA256: indexDigest, workspace: workspace, imageDir: imageDir}, nil
+	buildStage(ctx, "Validating SPDX against apko lock")
+	spdxPath := filepath.Join(sbomDir, "sbom-"+arch+".spdx.json")
+	spdxSHA256, err := validateSPDX(lockPath, spdxPath, arch)
+	if err != nil {
+		return fail(fmt.Errorf("validate SPDX against apko lock: %w", err))
+	}
+	result := buildResult{
+		packageName: selected.name, version: selected.version, arch: arch,
+		indexSHA256: indexDigest, workspace: workspace, imageDir: imageDir,
+		spdxPath: spdxPath, spdxSHA256: spdxSHA256, imageReference: imageReference,
+		buildReference: buildReference, dockerLoad: "skipped",
+	}
+	if !request.noLoad {
+		imageID, err := loadDockerImage(ctx, services.command, imageDir, workspace, buildReference, arch)
+		if err != nil {
+			return fail(err)
+		}
+		if err := tagReadableDockerImage(ctx, services.command, imageID, buildReference, imageReference, arch); err != nil {
+			return fail(err)
+		}
+		result.dockerLoad, result.dockerImageID = "loaded", imageID
+	}
+	if request.noLoad {
+		buildMessage(ctx, "Docker loading skipped")
+	}
+	buildStage(ctx, "Recording build result")
+	if err := retainBuildResult(ctx, result, lockPath); err != nil {
+		if result.dockerLoad == "loaded" {
+			return fail(fmt.Errorf("Docker loading confirmed for %s and %s (image ID: %s), but result recording failed; imported image/tags remain: %w", imageReference, buildReference, result.dockerImageID, err))
+		}
+		return fail(err)
+	}
+	return result, nil
 }
 
-func requireApkoVersion(ctx context.Context) error {
-	output, err := exec.CommandContext(ctx, "apko", "version").Output()
+func requireApkoVersion(ctx context.Context, command localCommand) error {
+	output, err := command(ctx, "apko", "version")
 	if err != nil {
 		return fmt.Errorf("apko %s is required: %w", apkoBuildVersion, err)
 	}
@@ -122,8 +206,8 @@ func requireApkoVersion(ctx context.Context) error {
 	return nil
 }
 
-func runApko(ctx context.Context, args ...string) error {
-	output, err := exec.CommandContext(ctx, "apko", args...).CombinedOutput()
+func runApko(ctx context.Context, command localCommand, args ...string) error {
+	output, err := command(ctx, "apko", args...)
 	if err != nil {
 		return fmt.Errorf("apko %s failed: %w: %s", args[0], err, strings.TrimSpace(string(output)))
 	}

@@ -14,19 +14,19 @@ import (
 )
 
 func TestCheckSelectedLockRejectsSubstitution(t *testing.T) {
-	selected := indexedPackage{name: postgresAPK, version: "17.10-r1", arch: "x86_64", checksum: "Q1exact"}
+	selected := indexedPackage{name: "valkey-9.1", version: "9.1.2-r1", arch: "x86_64", checksum: "Q1exact"}
 	path := filepath.Join(t.TempDir(), "lock.json")
 	for _, tc := range []struct {
 		name, version, checksum string
 		wantError               bool
 	}{
-		{"exact", "17.10-r1", "Q1exact", false},
-		{"wrong revision", "17.10-r0", "Q1exact", true},
-		{"different package bytes", "17.10-r1", "Q1changed", true},
+		{"exact", "9.1.2-r1", "Q1exact", false},
+		{"wrong revision", "9.1.2-r0", "Q1exact", true},
+		{"different package bytes", "9.1.2-r1", "Q1changed", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			lock := map[string]any{"contents": map[string]any{"packages": []any{map[string]any{
-				"name": postgresAPK, "version": tc.version, "architecture": "x86_64", "checksum": tc.checksum,
+				"name": "valkey-9.1", "version": tc.version, "architecture": "x86_64", "checksum": tc.checksum,
 			}}}}
 			data, _ := json.Marshal(lock)
 			if err := os.WriteFile(path, data, 0600); err != nil {
@@ -59,7 +59,7 @@ func makeOCI(t *testing.T, version string) (string, string) {
 	if err := os.WriteFile(filepath.Join(dir, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	installed := "P:postgresql-17\nV:" + version + "\nA:x86_64\n\n"
+	installed := "P:valkey-9.1\nV:" + version + "\nA:x86_64\n\n"
 	var layer bytes.Buffer
 	gz := gzip.NewWriter(&layer)
 	archive := tar.NewWriter(gz)
@@ -88,16 +88,16 @@ func makeOCI(t *testing.T, version string) (string, string) {
 }
 
 func TestCheckImagePackageRequiresExactInstalledVersionAndLayerDigest(t *testing.T) {
-	dir, layerDigest := makeOCI(t, "17.10-r1")
-	selected := indexedPackage{name: postgresAPK, version: "17.10-r1", arch: "x86_64"}
+	dir, layerDigest := makeOCI(t, "9.1.2-r1")
+	selected := indexedPackage{name: "valkey-9.1", version: "9.1.2-r1", arch: "x86_64"}
 	if err := checkImagePackage(dir, selected); err != nil {
 		t.Fatalf("valid OCI image rejected: %v", err)
 	}
-	selected.version = "17.10-r0"
+	selected.version = "9.1.2-r0"
 	if err := checkImagePackage(dir, selected); err == nil {
-		t.Fatal("image with wrong PostgreSQL version accepted")
+		t.Fatal("image with wrong selected package version accepted")
 	}
-	selected.version = "17.10-r1"
+	selected.version = "9.1.2-r1"
 	layerPath := filepath.Join(dir, "blobs", "sha256", layerDigest)
 	if err := os.WriteFile(layerPath, []byte("tampered"), 0600); err != nil {
 		t.Fatal(err)

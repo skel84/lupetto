@@ -1,6 +1,8 @@
 package main
 
 import (
+	apkcompare "chainguard.dev/apko/pkg/apk/apk"
+
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
@@ -16,27 +18,22 @@ import (
 	"net/http"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 )
 
-// These are the trust and package-family inputs for the first local image workflow.
-// Versions are discovered from APKINDEX, never listed here.
+// Trust inputs for the public Wolfi repository. Package names and versions
+// are resolved from the signed index, not from a source-level allowlist.
 const (
 	wolfiRepository = "https://packages.wolfi.dev/os"
 	wolfiKeyURL     = wolfiRepository + "/wolfi-signing.rsa.pub"
 	wolfiKeySHA256  = "f0031424cf46f7db780ce63a45f0fd6aa6f85f601e6bb3b7a91fe3d4d5b7d2cc"
-	postgresAPK     = "postgresql-17"
 )
 
-var (
-	pgSelector = regexp.MustCompile(`^17(?:\.[0-9]+)?$`)
-	pgVersion  = regexp.MustCompile(`^17\.([0-9]+)-r([0-9]+)$`)
-)
+var upstreamNumbers = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)*)`)
 
 type indexedPackage struct {
-	name, version, arch, checksum string
+	name, version, arch, checksum, provides string
 }
 
 func targetArch() (string, error) {
@@ -72,6 +69,17 @@ func getPublicFile(ctx context.Context, url string, maxBytes int64) ([]byte, err
 		return nil, fmt.Errorf("%s exceeds %d bytes", url, maxBytes)
 	}
 	return data, nil
+}
+
+func getWolfiSigningKey(ctx context.Context) ([]byte, error) {
+	key, err := getPublicFile(ctx, wolfiKeyURL, 16<<10)
+	if err != nil {
+		return nil, err
+	}
+	if sha256Hex(key) != wolfiKeySHA256 {
+		return nil, fmt.Errorf("Wolfi signing key fingerprint changed; refusing to use untrusted key")
+	}
+	return key, nil
 }
 
 // Wolfi signs the second gzip member (the index tarball) with a signature
@@ -128,7 +136,7 @@ func verifyAPKINDEX(compressed, publicKey []byte) ([]byte, error) {
 	return indexMember, nil
 }
 
-func parseAPKINDEX(compressed []byte) ([]indexedPackage, error) {
+func parseAPKINDEX(compressed []byte, requested string) ([]indexedPackage, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(compressed))
 	if err != nil {
 		return nil, fmt.Errorf("open APKINDEX gzip: %w", err)
@@ -160,7 +168,7 @@ func parseAPKINDEX(compressed []byte) ([]indexedPackage, error) {
 		var current indexedPackage
 		for _, line := range strings.Split(string(data), "\n") {
 			if line == "" {
-				if current.name == postgresAPK && current.version != "" && current.arch != "" && current.checksum != "" {
+				if matchesRequestedPackage(current, requested) && current.version != "" && current.arch != "" && current.checksum != "" {
 					packages = append(packages, current)
 				}
 				current = indexedPackage{}
@@ -178,47 +186,70 @@ func parseAPKINDEX(compressed []byte) ([]indexedPackage, error) {
 				current.arch = line[2:]
 			case 'C':
 				current.checksum = line[2:]
+			case 'p':
+				current.provides = line[2:]
 			}
 		}
-		if current.name == postgresAPK && current.version != "" && current.arch != "" && current.checksum != "" {
+		if matchesRequestedPackage(current, requested) && current.version != "" && current.arch != "" && current.checksum != "" {
 			packages = append(packages, current)
 		}
 		return packages, nil
 	}
 }
 
-func selectPostgres(packages []indexedPackage, request buildRequest, arch string) (indexedPackage, error) {
+// A provided name is usable only when it advertises the APK's own exact
+// version. This keeps selection tied to the package that apko will lock.
+func matchesRequestedPackage(pkg indexedPackage, requested string) bool {
+	if pkg.name == requested {
+		return true
+	}
+	for _, provided := range strings.Fields(pkg.provides) {
+		if provided == requested+"="+pkg.version {
+			return true
+		}
+	}
+	return false
+}
+
+func selectPackage(packages []indexedPackage, request buildRequest, arch string) (indexedPackage, error) {
 	var best indexedPackage
-	var bestMinor, bestRevision uint64
+	var bestVersion apkcompare.Version
+	ambiguous := false
 	for _, pkg := range packages {
-		if pkg.name != postgresAPK || pkg.arch != arch {
+		if pkg.arch != arch || !matchesRequestedPackage(pkg, request.packageName) {
 			continue
+		}
+		if !packageName.MatchString(pkg.name) {
+			return indexedPackage{}, fmt.Errorf("invalid APKINDEX package name %q", pkg.name)
 		}
 		if request.version != "" {
-			if pkg.version == request.version {
-				if best.version != "" && best.checksum != pkg.checksum {
-					return indexedPackage{}, fmt.Errorf("ambiguous APKINDEX entries for %s@%s", pkg.name, pkg.version)
-				}
-				best = pkg
+			if pkg.version != request.version {
+				continue
 			}
+			if best.version != "" && (best.name != pkg.name || best.checksum != pkg.checksum) {
+				return indexedPackage{}, fmt.Errorf("ambiguous package providers for %s@%s", request.packageName, pkg.version)
+			}
+			best = pkg
 			continue
 		}
-		match := pgVersion.FindStringSubmatch(pkg.version)
-		if match == nil {
+		upstream := upstreamNumbers.FindString(pkg.version)
+		if upstream != request.selector && !strings.HasPrefix(upstream, request.selector+".") {
 			continue
 		}
-		if request.selector != "17" && "17."+match[1] != request.selector {
+		parsed, err := apkcompare.ParseVersion(pkg.version)
+		if err != nil {
+			return indexedPackage{}, fmt.Errorf("cannot order APK version %q for %s: %w", pkg.version, pkg.name, err)
+		}
+		if best.version == "" {
+			best, bestVersion = pkg, parsed
 			continue
 		}
-		minor, minorErr := strconv.ParseUint(match[1], 10, 64)
-		revision, revisionErr := strconv.ParseUint(match[2], 10, 64)
-		if minorErr != nil || revisionErr != nil {
-			return indexedPackage{}, fmt.Errorf("unsupported PostgreSQL APK version %q", pkg.version)
-		}
-		if best.version == "" || minor > bestMinor || (minor == bestMinor && revision > bestRevision) {
-			best, bestMinor, bestRevision = pkg, minor, revision
-		} else if minor == bestMinor && revision == bestRevision && best.checksum != pkg.checksum {
-			return indexedPackage{}, fmt.Errorf("ambiguous APKINDEX entries for %s@%s", pkg.name, pkg.version)
+		comparison := apkcompare.CompareVersions(parsed, bestVersion)
+		if comparison > 0 {
+			best, bestVersion = pkg, parsed
+			ambiguous = false
+		} else if comparison == 0 && (best.name != pkg.name || best.version != pkg.version || best.checksum != pkg.checksum) {
+			ambiguous = true
 		}
 	}
 	if best.version == "" {
@@ -226,7 +257,10 @@ func selectPostgres(packages []indexedPackage, request buildRequest, arch string
 		if request.version != "" {
 			selector = request.version
 		}
-		return indexedPackage{}, fmt.Errorf("unavailable version: postgresql %s for %s in current Wolfi APKINDEX", selector, arch)
+		return indexedPackage{}, fmt.Errorf("unavailable version: %s %s for %s in current Wolfi APKINDEX", request.packageName, selector, arch)
+	}
+	if ambiguous {
+		return indexedPackage{}, fmt.Errorf("ambiguous package providers for %s at %s", request.packageName, best.version)
 	}
 	return best, nil
 }

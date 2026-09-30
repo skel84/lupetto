@@ -15,6 +15,10 @@ import (
 )
 
 func makeSignedIndex(t *testing.T) ([]byte, []byte) {
+	return makeSignedIndexFor(t, "P:postgresql-17\nV:17.10-r1\nA:x86_64\nC:Q1checksum\n\n")
+}
+
+func makeSignedIndexFor(t *testing.T, records string) ([]byte, []byte) {
 	t.Helper()
 	private, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -25,7 +29,7 @@ func makeSignedIndex(t *testing.T) ([]byte, []byte) {
 		t.Fatal(err)
 	}
 	publicPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER})
-	indexData := makeIndex(t, "P:postgresql-17\nV:17.10-r1\nA:x86_64\nC:Q1checksum\n\n")
+	indexData := makeIndex(t, records)
 	digest := sha256.Sum256(indexData)
 	sig, err := rsa.SignPKCS1v15(rand.Reader, private, crypto.SHA256, digest[:])
 	if err != nil {
@@ -55,7 +59,7 @@ func TestVerifyAPKINDEXAuthenticatesSelectedSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("valid index rejected: %v", err)
 	}
-	packages, err := parseAPKINDEX(verified)
+	packages, err := parseAPKINDEX(verified, "postgresql-17")
 	if err != nil || len(packages) != 1 || packages[0].version != "17.10-r1" {
 		t.Fatalf("parse verified index: %+v, %v", packages, err)
 	}

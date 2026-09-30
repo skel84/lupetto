@@ -2,7 +2,7 @@
 
 [Documentation home](../README.md) · [Scope](scope.md) · [Verification](verification.md)
 
-This is a rebuild proposal, not recovered source structure. A local Go module now contains a standalone CLI and a narrow PostgreSQL 17 OCI image path; broader dependencies and runtime build defaults remain undecided.
+This is a rebuild proposal, not recovered source structure. A local Go module now contains a standalone CLI, read-only discovery from the live signed Wolfi index, and a generic local OCI build path with apko-generated architecture SPDX/lock identity validation; persistent snapshot catalog ingestion and broader runtime build defaults remain undecided.
 
 The [approved next milestone](decisions.md#publication-first-roadmap-user-approved) extends the existing live signed-index exact-build path with registry publication, Cosign image signing, and signed SPDX attestation. Persistent catalog ingestion/querying is deferred and is not a dependency of publication/signing or the standalone CLI release. Retain per-build snapshot and lock evidence without introducing SQLite or Explorer into that path.
 
@@ -14,7 +14,7 @@ Treat `lupetto` and `lupetto-explorer` as separate applications. The CLI is inde
 | --- | --- |
 | Catalog | Import snapshots, retain provenance, query package versions, resolve selectors. |
 | Build implementation | Turn an exact request into configuration, resolved lock, image, SPDX, and validation outcome. |
-| Publication/signing | Load/tag/push, obtain a registry digest, then invoke signing and attestation. |
+| Local loading/publication/signing | Export/load the validated image locally; later tag/push, obtain a registry digest, then invoke signing and attestation. |
 | CLI | Parse operator input, run the shared operations, report results and failures. |
 | Explorer | Browse catalog/evidence and launch the configured CLI for builds. |
 
@@ -66,7 +66,7 @@ A separate Explorer product does not inherently require a remote service. Keep t
 
 ## External tools
 
-The first image path invokes native apko 1.4.5 with a signed Wolfi index/key and an exact package lock, producing a local OCI layout without Docker. Docker loading and Cosign signing remain future stages; no containerized apko build has been exercised.
+The exact-build path invokes native apko 1.4.5 with a signed Wolfi index/key and exact package lock, producing a local OCI layout and validated per-architecture SPDX. Read-only `discover` verifies the same signed index and pinned key without invoking apko or building an image. APK version ordering uses a pinned apko 1.4.5 Go dependency. The [local-loading decision](decisions.md#local-docker-loading-decisions-resolved-before-implementation) adds a post-validation Docker archive export/load/identity check to this same path; `--no-load` and `sbom` skip it. Cosign signing remains a future stage; no containerized apko build has been exercised.
 
 Use explicit argument arrays, not shell interpolation. Propagate cancellation, capture failures, and avoid logging secret-bearing environment values. Prefer structured output and artifact files where available. Any necessary parsing of Docker push output needs fixtures for supported tool versions and must fail if a valid digest cannot be established.
 
@@ -83,18 +83,18 @@ CLI selector → snapshot-scoped resolution → exact build request
                                                 │
                                          evidence validation
                                                 │
+                                    optional local archive/load/inspect
+                                                │
                                          artifact/result record
 ```
 
-Explorer invokes this CLI rather than implementing another resolver or builder. The SBOM command must reuse the same resolution/evidence logic; whether it requires image composition is an implementation decision to settle through apko behavior.
+The implemented `sbom --apk-version` command invokes the same selector and image-composition function as `build` but remains image-only; apko writes the architecture SPDX during the build. The apko index SPDX is supplemental and not lock-validated. Local loading consumes the already-validated OCI image, not another build or resolution path. Historical snapshot ingestion and any future Explorer integration remain separate decisions.
 
 A selected top-level version does not pin its dependency closure. A snapshot does not preserve the referenced APK bytes. Do not promise historical rebuildability unless the required artifacts and toolchain inputs remain available.
 
 ## Artifact and data ownership
 
-A build workspace retains the input configuration, resolved lock, generated SPDX, image artifact, diagnostics, and a machine-readable result. File names and result schema are deliberately not specified yet.
-
-The result should identify the selected snapshot, exact package/version, target architecture, relevant tool versions, evidence identities, and outcomes of requested stages. Never record private keys, passwords, or tokens.
+The unique, mode-0700 user-cache build workspace retains signed index/key, config, lock, OCI image, architecture/index SPDX, and a versioned local `result.json` only after all requested stages succeed. The version-3 readable-naming record retains primary `imageReference` and unique `buildReference`, separate loaded/skipped outcome, and verified local Docker image ID alongside snapshot, exact APK, architecture, apko version, artifact paths, and validated SPDX checksum. The sole apko composition/export/import uses the unique name; readable tagging follows verified import and uses the verified image ID, then checks the readable name's ID/platform. A readable version tag is mutable, not immutable build identity; concurrent builds are not an atomic multi-tag transaction. Skipped builds record intended names without touching Docker. The archive is retained when loading is attempted; a local image ID is not a registry digest. This is not an Explorer compatibility contract, and older result records/images are not migrated. Failures retain partial diagnostics/workspaces without a success record or validated-evidence success output; confirmed unique import followed by tag/inspect failure is partial local success with uncertain readable-tag effects, not rollback. Never record private keys, passwords, or tokens.
 
 SQLite owns catalog queries and immutable Explorer SBOM evidence. Workspace paths alone are insufficient for immutable downloads: retain the document bytes or a durable content-addressed copy and its checksum. Deleting a temporary workspace must not silently destroy retained evidence.
 

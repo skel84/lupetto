@@ -6,7 +6,7 @@
 
 The original operator-documentation request supplies the workflow targets below. Product-specific command and environment names here are adapted to Lupetto, not recovered historical spellings. The request is not executable proof. The lost source, tests, defaults, and database schema are unavailable; the overwritten checkout must not be used to fill those gaps.
 
-Architecture and selection rules proposed for the rebuild are identified separately. The CLI currently creates PostgreSQL 17 OCI images from the live Wolfi index and checks local tool availability. Other package families, catalog ingestion, Docker loading, and signed evidence remain unimplemented.
+Architecture and selection rules proposed for the rebuild are identified separately. The CLI discovers exact versions in the live signed Wolfi index, composes local OCI images for exact package names or version-matched providers, validates apko-generated architecture SPDX APK identities against the resolved lock, and checks local tool availability. Default build loading and explicit `--no-load` extend that same pipeline under the [resolved local-loading contract](decisions.md#local-docker-loading-decisions-resolved-before-implementation); `sbom` remains image-only. Observed interoperability and limitations are recorded in [verification](verification.md#local-docker-loading-evidence). Snapshot ingestion, publication, and signed evidence remain unimplemented.
 
 ## Local workflow to restore
 
@@ -24,17 +24,18 @@ The [user-approved publication-first roadmap](decisions.md#publication-first-roa
 
 ## CLI compatibility targets
 
-The PostgreSQL 17 major/minor and exact-APK forms below have an image-only implementation. Other packages and the `sbom` command remain syntax targets, not runnable examples or evidence of historical spellings. Angle-bracket terms must be replaced with actual values.
+The generic signed-index `discover` command, numeric-selector/exact-APK `build` forms, and exact-version `sbom` command below are implemented. `build` loads into local Docker by default; `--no-load` skips Docker. `sbom` composes a new image using the same exact-build pipeline, not a separate metadata-only path, and never loads Docker; it rejects `--no-load`. Angle-bracket terms must be replaced with actual values.
 
 ```text
-lupetto build <package> <major>
-lupetto build <package> --apk-version <exact-apk-version>
+lupetto discover <package-or-provider>
+lupetto build <package-or-provider> <dotted-numeric-selector> [--no-load]
+lupetto build <package-or-provider> --apk-version <exact-apk-version> [--no-load]
 lupetto sbom <package> --apk-version <exact-apk-version>
 ```
 
 An exact APK version includes the packaging revision, such as `-rN`. Selecting an upstream version alone does not distinguish its packaging revisions.
 
-The specification names `--no-load`; registry publication rejects it in the compatibility workflow because publication uses the locally loaded Docker image. Output-directory flags, workspace defaults, image naming, and the precise work performed by `sbom` remain undecided.
+The specification names `--no-load`; registry publication rejects it in the compatibility workflow because publication uses the locally loaded Docker image. Publication is not implemented. Output-directory flags, public Explorer result contracts, and runtime image recipes remain undecided. Current builds use a retained local user-cache workspace, primary `lupetto/<resolved-apk>:<exact-apk-version>-<oci-architecture>` reference, and additional unique `lupetto/local:build-<workspace-suffix>` reference. The [readable naming decision](decisions.md#readable-local-image-references-user-approved) keeps compatible exact identities literal and uses deterministic SHA-256 component fallbacks for Docker-incompatible syntax/length. The readable tag can move after rebuilding; the version-3 private result retains both names and distinguishes loaded/skipped with a verified local ID only after successful loading/tagging. No-load/SBOM references are intended names, not proof of tag creation. Failures/cancellation are nonzero and retain the workspace without a success record; local image/tag side effects are not rolled back.
 
 ### Registry and signing
 

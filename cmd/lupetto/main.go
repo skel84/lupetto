@@ -11,14 +11,20 @@ import (
 	"syscall"
 )
 
-const usage = "Usage:\n  lupetto doctor\n  lupetto build postgresql 17[.minor]\n  lupetto build postgresql --apk-version <exact-version>\n\nPostgreSQL 17 builds use the current signed Wolfi APKINDEX for the host architecture.\nA major selects the latest available minor/revision; a minor selects its latest available revision.\nAn unavailable version fails without substitution. Builds create a local OCI layout only.\nDoctor checks apko, Docker, and optional Cosign on PATH and suggests installation steps."
+const usage = "Usage:\n  lupetto doctor\n  lupetto discover <package-or-provider>\n  lupetto build <package-or-provider> <major[.minor[.patch]]> [--no-load]\n  lupetto build <package-or-provider> --apk-version <exact-version> [--no-load]\n  lupetto sbom <package-or-provider> --apk-version <exact-version>\n\nDiscover lists exact versions from the current signed Wolfi APKINDEX for the host architecture.\nListed versions are not guaranteed buildable; builds validate apko dependencies and installed packages.\nA numeric selector chooses the highest matching APK version/revision; an exact version includes -rN.\nThe package name must match an APK name or a version-matched provider; ambiguous build matches fail.\nBuild and sbom compose a local OCI layout and validate apko SPDX against the lock.\nBuild and sbom log stages and live tool diagnostics to stderr, with an ASCII spinner on interactive terminals.\nBuild loads Docker by default; --no-load skips loading. SBOM always skips loading.\nNeither publishes to a registry."
 
-var packageName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+._-]*$`)
+var (
+	packageName     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+._-]*$`)
+	requestedName   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+._-]*(?::[A-Za-z0-9][A-Za-z0-9+._-]*)*$`)
+	apkVersion      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+~:-]*-r[0-9]+$`)
+	numericSelector = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)*$`)
+)
 
 type buildRequest struct {
 	packageName string
 	selector    string
 	version     string
+	noLoad      bool
 }
 
 func main() {
@@ -28,6 +34,10 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	return runWithBuild(ctx, args, stdout, stderr, buildLocal)
+}
+
+func runWithBuild(ctx context.Context, args []string, stdout, stderr io.Writer, build func(context.Context, buildRequest) (buildResult, error)) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
 		return 2
@@ -39,18 +49,39 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "doctor":
 		return runDoctor(stdout, stderr, args[1:])
-	case "build":
+	case "discover":
+		return runDiscover(ctx, args[1:], stdout, stderr)
+	case "build", "sbom":
 		request, err := parseBuild(args[1:])
+		if err == nil && args[0] == "sbom" && request.noLoad {
+			err = fmt.Errorf("sbom does not accept --no-load")
+		}
+		if err == nil && args[0] == "sbom" && request.version == "" {
+			err = fmt.Errorf("sbom requires --apk-version with an exact APK revision")
+		}
 		if err != nil {
 			fmt.Fprintf(stderr, "lupetto: %v\n", err)
 			return 2
 		}
-		result, err := buildLocal(ctx, request)
+		if args[0] == "sbom" {
+			request.noLoad = true
+		}
+		progress := newBuildProgress(ctx, stderr, progressTerminal(stderr))
+		defer progress.Close()
+		buildCtx := context.WithValue(ctx, buildProgressKey{}, progress)
+		result, err := build(buildCtx, request)
+		progress.Close()
 		if err != nil {
-			fmt.Fprintf(stderr, "lupetto: %v\n", err)
+			fmt.Fprintf(stderr, "lupetto: %s\n", plainProgressText(err.Error()))
 			return 1
 		}
-		fmt.Fprintf(stdout, "Selected %s@%s (APKINDEX sha256:%s)\nOCI image: %s\nBuild evidence: %s\n", result.packageName, result.version, result.indexSHA256, result.imageDir, result.workspace)
+		fmt.Fprintf(stdout, "Selected %s@%s (APKINDEX sha256:%s)\nOCI image: %s\nValidated SPDX: %s (sha256:%s)\nBuild evidence: %s\n", result.packageName, result.version, result.indexSHA256, result.imageDir, result.spdxPath, result.spdxSHA256, result.workspace)
+		fmt.Fprintf(stdout, "Image reference: %s\nBuild reference: %s\n", result.imageReference, result.buildReference)
+		if result.dockerLoad == "loaded" {
+			fmt.Fprintf(stdout, "Docker loaded: %s (image ID: %s)\n", result.imageReference, result.dockerImageID)
+		} else {
+			fmt.Fprintln(stdout, "Docker loading: skipped")
+		}
 		return 0
 	default:
 		fmt.Fprintf(stderr, "lupetto: unknown command %q\n", args[0])
@@ -65,6 +96,11 @@ func parseBuild(args []string) (buildRequest, error) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
+		case arg == "--no-load":
+			if request.noLoad {
+				return buildRequest{}, fmt.Errorf("--no-load may be specified only once")
+			}
+			request.noLoad = true
 		case arg == "--apk-version" || strings.HasPrefix(arg, "--apk-version="):
 			if seenVersion {
 				return buildRequest{}, fmt.Errorf("--apk-version may be specified only once")
@@ -87,25 +123,22 @@ func parseBuild(args []string) (buildRequest, error) {
 	}
 
 	if len(positional) < 1 || len(positional) > 2 {
-		return buildRequest{}, fmt.Errorf("build requires a package and a major/minor selector, or --apk-version")
+		return buildRequest{}, fmt.Errorf("build requires a package name and numeric version selector, or --apk-version")
 	}
 	request.packageName = positional[0]
-	if !packageName.MatchString(request.packageName) {
-		return buildRequest{}, fmt.Errorf("invalid package name")
-	}
-	if request.packageName != "postgresql" {
-		return buildRequest{}, fmt.Errorf("only the postgresql 17 family is supported for local images")
+	if !requestedName.MatchString(request.packageName) {
+		return buildRequest{}, fmt.Errorf("invalid package or provider name")
 	}
 	if seenVersion {
 		if len(positional) != 1 {
 			return buildRequest{}, fmt.Errorf("cannot combine a selector with --apk-version")
 		}
-		if !pgVersion.MatchString(request.version) {
-			return buildRequest{}, fmt.Errorf("--apk-version must be an exact PostgreSQL 17 APK revision (17.N-rM)")
+		if !apkVersion.MatchString(request.version) {
+			return buildRequest{}, fmt.Errorf("--apk-version must include an exact APK revision (-rN)")
 		}
 	} else {
-		if len(positional) != 2 || !pgSelector.MatchString(positional[1]) {
-			return buildRequest{}, fmt.Errorf("postgresql requires a major/minor selector (17 or 17.N)")
+		if len(positional) != 2 || !numericSelector.MatchString(positional[1]) {
+			return buildRequest{}, fmt.Errorf("build requires a dotted numeric version selector")
 		}
 		request.selector = positional[1]
 	}
