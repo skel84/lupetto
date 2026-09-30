@@ -14,6 +14,16 @@ For this documentation-only reprioritization, relative links/heading anchors acr
 
 On macOS/amd64, `go run ./cmd/lupetto doctor` initially reported missing apko (exit 1) with `brew install apko`, while Docker and Cosign were found. After `HOMEBREW_NO_AUTO_UPDATE=1 brew install apko`, `apko version` reported 1.4.5 and `go run ./cmd/lupetto doctor` reported all three present (exit 0). `docker --version` reported 27.4.0 and `cosign version` reported v3.1.3. These are executable checks, not build compatibility, Docker daemon availability, or signing verification.
 
+## Publication/signing prerequisite and design tooling evidence
+
+The preimplementation baseline `go test ./...` passed. Tool checks found Docker client/server 27.4.0 with a linux/x86_64 daemon, apko 1.4.5, and installed Cosign v3.1.3 (confirmed by the JSON `GitVersion` field).
+
+Upstream `cosign generate-key-pair --output-key-prefix /temporary/throwaway` generated encrypted signing keys outside the repository; a separate wrong-key test pair was also generated there. These probes used inherited `COSIGN_PASSWORD`; no password value or key material is recorded here. `cosign signing-config create --out /temporary/local-signing-config.json` exited 0 and generated a Sigstore protobuf v0.2 configuration without services. The `/temporary/…` paths denote disposable locations outside the repository. Key/config generation does **not** establish sign/attest interoperability.
+
+A disposable `registry:3` instance used synthetic bcrypt credentials and a fresh isolated `DOCKER_CONFIG` outside the repository, bound only to `127.0.0.1` on a high port. An anonymous `/v2/` request was rejected with HTTP 401. This establishes the local authentication prerequisite only, not publication, image signing, or SPDX attestation implementation or verification.
+
+The required designer route was unavailable; explicit parent design is the fallback, with independent contract review underway. No designer approval or completed independent review is claimed for this milestone.
+
 ## Scoped PostgreSQL 17 image evidence
 
 On darwin/amd64 targeting linux/amd64, with apko 1.4.5, `go run ./cmd/lupetto build postgresql 17` exited 0 after verifying the downloaded APKINDEX signature with the pinned Wolfi key. It selected `postgresql-17@17.10-r1` from APKINDEX SHA-256 `d296da0b216382d0e825cd1a71bebeaf0fb06e887f3e8b6b9ba15db544d5a27e`. The workspace was `/Users/skel/Library/Caches/lupetto/builds/postgresql-17-2725349457`, outside the repository. Independent inspection of the OCI manifest/layer, apko lock, and `usr/lib/apk/db/installed` found exactly `postgresql-17` `17.10-r1` on `x86_64`; the OCI layer digest matched its bytes. `go run ./cmd/lupetto build postgresql 17.10` and `go run ./cmd/lupetto build postgresql --apk-version 17.10-r1` also exited 0 with `17.10-r1` after signature verification. Each of `go run ./cmd/lupetto build postgresql 17.1`, `17.2`, and `17.3` exited 1 with an explicit unavailable-version error, without producing an image. This is not SBOM/lock consistency validation, historical version archival, Docker loading, or evidence of a runnable database image.
