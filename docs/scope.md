@@ -6,7 +6,7 @@
 
 The original operator-documentation request supplies the workflow targets below. Product-specific command and environment names here are adapted to Lupetto, not recovered historical spellings. The request is not executable proof. The lost source, tests, defaults, and database schema are unavailable; the overwritten checkout must not be used to fill those gaps.
 
-Architecture and selection rules proposed for the rebuild are identified separately. The CLI discovers exact versions in the live signed Wolfi index, composes local OCI images for exact package names or version-matched providers, validates apko-generated architecture SPDX APK identities against the resolved lock, and checks local tool availability. Default build loading and explicit `--no-load` extend that same pipeline under the [resolved local-loading contract](decisions.md#local-docker-loading-decisions-resolved-before-implementation); `sbom` remains image-only. Observed interoperability and limitations are recorded in [verification](verification.md#local-docker-loading-evidence). Snapshot ingestion, publication, and signed evidence remain unimplemented.
+Architecture and selection rules proposed for the rebuild are identified separately. The CLI discovers exact versions in the live signed Wolfi index, composes local OCI images for exact package names or version-matched providers, validates apko-generated architecture SPDX APK identities against the resolved lock, and checks local tool availability. Default build loading and explicit `--no-load` extend that same pipeline under the [resolved local-loading contract](decisions.md#local-docker-loading-decisions-resolved-before-implementation); `sbom` remains image-only. Registry-publication checkpoint source now extends the verified local-load path; real Lupetto registry interoperability is not yet recorded. Observed local interoperability and limitations are recorded in [verification](verification.md#local-docker-loading-evidence). Persistent snapshot ingestion, signing, signed attestation, and Explorer remain unimplemented.
 
 ## Local workflow to restore
 
@@ -24,32 +24,39 @@ The [user-approved publication-first roadmap](decisions.md#publication-first-roa
 
 ## CLI compatibility targets
 
-The generic signed-index `discover` command, numeric-selector/exact-APK `build` forms, and exact-version `sbom` command below are implemented. `build` loads into local Docker by default; `--no-load` skips Docker. `sbom` composes a new image using the same exact-build pipeline, not a separate metadata-only path, and never loads Docker; it rejects `--no-load`. Angle-bracket terms must be replaced with actual values.
+The generic signed-index `discover` command, numeric-selector/exact-APK `build` forms, and exact-version `sbom` command below are implemented. `build` loads into local Docker by default and optionally publishes; `--no-load` skips Docker only when publication is absent. `sbom` composes a new image using the same exact-build pipeline, not a separate metadata-only path, and never loads Docker or publishes; it rejects `--no-load`, `--registry`, and `--repository`, and ignores publication environment inputs. Signing flags are not implemented. Angle-bracket terms must be replaced with actual values.
 
 ```text
 lupetto discover <package-or-provider>
-lupetto build <package-or-provider> <dotted-numeric-selector> [--no-load]
-lupetto build <package-or-provider> --apk-version <exact-apk-version> [--no-load]
-lupetto sbom <package> --apk-version <exact-apk-version>
+lupetto build <package-or-provider> <dotted-numeric-selector> [--no-load] [--registry <authority> --repository <prefix>]
+lupetto build <package-or-provider> --apk-version <exact-apk-version> [--no-load] [--registry <authority> --repository <prefix>]
+lupetto sbom <package-or-provider> --apk-version <exact-apk-version>
 ```
 
 An exact APK version includes the packaging revision, such as `-rN`. Selecting an upstream version alone does not distinguish its packaging revisions.
 
-The specification names `--no-load`; registry publication rejects it in the compatibility workflow because publication uses the locally loaded Docker image. Publication is not implemented. Output-directory flags, public Explorer result contracts, and runtime image recipes remain undecided. Current builds use a retained local user-cache workspace, primary `lupetto/<resolved-apk>:<exact-apk-version>-<oci-architecture>` reference, and additional unique `lupetto/local:build-<workspace-suffix>` reference. The [readable naming decision](decisions.md#readable-local-image-references-user-approved) keeps compatible exact identities literal and uses deterministic SHA-256 component fallbacks for Docker-incompatible syntax/length. The readable tag can move after rebuilding; the version-3 private result retains both names and distinguishes loaded/skipped with a verified local ID only after successful loading/tagging. No-load/SBOM references are intended names, not proof of tag creation. Failures/cancellation are nonzero and retain the workspace without a success record; local image/tag side effects are not rolled back.
+Publication rejects `--no-load` before tool checks, workspace creation, network activity, or building because it uses the locally loaded Docker image. Output-directory flags, public Explorer result contracts, and runtime image recipes remain undecided. Current builds use a retained local user-cache workspace, primary `lupetto/<resolved-apk>:<exact-apk-version>-<oci-architecture>` reference, and additional unique `lupetto/local:build-<workspace-suffix>` reference. The [readable naming decision](decisions.md#readable-local-image-references-user-approved) keeps compatible exact identities literal and uses deterministic SHA-256 component fallbacks for Docker-incompatible syntax/length. The readable tag can move after rebuilding; the version-3 private local-only result is unchanged and retains both names and loaded/skipped status with a verified local ID only after successful loading/tagging. No-load/SBOM references are intended names, not proof of tag creation. Publication success adds the version-4 evidence below. Failures/cancellation are nonzero and retain the workspace without a success record; local/remote side effects are not rolled back.
 
 ### Registry and signing
 
-| Flag | Proposed Lupetto environment input |
+| Implemented build-only flag | Environment input |
 | --- | --- |
 | `--registry` | `LUPETTO_REGISTRY` |
 | `--repository` | `LUPETTO_REPOSITORY` |
-| `--cosign-key` | `LUPETTO_COSIGN_KEY` |
-| `--cosign-signing-config` | `LUPETTO_COSIGN_SIGNING_CONFIG` |
-| `--cosign-allow-http` | `LUPETTO_COSIGN_ALLOW_HTTP` |
 
-`--repository` is an OCI repository prefix and supports nested paths such as `team/lupetto/images`. No registry vendor is required.
+Resolve each setting independently: an explicit flag overrides only its corresponding environment input, including an explicitly empty flag, which is rejected rather than falling back or disabling publication. Empty/unset environment values mean absent. Both settings absent means local-only; exactly one present is an incomplete-configuration error. Reject duplicates and invalid settings before build side effects. `sbom` rejects explicit publication flags, including empty forms, and ignores both environment inputs.
 
-Docker registry authentication uses Docker’s credential store. `COSIGN_PASSWORD` is process environment input, never a command argument. Configuration precedence and partial-configuration errors must be decided before implementation.
+Registry is a validated authority (DNS name, IPv4, or bracketed IPv6, optionally with a port), not a URL, user information, or path. An unambiguous authority needs a dot, `localhost`, an IP address, or an explicit port on a single-label DNS name. `--repository` is a lower-case nested OCI prefix such as `team/lupetto/images`, without tags, digests, empty components, or `.`/`..`. Validate the complete eventual reference with the pinned Docker reference parser; do not normalize the intended authority or shorten an oversized operator-supplied prefix. No registry vendor is required.
+
+Derive `HOST/PREFIX/<resolved-actual-APK-component>:<local-readable-tag>-build-<workspace-suffix>` using the same literal-or-SHA-256-fallback APK component and exact-version/OCI-architecture tag as local naming. If the combined unique tag is too long, hash the entire combined tag deterministically; do not truncate or alter exact APK identity. Tag from the verified local image ID, never the mutable readable alias, then inspect for the same ID/platform before pushing. Reuse the single apko composition and validated architecture SPDX; publication is not a second resolution/build path.
+
+Docker registry authentication uses Docker's existing credential store only: no login operation, credential arguments, copied configuration, or custom registry authentication. Auth-bearing publication tool diagnostics are discarded, not streamed/captured/retained or attached to errors. A bounded streaming push parser retains only the valid digest. Capture exactly one supported Docker 27.4 push summary for the expected unique tag; absent, repeated, conflicting, wrong-tag, or malformed summaries fail. Construct `REPO@sha256:<digest>` from that pushed digest, never a local Docker ID.
+
+Pull the immutable reference, save it into retained mode-0600 `docker-published.tar`, and require its config digest to equal the original OCI config digest. Hash the actual uncompressed saved layers in manifest order and compare the ordered hashes with the source config's `rootfs.diff_ids`, with platform/archive validation. Matching claimed diffIDs or a successful push alone is insufficient; registry manifest serialization may differ from local identity. Only then report publication `published` with identity verified.
+
+Publication-requested success records are private version-4 `result.json` files separating build/load/publication, unique remote reference, captured digest/immutable reference, and verification status; signing/attestation are `skipped`. Local-only version 3 remains unchanged. Typed `workflowFailure` outcomes drive CLI partial-status reporting and separate mode-0600 version-4 `failure.json` retention when a workspace exists. Preserve a captured digest on later verification failure but mark it unverified and do not enable signing. Failures may leave changed tags, a pushed image, or pulled content; final result-record failure can follow confirmed publication. No rollback or complete-success output is claimed, and failure-record errors do not hide the original failure.
+
+Cosign image signing and signed `spdxjson` attestation are the next checkpoint, not implemented flags or outcomes. Their chosen future inputs are `--cosign-key` / `LUPETTO_COSIGN_KEY`, `--cosign-signing-config` / `LUPETTO_COSIGN_SIGNING_CONFIG`, and `--cosign-allow-http` / `LUPETTO_COSIGN_ALLOW_HTTP`; see the [next-checkpoint contract](decisions.md#cosign-signing-contract-chosen-for-the-next-checkpoint). `COSIGN_PASSWORD` is future process-environment input, never a command argument. Generic placeholder publication examples in the [README](../README.md#publish-the-same-built-image) are not evidence of exercised remote publication.
 
 ### Major selection: proposed deterministic rule
 

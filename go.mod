@@ -4,6 +4,7 @@ go 1.27.1
 
 require (
 	chainguard.dev/apko v1.4.5
+	github.com/distribution/reference v0.6.0
 	github.com/google/go-containerregistry v0.22.1
 	golang.org/x/term v0.46.0
 )

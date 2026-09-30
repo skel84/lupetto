@@ -300,6 +300,11 @@ func retainBuildResult(ctx context.Context, result buildResult, lockPath string)
 		SPDXSHA256: result.spdxSHA256, SPDXValidated: true, ImageReference: result.imageReference,
 		BuildReference: result.buildReference, DockerLoad: result.dockerLoad, DockerImageID: result.dockerImageID,
 	}
+	if result.publication.status != "" && result.publication.status != "skipped" {
+		publication := result.publication.evidence()
+		record.Version, record.Publication = 4, &publication
+		record.Build, record.Signing, record.Attestation = "completed", "skipped", "skipped"
+	}
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode build result: %w", err)

@@ -23,69 +23,93 @@ var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 type buildResult struct {
 	packageName, version, arch, indexSHA256, workspace, imageDir, spdxPath, spdxSHA256 string
 	imageReference, buildReference, dockerLoad, dockerImageID                          string
+	publication                                                                        publicationOutcome
 }
 
 type evidenceResult struct {
-	Version        int    `json:"version"`
-	PackageName    string `json:"packageName"`
-	PackageVersion string `json:"packageVersion"`
-	Architecture   string `json:"architecture"`
-	IndexSHA256    string `json:"indexSHA256"`
-	ApkoVersion    string `json:"apkoVersion"`
-	ImageDirectory string `json:"imageDirectory"`
-	LockPath       string `json:"lockPath"`
-	SPDXPath       string `json:"spdxPath"`
-	SPDXSHA256     string `json:"spdxSHA256"`
-	SPDXValidated  bool   `json:"spdxValidated"`
-	ImageReference string `json:"imageReference"`
-	BuildReference string `json:"buildReference"`
-	DockerLoad     string `json:"dockerLoad"`
-	DockerImageID  string `json:"dockerImageID,omitempty"`
+	Version        int                  `json:"version"`
+	PackageName    string               `json:"packageName"`
+	PackageVersion string               `json:"packageVersion"`
+	Architecture   string               `json:"architecture"`
+	IndexSHA256    string               `json:"indexSHA256"`
+	ApkoVersion    string               `json:"apkoVersion"`
+	ImageDirectory string               `json:"imageDirectory"`
+	LockPath       string               `json:"lockPath"`
+	SPDXPath       string               `json:"spdxPath"`
+	SPDXSHA256     string               `json:"spdxSHA256"`
+	SPDXValidated  bool                 `json:"spdxValidated"`
+	ImageReference string               `json:"imageReference"`
+	BuildReference string               `json:"buildReference"`
+	DockerLoad     string               `json:"dockerLoad"`
+	DockerImageID  string               `json:"dockerImageID,omitempty"`
+	Publication    *publicationEvidence `json:"publication,omitempty"`
+	Build          string               `json:"build,omitempty"`
+	Signing        string               `json:"signing,omitempty"`
+	Attestation    string               `json:"attestation,omitempty"`
 }
 
 func buildLocal(ctx context.Context, request buildRequest) (buildResult, error) {
 	return buildLocalWith(ctx, request, buildServices{
 		command: executeLocalCommand, cacheDir: os.UserCacheDir,
 		publicFile: getPublicFile, signingKey: getWolfiSigningKey,
+		publicationCommand: executePublicationCommand,
 	})
 }
 
 // Only external boundaries are replaceable; selection and artifact validation
 // always use the same implementation.
 type buildServices struct {
-	command    localCommand
-	cacheDir   func() (string, error)
-	publicFile func(context.Context, string, int64) ([]byte, error)
-	signingKey func(context.Context) ([]byte, error)
+	command            localCommand
+	publicationCommand localCommand
+	cacheDir           func() (string, error)
+	publicFile         func(context.Context, string, int64) ([]byte, error)
+	signingKey         func(context.Context) ([]byte, error)
 }
 
 func buildLocalWith(ctx context.Context, request buildRequest, services buildServices) (buildResult, error) {
-	if err := ctx.Err(); err != nil {
+	earlyFail := func(err error) (buildResult, error) {
+		if request.publication.enabled() {
+			result := buildResult{dockerLoad: "skipped", publication: publicationOutcome{status: "skipped"}}
+			return result, newWorkflowFailure(result, "build", err, false)
+		}
 		return buildResult{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return earlyFail(err)
+	}
+	if err := validatePublicationOptions(request.publication); err != nil {
+		return buildResult{}, err
+	}
+	if request.publication.enabled() && request.noLoad {
+		return buildResult{}, fmt.Errorf("publication requires Docker loading; --no-load is incompatible")
 	}
 	buildStage(ctx, "Checking build tools")
 	arch, err := targetArch()
 	if err != nil {
-		return buildResult{}, err
+		return earlyFail(err)
 	}
 	if err := requireApkoVersion(ctx, services.command); err != nil {
-		return buildResult{}, err
+		return earlyFail(err)
 	}
 	buildStage(ctx, "Creating build workspace")
 	cacheDir, err := services.cacheDir()
 	if err != nil {
-		return buildResult{}, fmt.Errorf("find user cache: %w", err)
+		return earlyFail(fmt.Errorf("find user cache: %w", err))
 	}
 	root := filepath.Join(cacheDir, "lupetto", "builds")
 	if err := os.MkdirAll(root, 0700); err != nil {
-		return buildResult{}, fmt.Errorf("create build directory: %w", err)
+		return earlyFail(fmt.Errorf("create build directory: %w", err))
 	}
 	workspace, err := os.MkdirTemp(root, "image-")
 	if err != nil {
-		return buildResult{}, fmt.Errorf("create build workspace: %w", err)
+		return earlyFail(fmt.Errorf("create build workspace: %w", err))
 	}
 	buildReference := "lupetto/local:build-" + strings.TrimPrefix(filepath.Base(workspace), "image-")
+	result := buildResult{workspace: workspace, dockerLoad: "skipped", publication: publicationOutcome{status: "skipped"}}
 	fail := func(err error) (buildResult, error) {
+		if request.publication.enabled() {
+			return result, newWorkflowFailure(result, "build", err, false)
+		}
 		return buildResult{}, fmt.Errorf("%w (workspace: %s)", err, workspace)
 	}
 
@@ -129,6 +153,13 @@ func buildLocalWith(ctx context.Context, request buildRequest, services buildSer
 	if err != nil {
 		return fail(err)
 	}
+	if request.publication.enabled() {
+		// The selected component is now known; reject a full-reference bound
+		// failure before composition/loading, without resolving another APK.
+		if _, err := publicationReferences(selected, arch, workspace, request.publication); err != nil {
+			return fail(err)
+		}
+	}
 	buildMessage(ctx, "Selected %s@%s; local reference %s; build reference %s", selected.name, selected.version, imageReference, buildReference)
 	configPath := filepath.Join(workspace, "apko.yaml")
 	config := fmt.Sprintf("contents:\n  keyring:\n    - %s\n  repositories:\n    - %s\n  packages:\n    - %s\narchs:\n  - %s\n", strconv.Quote(keyPath), wolfiRepository, strconv.Quote(selected.name+"="+selected.version), arch)
@@ -166,27 +197,47 @@ func buildLocalWith(ctx context.Context, request buildRequest, services buildSer
 	if err != nil {
 		return fail(fmt.Errorf("validate SPDX against apko lock: %w", err))
 	}
-	result := buildResult{
+	result = buildResult{
 		packageName: selected.name, version: selected.version, arch: arch,
 		indexSHA256: indexDigest, workspace: workspace, imageDir: imageDir,
 		spdxPath: spdxPath, spdxSHA256: spdxSHA256, imageReference: imageReference,
-		buildReference: buildReference, dockerLoad: "skipped",
+		buildReference: buildReference, dockerLoad: "skipped", publication: publicationOutcome{status: "skipped"},
 	}
 	if !request.noLoad {
 		imageID, err := loadDockerImage(ctx, services.command, imageDir, workspace, buildReference, arch)
 		if err != nil {
-			return fail(err)
-		}
-		if err := tagReadableDockerImage(ctx, services.command, imageID, buildReference, imageReference, arch); err != nil {
+			if request.publication.enabled() {
+				result.dockerLoad = "failed"
+				return result, newWorkflowFailure(result, "load", err, true)
+			}
 			return fail(err)
 		}
 		result.dockerLoad, result.dockerImageID = "loaded", imageID
+		if err := tagReadableDockerImage(ctx, services.command, imageID, buildReference, imageReference, arch); err != nil {
+			if request.publication.enabled() {
+				return result, newWorkflowFailure(result, "readable-tag", err, true)
+			}
+			return fail(err)
+		}
 	}
 	if request.noLoad {
 		buildMessage(ctx, "Docker loading skipped")
 	}
+	if request.publication.enabled() {
+		command := services.publicationCommand
+		if command == nil {
+			command = services.command // Injected fixtures; production always supplies the safe adapter.
+		}
+		result.publication, err = publishDockerImage(ctx, command, result, request.publication)
+		if err != nil {
+			return result, newWorkflowFailure(result, "publication", err, true)
+		}
+	}
 	buildStage(ctx, "Recording build result")
 	if err := retainBuildResult(ctx, result, lockPath); err != nil {
+		if request.publication.enabled() {
+			return result, newWorkflowFailure(result, "record", err, true)
+		}
 		if result.dockerLoad == "loaded" {
 			return fail(fmt.Errorf("Docker loading confirmed for %s and %s (image ID: %s), but result recording failed; imported image/tags remain: %w", imageReference, buildReference, result.dockerImageID, err))
 		}

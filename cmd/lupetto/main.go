@@ -11,7 +11,7 @@ import (
 	"syscall"
 )
 
-const usage = "Usage:\n  lupetto doctor\n  lupetto discover <package-or-provider>\n  lupetto build <package-or-provider> <major[.minor[.patch]]> [--no-load]\n  lupetto build <package-or-provider> --apk-version <exact-version> [--no-load]\n  lupetto sbom <package-or-provider> --apk-version <exact-version>\n\nDiscover lists exact versions from the current signed Wolfi APKINDEX for the host architecture.\nListed versions are not guaranteed buildable; builds validate apko dependencies and installed packages.\nA numeric selector chooses the highest matching APK version/revision; an exact version includes -rN.\nThe package name must match an APK name or a version-matched provider; ambiguous build matches fail.\nBuild and sbom compose a local OCI layout and validate apko SPDX against the lock.\nBuild and sbom log stages and live tool diagnostics to stderr, with an ASCII spinner on interactive terminals.\nBuild loads Docker by default; --no-load skips loading. SBOM always skips loading.\nNeither publishes to a registry."
+const usage = "Usage:\n  lupetto doctor\n  lupetto discover <package-or-provider>\n  lupetto build <package-or-provider> <major[.minor[.patch]]> [--no-load] [--registry <authority> --repository <prefix>]\n  lupetto build <package-or-provider> --apk-version <exact-version> [--no-load] [--registry <authority> --repository <prefix>]\n  lupetto sbom <package-or-provider> --apk-version <exact-version>\n\nDiscover lists exact versions from the current signed Wolfi APKINDEX for the host architecture.\nListed versions are not guaranteed buildable; builds validate apko dependencies and installed packages.\nA numeric selector chooses the highest matching APK version/revision; an exact version includes -rN.\nThe package name must match an APK name or a version-matched provider; ambiguous build matches fail.\nBuild and sbom compose a local OCI layout and validate apko SPDX against the lock.\nBuild and sbom log stages and live tool diagnostics to stderr, with an ASCII spinner on interactive terminals.\nBuild loads Docker by default; --no-load skips loading. SBOM always skips loading.\nBuild optionally publishes with --registry / LUPETTO_REGISTRY and --repository / LUPETTO_REPOSITORY.\nEach explicit flag overrides its environment input; both settings are required, and empty flags are invalid.\nRegistry is an authority (not a URL); repository is a nested lower-case prefix such as team/lupetto/images.\nPublication requires loading, uses Docker's credential store, and verifies the pushed immutable digest.\nPublication tool diagnostics are discarded; no signing or attestation is performed.\nSBOM rejects publication flags and ignores publication environment inputs."
 
 var (
 	packageName     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+._-]*$`)
@@ -21,10 +21,12 @@ var (
 )
 
 type buildRequest struct {
-	packageName string
-	selector    string
-	version     string
-	noLoad      bool
+	packageName      string
+	selector         string
+	version          string
+	noLoad           bool
+	publicationFlags publicationFlags
+	publication      publicationOptions
 }
 
 func main() {
@@ -56,8 +58,17 @@ func runWithBuild(ctx context.Context, args []string, stdout, stderr io.Writer, 
 		if err == nil && args[0] == "sbom" && request.noLoad {
 			err = fmt.Errorf("sbom does not accept --no-load")
 		}
+		if err == nil && args[0] == "sbom" && (request.publicationFlags.registry.set || request.publicationFlags.repository.set) {
+			err = fmt.Errorf("sbom does not accept --registry or --repository")
+		}
 		if err == nil && args[0] == "sbom" && request.version == "" {
 			err = fmt.Errorf("sbom requires --apk-version with an exact APK revision")
+		}
+		if err == nil && args[0] == "build" {
+			request.publication, err = resolvePublication(request.publicationFlags, os.LookupEnv)
+			if err == nil && request.noLoad && request.publication.enabled() {
+				err = fmt.Errorf("publication cannot be used with --no-load")
+			}
 		}
 		if err != nil {
 			fmt.Fprintf(stderr, "lupetto: %v\n", err)
@@ -72,7 +83,9 @@ func runWithBuild(ctx context.Context, args []string, stdout, stderr io.Writer, 
 		result, err := build(buildCtx, request)
 		progress.Close()
 		if err != nil {
-			fmt.Fprintf(stderr, "lupetto: %s\n", plainProgressText(err.Error()))
+			if !reportWorkflowFailure(stderr, err) {
+				fmt.Fprintf(stderr, "lupetto: %s\n", plainProgressText(err.Error()))
+			}
 			return 1
 		}
 		fmt.Fprintf(stdout, "Selected %s@%s (APKINDEX sha256:%s)\nOCI image: %s\nValidated SPDX: %s (sha256:%s)\nBuild evidence: %s\n", result.packageName, result.version, result.indexSHA256, result.imageDir, result.spdxPath, result.spdxSHA256, result.workspace)
@@ -82,6 +95,12 @@ func runWithBuild(ctx context.Context, args []string, stdout, stderr io.Writer, 
 		} else {
 			fmt.Fprintln(stdout, "Docker loading: skipped")
 		}
+		if result.publication.status == "published" && result.publication.verified {
+			fmt.Fprintf(stdout, "Registry published: %s\nImmutable reference: %s\n", result.publication.reference, result.publication.immutableReference)
+		} else {
+			fmt.Fprintln(stdout, "Registry publication: skipped")
+		}
+		fmt.Fprintln(stdout, "Image signing: skipped\nSPDX attestation: skipped")
 		return 0
 	default:
 		fmt.Fprintf(stderr, "lupetto: unknown command %q\n", args[0])
@@ -115,6 +134,23 @@ func parseBuild(args []string) (buildRequest, error) {
 			} else {
 				request.version = strings.TrimPrefix(arg, "--apk-version=")
 			}
+		case arg == "--registry" || strings.HasPrefix(arg, "--registry=") || arg == "--repository" || strings.HasPrefix(arg, "--repository="):
+			flagName, value, inline := strings.Cut(arg, "=")
+			target := &request.publicationFlags.registry
+			if flagName == "--repository" {
+				target = &request.publicationFlags.repository
+			}
+			if target.set {
+				return buildRequest{}, fmt.Errorf("%s may be specified only once", flagName)
+			}
+			if !inline {
+				i++
+				if i == len(args) || strings.HasPrefix(args[i], "-") {
+					return buildRequest{}, fmt.Errorf("%s requires a value", flagName)
+				}
+				value = args[i]
+			}
+			*target = optionalString{value: value, set: true}
 		case strings.HasPrefix(arg, "-"):
 			return buildRequest{}, fmt.Errorf("unknown flag %q", arg)
 		default:

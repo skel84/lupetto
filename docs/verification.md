@@ -2,11 +2,11 @@
 
 [Documentation home](../README.md) · [Scope](scope.md) · [Implementation checklist](implementation-plan.md)
 
-**Current status: live signed-index discovery, generic local OCI images with scoped architecture SPDX/lock identity validation, and default local Docker loading with explicit no-load behavior.** The standalone CLI has exercised metadata listing, numeric/exact-version composition, exact-version SBOM, and real Docker loading on the local daemon. Persistent snapshot ingestion, registry, signing, and Explorer scenarios below remain future acceptance criteria.
+**Current status: live signed-index discovery, generic local OCI images with scoped architecture SPDX/lock identity validation, default local Docker loading with explicit no-load behavior, and implemented registry publication verified against an authenticated loopback registry.** The standalone CLI has exercised metadata listing, numeric/exact-version composition, exact-version SBOM, real Docker loading, and immutable pushed-content verification; the final focused race-enabled and full test gates passed. Lupetto signing/attestation is next; persistent snapshot ingestion and Explorer scenarios remain future acceptance criteria.
 
 Use focused regression tests for uncertain behavior and real smoke runs for external-tool integration. Do not replace a real build or registry check with mocks that merely echo arguments.
 
-Under the [approved publication-first roadmap](decisions.md#publication-first-roadmap-user-approved), registry publication, image signing, and signed SPDX attestation are the next CLI acceptance work. Persistent snapshot ingestion/history and Explorer checks remain deferred full-scope criteria, not prerequisites for that milestone or the standalone CLI release. Existing live-index selection, exact revision preservation, lock/SPDX validation, local loading, and per-build provenance checks still apply.
+Under the [approved publication-first roadmap](decisions.md#publication-first-roadmap-user-approved), the registry publication checkpoint is implemented and verified within the scope below; image signing and signed SPDX attestation are the next CLI acceptance work. Persistent snapshot ingestion/history and Explorer checks remain deferred full-scope criteria, not prerequisites for that milestone or the standalone CLI release. Existing live-index selection, exact revision preservation, lock/SPDX validation, local loading, and per-build provenance checks still apply.
 
 For this documentation-only reprioritization, relative links/heading anchors across the six required docs, checklist task/status preservation and milestone-order checks, `git diff --check`, and `go test ./...` passed (`ok lupetto/cmd/lupetto (cached)`). Independent read-only review found no concrete findings. Earlier source/untracked work was unchanged. No registry publication, signing, credentials, remote infrastructure changes, or new application behavior were exercised.
 
@@ -22,7 +22,7 @@ Upstream `cosign generate-key-pair --output-key-prefix /temporary/throwaway` gen
 
 A disposable `registry:3` instance used synthetic bcrypt credentials and a fresh isolated `DOCKER_CONFIG` outside the repository, bound only to `127.0.0.1` on a high port. An anonymous `/v2/` request was rejected with HTTP 401. This establishes the local authentication prerequisite only, not publication, image signing, or SPDX attestation implementation or verification.
 
-The required designer route was unavailable; explicit parent design is the fallback, with independent contract review underway. No designer approval or completed independent review is claimed for this milestone.
+At the prerequisite stage, the required designer route was unavailable; explicit parent design was the fallback, and independent contract review was still underway. No designer approval is claimed. The final independent contract/source reviews completed with no concrete findings; see [publication evidence](#authenticated-registry-publication-evidence).
 
 ## Scoped PostgreSQL 17 image evidence
 
@@ -120,6 +120,26 @@ Final `go test -race ./cmd/lupetto -run 'TestReadableImageReference|TestBuildLoc
 The bounded private runtime/result contract and final source received independent reviewer approval with no findings. The configured tools rejected the required `designer` route as unavailable (only scout/reviewer/security-reviewer/task/sonic were exposed, with no custom-model override); explicit parent design and the independent reviewer validation were used rather than claiming designer validation. Other architectures, real SHA-fallback package builds, concurrent replacement of readable tags, and real daemon-side tag/cancellation failures remain unexercised. The readable tag is mutable and local side effects are not rolled back; unique tags/workspaces remain the per-build references. Publication, signing, persistent catalog, service recipes, and Explorer remain outside this change.
 
 `docker image ls --format '{{.Repository}}:{{.Tag}} {{.ID}}' lupetto/busybox-static` and the same command for `lupetto/nginx-stable` listed the readable tags with IDs `c0436a4e891d` and `de0491eada27`. `git diff --check` and relative documentation link/heading-anchor checks passed. The Git index remained empty; existing uncommitted work was preserved, nothing was staged or committed, and no artifacts were pushed or signed.
+
+## Authenticated registry publication evidence
+
+A separately built executable, `go build -o <temporary>/lupetto ./cmd/lupetto`, exited 0. `<temporary>` denotes a disposable directory outside the repository. With a fresh `DOCKER_CONFIG` referring only to an isolated synthetic credential helper, and with no `COSIGN_PASSWORD` in the environment, the following external-binary command exited 0:
+
+```text
+<temporary>/lupetto build busybox-static 1 --registry 127.0.0.1:54355 --repository tests/lupetto-test-01c1b8dd6fc2/nested/images
+```
+
+The run used darwin/amd64 → linux/amd64, native apko 1.4.5, Docker client/server 27.4.0, and a synthetic-authenticated `registry:3` bound only to loopback over HTTP. It selected `busybox-static@1.38.0-r2` for `x86_64` from signed APKINDEX SHA-256 `fd15fdec22fb176cf494f49643bdbaeba5f8eec36f9260f5c8e7e9b7dd0da76a`. Workspace `image-1214665509`, under the user cache outside the repository, retained validated architecture SPDX SHA-256 `9413e7672063b7ac84bb44ea201a373a77ce66eb33c51af87876738dbb000bbe` and a version-4 result with publication `verified: true`.
+
+The remote reference was `127.0.0.1:54355/tests/lupetto-test-01c1b8dd6fc2/nested/images/busybox-static:1.38.0-r2-amd64-build-1214665509`. Its immutable reference was `127.0.0.1:54355/tests/lupetto-test-01c1b8dd6fc2/nested/images/busybox-static@sha256:6d074e64afbface35554ec1e23fba3c84639435fb10409d4483592d48f668539`, obtained by parsing the Docker push summary and then proving the content at that immutable registry reference. That digest equaled the inspected local Docker manifest ID in this exercised store; equality is an observation, **not** use of the local ID as a substitute for a pushed digest.
+
+Independent retrieval of the immutable manifest using synthetic authentication recomputed its SHA-256 and matched the pushed digest. The remote config digest matched the original OCI config. Retrieval of the compressed remote layers recomputed their blob hashes and actual ordered uncompressed hashes; those uncompressed hashes matched the original config's rootfs diffIDs. This independently establishes the remotely stored config/rootfs identity, not merely the presence of a tag or push-summary line.
+
+The same publication arguments plus `--no-load`, with `PATH=/nonexistent`, exited 2 with empty stdout. This exercised rejection before external-tool lookup or publication side effects. Repeating the real BusyBox publication build with a fresh empty external Docker configuration, without existing credentials, exited 1 at push. Workspace `image-988594844` retained no `result.json` and produced no success stdout; its `failure.json` recorded build `completed`, load `loaded`, publication `failed`, signing/attestation `skipped`, stage `publication`, and the safe message `publication push failed`. Authentication diagnostics were not leaked. The loaded local image remains a partial side effect; no rollback is claimed.
+
+Earlier gate attempts exposed two corrected test regressions: a publication fixture incorrectly required the pushed digest to differ from a local manifest ID, and an older progress test expected the pre-publication exact stdout. The publication regression now checks pushed-digest provenance, and the progress assertion reflects the current summary. Final `go test -race ./cmd/lupetto -run 'Test(Publication|ResolvePublication|ValidatePublication|Registry|RunPublication|BuildPublication|ExecutePublication|PushSummary|CLIClosesProgress)' -count=1` passed, followed by passing `go test ./...` and `git diff --check`. `go run ./cmd/lupetto --help` exited 0. Independent contract/source review through two lenses completed with no concrete findings. These gates complete the scoped registry checkpoint, not Lupetto signing or attestation.
+
+Actual signature prerequisite verification on a synthetic image also succeeded using an upstream-generated no-service signing configuration. This is upstream Cosign interoperability evidence, not Lupetto signing or SPDX attestation implementation. Production HTTPS/transparency-log verification remains unexercised. Push-summary parsing intentionally supports a strict grammar; other Docker versions have not been verified. No secret values, credential configurations, keys, or runtime files were committed.
 
 ## Selection and snapshots
 

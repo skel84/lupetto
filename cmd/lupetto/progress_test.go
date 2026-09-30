@@ -463,7 +463,7 @@ func TestCLIClosesProgressBeforeFinalSuccessFailureOrCancellation(t *testing.T) 
 			}
 			code := runWithBuild(ctx, []string{"build", "busybox", "--apk-version", "1.0-r0", "--no-load"}, out, errOut, build)
 			if outcome == "success" {
-				want := "Selected busybox@1.0-r0 (APKINDEX sha256:)\nOCI image: image\nValidated SPDX: sbom (sha256:)\nBuild evidence: workspace\nImage reference: lupetto/busybox:1.0-r0-amd64\nBuild reference: lupetto/local:build-fixture\nDocker loading: skipped\n"
+				want := "Selected busybox@1.0-r0 (APKINDEX sha256:)\nOCI image: image\nValidated SPDX: sbom (sha256:)\nBuild evidence: workspace\nImage reference: lupetto/busybox:1.0-r0-amd64\nBuild reference: lupetto/local:build-fixture\nDocker loading: skipped\nRegistry publication: skipped\nImage signing: skipped\nSPDX attestation: skipped\n"
 				if code != 0 || stdout.String() != want {
 					t.Fatalf("success stdout changed: code=%d stdout=%q", code, stdout.String())
 				}

@@ -2,11 +2,11 @@
 
 [Documentation home](../README.md) · [Decisions](decisions.md) · [Verification](verification.md)
 
-This is the single implementation checklist. The standalone CLI, tool check, live signed-index discovery, generic local build, per-architecture SPDX/lock identity validation, and default local Docker loading/explicit no-load are complete within the scoped local path; persistent catalog ingestion and publication/signing remain pending. Mark an item complete only after its observable behavior is verified; record the command/result or evidence reference beside it. Track blockers beside the affected item and design choices in the decision record, rather than creating a second status list.
+This is the single implementation checklist. The standalone CLI, tool check, live signed-index discovery, generic local build, per-architecture SPDX/lock identity validation, default local Docker loading/explicit no-load, and registry publication are complete within the scoped verified path; Cosign signing and signed SPDX attestation are next, while persistent catalog ingestion remains deferred. Mark an item complete only after its observable behavior is verified; record the command/result or evidence reference beside it. Track blockers beside the affected item and design choices in the decision record, rather than creating a second status list.
 
 The CLI and Explorer are separate workstreams. The CLI can ship after its implementation and release checks below; it does not wait for Explorer. Explorer remains part of the full compatibility scope, but its product/repository/module packaging is undecided.
 
-**Approved priority:** complete generic registry publication, then Cosign image signing and signed SPDX attestation, using the current live signed-index exact-build path. Persistent catalog/snapshot-history work is deferred and is not a prerequisite for those stages or the standalone CLI release. Per-build snapshot/lock/evidence retention remains mandatory; catalog and Explorer remain in full scope. See the [decision record](decisions.md#publication-first-roadmap-user-approved).
+**Approved priority:** registry publication is implemented and verified within the scope recorded below; next implement Cosign image signing and signed SPDX attestation, using the current live signed-index exact-build path. Persistent catalog/snapshot-history work is deferred and is not a prerequisite for those stages or the standalone CLI release. Per-build snapshot/lock/evidence retention remains mandatory; catalog and Explorer remain in full scope. See the [decision record](decisions.md#publication-first-roadmap-user-approved).
 
 ## CLI workstream
 
@@ -31,18 +31,20 @@ The CLI and Explorer are separate workstreams. The CLI can ship after its implem
 
 **Completion:** an exact local build is usable independently of catalog conveniences, publication, and Explorer. Unvalidated evidence is never labeled validated.
 
-### 2. Publish, sign, and attest (next)
+### 2. Publish, sign, and attest (registry complete; signing next)
 
 Take two coherent checkpoints: first registry configuration/tag/push and verified pushed-digest reporting; then Cosign image signing, signed SPDX attestation, and verification of both against that same digest. Resolve the [publication/signing decisions](decisions.md#before-publicationsigning) before each dependent change; leave unverified outcomes unchecked.
 
-- [ ] Define image naming/tagging, repository-prefix validation, flag/environment precedence, and incomplete-configuration errors.
-- [ ] Implement generic registry/repository settings, including nested prefixes, using Docker credential-store authentication.
-- [ ] Reject publication with `--no-load` before publication side effects.
-- [ ] Implement Docker tag/push and capture the pushed immutable registry digest, not a local image ID.
+The external-binary authenticated loopback run, immutable-content inspection, corrected focused race-enabled gate, passing full `go test ./...`, `git diff --check`, CLI-help exit 0, and independent contract/source reviews are recorded in [registry publication evidence](verification.md#authenticated-registry-publication-evidence). These complete the scoped registry checkpoint. The upstream synthetic-image signature prerequisite is not Lupetto signing/attestation completion; those items remain unchecked.
+
+- [x] Define image naming/tagging, repository-prefix validation, flag/environment precedence, and incomplete-configuration errors. The final focused race-enabled publication tests passed, and the real nested-prefix run used the resolved actual APK component and exact revision/build tag; see [publication evidence](verification.md#authenticated-registry-publication-evidence).
+- [x] Implement generic registry/repository settings, including nested prefixes, using Docker credential-store authentication. A fresh isolated synthetic credential helper authenticated the external-binary nested-prefix run; the final focused and full test gates passed. See [publication evidence](verification.md#authenticated-registry-publication-evidence).
+- [x] Reject publication with `--no-load` before publication side effects. The real publication arguments plus `--no-load`, with `PATH=/nonexistent`, exited 2 and emitted no success stdout; the final focused tests passed. See [pre-tool rejection evidence](verification.md#authenticated-registry-publication-evidence).
+- [x] Implement Docker tag/push and capture the pushed immutable registry digest, not a local image ID. The real loopback run parsed the push summary and independently verified manifest/config/rootfs content at the same repository's immutable reference; the corrected digest-provenance regression and final gates passed. See [publication evidence](verification.md#authenticated-registry-publication-evidence).
 - [ ] Select a supported Cosign version, signing-config format, and registry compatibility mode.
 - [ ] Implement image signing followed by a signed `spdxjson` attestation of the validated document, both bound to the same pushed digest.
 - [ ] Keep `COSIGN_PASSWORD` in the process environment and prevent secrets from entering arguments, logs, or retained evidence.
-- [ ] Report build, publication, signing, and attestation outcomes separately, including partial success.
+- [ ] Report build, publication, signing, and attestation outcomes separately, including partial success. The real anonymous push failure recorded completed build/loaded local image, failed publication, and skipped signing/attestation without success stdout or `result.json`; see [failure evidence](verification.md#authenticated-registry-publication-evidence). Lupetto signing/attestation outcomes remain unimplemented.
 - [ ] Exercise real publication and verification of both signature and attestation, including wrong-key/digest and partial-failure cases.
 - [ ] Exercise production-compatible verification separately from clearly labeled local HTTP/offline variants.
 
@@ -51,7 +53,7 @@ Take two coherent checkpoints: first registry configuration/tag/push and verifie
 ### CLI release gate
 
 - [ ] Run applicable selection, build, evidence, and publication scenarios from [verification](verification.md); record actual outcomes and unexercised cases.
-- [x] Run `go test ./...` in the implemented CLI Go module: passed after readable local naming, following the focused race-enabled command recorded in [verification](verification.md#readable-local-image-reference-evidence). This verifies code tests, not pending publication acceptance or unexercised host/store/concurrency scenarios.
+- [x] Run `go test ./...` in the implemented CLI Go module: passed after registry publication, following the final focused race-enabled publication/progress command recorded in [verification](verification.md#authenticated-registry-publication-evidence). `git diff --check` passed and `go run ./cmd/lupetto --help` exited 0. This verifies code tests, not pending signing/attestation acceptance or unexercised host/store/concurrency scenarios.
 - [ ] Verify CLI help and every documented command/flag against actual parsing and exercised behavior.
 - [ ] Replace the root landing page with a verified CLI operator guide and create `docs/registry-signing.md`, with cross-links and no duplicated signing prose.
 - [ ] Document prerequisites, live-index discovery, numeric/exact selection, workspace retention, architecture support, publication, signing, verification, and security/evidence limitations; label deferred catalog/Explorer workflows as unimplemented rather than inventing ingest/browse commands.
