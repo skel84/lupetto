@@ -6,6 +6,8 @@ This is the single implementation checklist. The standalone CLI, tool check, and
 
 The CLI and Explorer are separate workstreams. The CLI can ship after its implementation and release checks below; it does not wait for Explorer. Explorer remains part of the full compatibility scope, but its product/repository/module packaging is undecided.
 
+**Approved priority:** complete generic registry publication, then Cosign image signing and signed SPDX attestation, using the current live signed-index exact-build path. Persistent catalog/snapshot-history work is deferred and is not a prerequisite for those stages or the standalone CLI release. Per-build snapshot/lock/evidence retention remains mandatory; catalog and Explorer remain in full scope. See the [decision record](decisions.md#publication-first-roadmap-user-approved).
+
 ## CLI workstream
 
 ### 1. Prove an exact local build
@@ -25,19 +27,9 @@ The CLI and Explorer are separate workstreams. The CLI can ship after its implem
 
 **Completion:** an exact local build is usable independently of catalog conveniences, publication, and Explorer. Unvalidated evidence is never labeled validated.
 
-### 2. Add snapshots and major selection
+### 2. Publish, sign, and attest (next)
 
-- [ ] Resolve catalog decisions: SQLite driver/schema, snapshot identity, duplicate imports, database flags, and ingest/query command names.
-- [ ] Implement snapshot ingestion, provenance retention, and package/version queries.
-- [ ] Define package-family mappings and major semantics only where needed; use APK-compatible version ordering.
-- [ ] Resolve major selectors deterministically within an identified snapshot and target architecture; display and retain the exact selection.
-- [ ] Route exact and major selections into the same exact-build pipeline.
-- [ ] Reject ambiguous mappings, conflicting selectors, missing matches, and unavailable APK bytes without fallback.
-- [ ] Exercise revision ordering, architecture filtering, and retained build selections after a newer snapshot is imported.
-
-**Completion:** operators can ingest/browse snapshots and use either selector form. No general Products framework is required merely to resolve versions.
-
-### 3. Publish and sign
+Take two coherent checkpoints: first registry configuration/tag/push and verified pushed-digest reporting; then Cosign image signing, signed SPDX attestation, and verification of both against that same digest. Resolve the [publication/signing decisions](decisions.md#before-publicationsigning) before each dependent change; leave unverified outcomes unchecked.
 
 - [ ] Define image naming/tagging, repository-prefix validation, flag/environment precedence, and incomplete-configuration errors.
 - [ ] Implement generic registry/repository settings, including nested prefixes, using Docker credential-store authentication.
@@ -58,10 +50,24 @@ The CLI and Explorer are separate workstreams. The CLI can ship after its implem
 - [ ] Run `go test ./...` in the CLI’s implemented Go module and record the result.
 - [ ] Verify CLI help and every documented command/flag against actual parsing and exercised behavior.
 - [ ] Replace the root landing page with a verified CLI operator guide and create `docs/registry-signing.md`, with cross-links and no duplicated signing prose.
-- [ ] Document prerequisites, ingest/browse commands, exact/major selection, workspace retention, architecture support, publication, signing, verification, and security/evidence limitations.
+- [ ] Document prerequisites, live-index discovery, numeric/exact selection, workspace retention, architecture support, publication, signing, verification, and security/evidence limitations; label deferred catalog/Explorer workflows as unimplemented rather than inventing ingest/browse commands.
 - [ ] Confirm standalone CLI installation and operation without Explorer; check documentation links and remove obsolete vendor-specific configuration claims.
 
-**Completion:** the CLI is independently deliverable. Preserve links to these rebuild records and state clearly that Explorer is not yet delivered if its workstream remains pending.
+**Completion:** the CLI is independently deliverable with the verified live-index build/publication/signing workflow and its applicable release checks. Persistent catalog/history and Explorer do not block this release. Preserve links to these rebuild records and clearly identify deferred workflows as unimplemented.
+
+### 3. Persistent catalog and historical selection (deferred)
+
+Resume when there is a concrete catalog/history or Explorer need. These items are retained full-scope work, not prerequisites for publication/signing or the standalone CLI release. Existing live-index numeric/exact selection already enters the same build pipeline; the pending selector tasks below concern persistent imported snapshots. Snapshot metadata does not preserve APK bytes.
+
+- [ ] Resolve catalog decisions: SQLite driver/schema, snapshot identity, duplicate imports, database flags, and ingest/query command names.
+- [ ] Implement snapshot ingestion, provenance retention, and package/version queries.
+- [ ] Define package-family mappings and major semantics only where needed; use APK-compatible version ordering.
+- [ ] Resolve major selectors deterministically within an identified snapshot and target architecture; display and retain the exact selection.
+- [ ] Route exact and major selections into the same exact-build pipeline.
+- [ ] Reject ambiguous mappings, conflicting selectors, missing matches, and unavailable APK bytes without fallback.
+- [ ] Exercise revision ordering, architecture filtering, and retained build selections after a newer snapshot is imported.
+
+**Completion:** operators can ingest/browse snapshots and use either selector form. No general Products framework is required merely to resolve versions.
 
 ## Explorer workstream
 

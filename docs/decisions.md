@@ -39,6 +39,16 @@ Status vocabulary:
 - A dotted numeric selector (major, minor, or patch) matches the corresponding leading upstream numeric components; choose the highest matching APK version and packaging revision using apko's pinned APK-compatible version comparator, not lexical or generic SemVer sorting. `--apk-version` requires an exact revision. No match is an explicit unavailable-version error; equal-ranked distinct package/byte candidates are ambiguous errors. The signed index is retained and apko still locks the exact selected package and checksum before image composition.
 - Keep the same image-only apko pipeline and user-cache workspace for every requested package. nginx and Valkey are real interoperability checks, not source-level package allowlists or product recipes. Numeric selector support does not imply full package-family mapping for every Wolfi naming convention, a generic catalog, or runnable images.
 
+## Publication-first roadmap (user-approved)
+
+- Prioritize generic registry publication, then Cosign image signing and a signed `spdxjson` attestation of the already-validated architecture SPDX, both bound to the same pushed immutable registry digest.
+- Use the existing live signed-index discovery/selection and single exact-build pipeline. Preserve signed-index/key, exact APK revision, dependency lock, validated SPDX, and per-build provenance; no persistent database is required for correctness of this workflow.
+- Defer persistent snapshot ingestion, SQLite catalog queries, and historical selection until there is a concrete catalog/history or Explorer need. This changes implementation priority and the standalone CLI release gate, not the full compatibility scope: catalog and Explorer targets remain pending rather than being deleted or marked complete.
+- Historical metadata can support comparisons, pinned snapshot selection, and browsing, but does not preserve APK bytes or guarantee historical rebuildability. Existing per-build evidence retention remains required.
+- The immediate prerequisite decisions are registry naming/prefix validation, configuration precedence and incomplete-input errors, pushed-digest capture, separate stage/partial-success reporting, and supported Cosign signing/attestation/verification behavior. Local readable tags do not settle registry naming or establish immutable publication identity.
+- Implement and verify coherent checkpoints: registry publication first, then signing/attestation and their verification. Preserve Docker credential-store authentication, publication rejection with `--no-load`, process-environment `COSIGN_PASSWORD`, and clearly separated production HTTPS/transparency-log requirements versus local-development exceptions.
+- This priority approval does not authorize publication/signing against a live registry, use of existing credentials/keys, or remote infrastructure changes. Obtain authorization for the exact verification target/scope; prefer isolated local checks. The [implementation checklist](implementation-plan.md) remains the single progress record.
+
 ## Proposed design choices
 
 | ID | Proposal | Tradeoff |

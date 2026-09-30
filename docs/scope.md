@@ -10,7 +10,7 @@ Architecture and selection rules proposed for the rebuild are identified separat
 
 ## Local workflow to restore
 
-1. Ingest a Wolfi APKINDEX snapshot and browse its packages.
+1. Read the current signed Wolfi APKINDEX and discover matching packages. Persistent snapshot ingestion and catalog browsing are deferred.
 2. Select an exact package/version directly or resolve a major selector to one.
 3. Compose an OCI image locally using apko and retain its resolved dependency lock.
 4. Generate SPDX evidence and validate its APK package contents against that lock.
@@ -19,6 +19,8 @@ Architecture and selection rules proposed for the rebuild are identified separat
 7. Optionally sign that digest and publish the generated SPDX as a signed Cosign attestation of type `spdxjson`.
 
 This is image composition from APK packages, not source compilation of those packages.
+
+The [user-approved publication-first roadmap](decisions.md#publication-first-roadmap-user-approved) prioritizes registry publication, signing, and SPDX attestation using the existing live-index build path. Persistent catalog/history and Explorer remain compatibility targets, but neither blocks that workflow or the standalone CLI release. Per-build signed-index/lock/evidence retention remains required; an index archive alone is not an APK archive or a guarantee of historical rebuildability.
 
 ## CLI compatibility targets
 

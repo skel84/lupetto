@@ -6,6 +6,8 @@ Lupetto is being rebuilt as a local tool for selecting Wolfi APK packages, compo
 
 The source of the rebuild specification is the operator-documentation request supplied for the lost implementation. The overwritten older checkout is excluded from this project’s evidence and design. No claim about the lost implementation has been verified against its source or executable.
 
+**Next priority:** generic registry publication, followed by Cosign image signing and a signed SPDX attestation bound to the pushed immutable digest. Persistent snapshot/catalog ingestion and historical queries are deferred, not removed from scope, and are not prerequisites for this workflow or the standalone CLI release. Continue using the live signed index and retained per-build evidence. See the [approved roadmap priority](docs/decisions.md#publication-first-roadmap-user-approved) and [single implementation checklist](docs/implementation-plan.md).
+
 ## Check external tools
 
 ```bash

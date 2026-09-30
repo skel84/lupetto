@@ -4,6 +4,8 @@
 
 This is a rebuild proposal, not recovered source structure. A local Go module now contains a standalone CLI and a narrow PostgreSQL 17 OCI image path; broader dependencies and runtime build defaults remain undecided.
 
+The [approved next milestone](decisions.md#publication-first-roadmap-user-approved) extends the existing live signed-index exact-build path with registry publication, Cosign image signing, and signed SPDX attestation. Persistent catalog ingestion/querying is deferred and is not a dependency of publication/signing or the standalone CLI release. Retain per-build snapshot and lock evidence without introducing SQLite or Explorer into that path.
+
 ## Components
 
 Treat `lupetto` and `lupetto-explorer` as separate applications. The CLI is independently useful; Explorer is an optional consumer, not a required part of the build engine. Whether they share a repository, Go module, release, or product identity remains open.
