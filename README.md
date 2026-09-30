@@ -1,143 +1,133 @@
 # Lupetto
 
-Lupetto is being rebuilt as a local tool for selecting Wolfi APK packages, composing OCI images with apko, and retaining verifiable build evidence. Optional registry publication extends the local build workflow; Cosign signing and signed SPDX attestation are the next checkpoint.
+Lupetto is a standalone CLI for discovering Wolfi APK versions, selecting an exact package revision, composing an OCI image with apko, and retaining validated SPDX and build evidence. `build` loads the image into Docker by default and can publish it to a compatible OCI registry. Optional Cosign signing and SPDX attestation extend that same build pipeline; see the [registry, signing, and verification guide](docs/registry-signing.md).
 
-**Status: signed-index discovery, generic local OCI images with validated SPDX/lock package identities, local Docker loading, and registry-publication checkpoint implementation.** `lupetto discover <package-or-provider>` lists exact indexed versions; `lupetto build <package-or-provider> <numeric-selector>` and `--apk-version <exact-revision>` select an exact Wolfi APK, create a local OCI layout, validate apko-generated SPDX against the resolved lock, and load the image into Docker by default. `--no-load` skips Docker when publication is not configured. `lupetto sbom <package-or-provider> --apk-version <exact-revision>` uses that same build path without loading or publication. Publication source contracts are described below; real Lupetto publication interoperability has not yet been recorded. This is not a persistent catalog or runnable service recipe: signing, signed attestation, and Explorer are not implemented.
+The CLI does not require Explorer or a database. Persistent SQLite catalog ingestion, historical snapshot queries, Explorer, and runnable service recipes are deferred, not implemented commands. These images contain packages; installing PostgreSQL or nginx does **not** establish a configured, runnable service.
 
-The source of the rebuild specification is the operator-documentation request supplied for the lost implementation. The overwritten older checkout is excluded from this project’s evidence and design. No claim about the lost implementation has been verified against its source or executable.
+This guide describes the current CLI/source contract. The [verification record](docs/verification.md) distinguishes observed interoperability from source behavior and unexercised scenarios. In particular, local HTTP/offline signing is not production HTTPS/transparency-log proof; production commands in the detailed guide are explicitly templates.
 
-**Next priority:** exercise the registry-publication checkpoint, then implement Cosign image signing and a signed SPDX attestation bound to the verified pushed immutable digest. Persistent snapshot/catalog ingestion and historical queries are deferred, not removed from scope, and are not prerequisites for this workflow or the standalone CLI release. Continue using the live signed index and retained per-build evidence. See the [approved roadmap priority](docs/decisions.md#publication-first-roadmap-user-approved) and [single implementation checklist](docs/implementation-plan.md).
+## Prerequisites and installation
 
-## Check external tools
+Run from this checkout with **Go 1.27.1**. Install the CLI independently of Explorer:
 
 ```bash
-go run ./cmd/lupetto doctor
+go install ./cmd/lupetto
 ```
 
-The check reports whether `apko` and `docker` (required for default Docker loading and publication) and `cosign` (optional for future signing) are on `PATH`. It suggests OS-specific installation steps for missing tools. It does not install anything, verify tool versions, or check whether the Docker daemon is running. Exit status is 1 if a required tool is missing, 0 otherwise. `build --no-load` without publication settings and `sbom` do not use Docker or Cosign.
+Go installs `lupetto` in `GOBIN`, or otherwise in the `bin` directory of `GOPATH` (normally `$HOME/go/bin`). Put that directory on `PATH`. This is a **local-checkout installation**, not a published module download path. You can instead substitute `go run ./cmd/lupetto` for `lupetto` in the commands below.
+
+| Operation | Requirements |
+| --- | --- |
+| `help`, `doctor` | Installed CLI; `doctor` checks executable availability. |
+| `discover` | Access to the public Wolfi index/key; no apko, Docker, or Cosign invocation. |
+| `build --no-load`, `sbom` | Native **apko 1.4.5**, access to the public Wolfi repository, writable user cache. |
+| Default `build` | The above plus Docker on `PATH` and a running configured local Linux Docker daemon. |
+| Publication | Default build requirements, an authorized compatible registry/repository, and Docker's existing credential store. The supported push-summary grammar is Docker **27.4**. |
+| Requested signing | Publication requirements plus exactly **Cosign v3.1.3** and the key/config inputs described in the [detailed guide](docs/registry-signing.md#sign-and-attest-the-verified-digest). |
+
+```bash
+lupetto help
+lupetto doctor
+```
+
+`doctor` suggests OS-specific installation commands when tools are missing but never installs anything. It checks `PATH`, **not** versions, daemon health, authentication, or registry compatibility. Missing apko or Docker produces exit 1; missing optional Cosign does not. No-load and SBOM builds can work without Docker even though `doctor` reports it missing. The build path checks apko's version; requested signing also checks Cosign's exact version before workspace/network/build/publication work.
+
+Targets follow the host architecture: `amd64` → Wolfi `x86_64` / OCI `linux/amd64`, `arm64` → Wolfi `aarch64` / OCI `linux/arm64`. Other architectures fail. There is no target-architecture flag or multi-platform build. Recorded real interoperability is on **darwin/amd64 → linux/amd64**, using Docker 27.4.0 with its containerd image store; arm64 and other host/store combinations are not thereby proven.
 
 ## Discover indexed versions
 
-With Go 1.27.1 and access to the public Wolfi repository (no apko executable or Docker required):
-
 ```bash
-go run ./cmd/lupetto discover postgresql
-go run ./cmd/lupetto discover nginx
-go run ./cmd/lupetto discover valkey
-go run ./cmd/lupetto discover cmd:curl
+lupetto discover postgresql
+lupetto discover nginx
+lupetto discover valkey
+lupetto discover cmd:curl
 ```
 
-`discover` verifies the current APKINDEX signature with the pinned Wolfi signing key and lists all matching exact APK names/versions for the host architecture, newest first, including version-matched virtual providers such as `cmd:curl` (which lists the actual `curl` APK). It prints the signed archive SHA-256 and does **not** silently collapse multiple packages advertising the same version. For the exercised x86_64 snapshot it listed PostgreSQL majors 13–18 and nginx series 1.26–1.31; index contents can change. An indexed version is **not confirmed buildable** until apko can lock its package/dependencies and compose an image. Discovery makes no workspace, checks no APK bytes, and does not ingest or browse historical snapshots. A missing name exits unsuccessfully.
+`discover` verifies the live APKINDEX signature against the pinned Wolfi public key, prints the signed archive's SHA-256, and lists all matching exact APK names/versions for the host architecture, newest first. Names can match an actual package or a version-matched virtual provider (`cmd:curl` resolves to actual APK entries). Different packages advertising the same version are not silently collapsed.
 
-## Build a local Wolfi OCI image
+**Indexed does not mean buildable.** apko must still lock the package/dependencies and fetch the needed APK bytes. Discovery creates no workspace, checks no APK contents, and does not browse imported or historical snapshots. A missing name exits unsuccessfully. The live index changes, so examples are not availability guarantees.
 
-With Go 1.27.1, native apko 1.4.5, a Docker executable and running local daemon, and access to the public Wolfi package repository:
+## Build a local OCI image
 
-```bash
-go run ./cmd/lupetto build nginx 1.30
-go run ./cmd/lupetto build nginx 1.31
-go run ./cmd/lupetto build valkey 9.0
-go run ./cmd/lupetto build valkey 9.1
-go run ./cmd/lupetto build postgresql 17
-go run ./cmd/lupetto build nginx --apk-version 1.30.2-r0
-go run ./cmd/lupetto build nginx --apk-version 1.30.2-r0 --no-load
-```
-
-`build` and `sbom` write stage progress and live apko lock/build diagnostics to stderr; default builds also stream Docker load output. Publication stages report progress but suppress Docker tool diagnostics because authentication failures can expose secrets. In an interactive stderr terminal, an ASCII spinner shows the active stage and elapsed time. Redirected stderr and `TERM=dumb` receive plain logs without animation. The final artifact/SPDX/load/publication summary remains on stdout and is printed only on complete success. Progress logs are not a persistent build-log artifact or machine-readable contract.
-
-These names are **examples, not an allowlist**. Lupetto resolves any requested name that matches an exact package name or a version-matched provider in the signed Wolfi APKINDEX for the host architecture. Numeric selectors match leading dotted upstream components (`9`, `9.1`, or `9.1.2`) and choose the highest APK-compatible version and revision; an exact request must include `-rN`. Unavailable or ambiguous selections fail without substituting a package/version. Availability depends on the current index: the observed `nginx 1.30` and `1.31` selected `nginx-stable@1.30.2-r0` and `nginx-mainline@1.31.6-r2`; `valkey 9.0` and `9.1` selected `valkey-9.0@9.0.4-r0` and `valkey-9.1@9.1.2-r1`.
-
-On success the command prints the selected **actual APK name and exact version**, the APKINDEX SHA-256, a local OCI layout, the validated architecture SPDX path/checksum, and a separate Docker loaded/skipped outcome. The primary image reference is `lupetto/<resolved-apk-name>:<exact-apk-version>-<architecture>`, for example `lupetto/busybox-static:1.38.0-r2-amd64` or `lupetto/nginx-stable:1.30.2-r0-amd64`. Architecture uses OCI spelling (`amd64` or `arm64`), not the APK spelling. Every build also retains `lupetto/local:build-<workspace-suffix>` as its unique reference. A later build can replace the readable version tag; it is not immutable identity. Older images are not automatically renamed.
-
-Default builds export the already-validated image to `docker-image.tar`, load/verify it through the unique reference, then tag the verified local image ID with the readable name and inspect that name for the same ID/platform. When Docker's image store reports a manifest ID rather than the OCI config digest, Lupetto saves the unique imported reference to `docker-loaded.tar` and verifies its config digest against the built image before tagging. No-load and SBOM builds skip archive creation and all Docker commands; their reported references are intended names, not evidence that either tag was created or that an existing tag points to this new build.
-
-New builds are discoverable by package name, for example `docker image ls lupetto/busybox-static` or `docker images | grep busybox`. Use the exact `Image reference:` or `Docker loaded:` value with `docker image inspect <reference>`. `docker image ls lupetto/local` still lists unique build tags, including older builds that have no readable alias. Docker-incompatible or oversized APK name/version components use deterministic SHA-256 fallback components; the exact APK identity is unchanged and remains displayed/recorded. See the [readable naming decisions](docs/decisions.md#readable-local-image-references-user-approved) and [observed evidence](docs/verification.md#readable-local-image-reference-evidence).
-
-A unique workspace under the user's cache directory retains `APKINDEX.tar.gz`, its checksum, the pinned public key, `apko.yaml`, `lock.json`, `image/`, `sbom/sbom-x86_64.spdx.json`, supplemental `sbom/sbom-index.spdx.json`, and a version-3 local-only `result.json` written only after all requested stages succeed. The local-only result format is unchanged: it records the readable `imageReference`, unique `buildReference`, and separate Docker-load status/image ID; that local ID is **not** a pushed registry digest or Explorer contract. Existing records are not migrated. Publication success uses version 4, described below. The installed APK database is checked for the selected package/version/architecture. The complete lock APK identity set must match the architecture SPDX's Wolfi APK entries; non-APK image, OS, and build-recipe entries are excluded. This does not independently validate the index SPDX or every installed dependency against the image. Without publication settings nothing is pushed; nothing is signed in this checkpoint. These minimal images are not claimed to be runnable services.
-
-To generate SPDX for an exact APK revision, use the same build/resolution/validation path:
+For a local-only session, clear publication/signing environment settings described in the [configuration table](docs/registry-signing.md#configuration-and-upfront-errors). Otherwise environment configuration can request additional stages.
 
 ```bash
-go run ./cmd/lupetto sbom valkey --apk-version 9.1.2-r1
+lupetto build nginx 1.30
+lupetto build valkey 9.1
+lupetto build postgresql 17
+lupetto build nginx --apk-version 1.30.2-r0
+lupetto build nginx --apk-version 1.30.2-r0 --no-load
 ```
 
-This composes a new local OCI image and workspace; it does not extract an SBOM from an existing image. `sbom` remains image-only, rejects `--no-load`, `--registry`, and `--repository`, and ignores `LUPETTO_REGISTRY` and `LUPETTO_REPOSITORY`. Signing flags are not implemented. A version listed by `discover` can still fail to lock or build. Failed builds retain partial workspaces but do not create a successful `result.json` or print validated-evidence success output. A load, tag, or inspect failure returns nonzero even after successful composition; once loading begins, an image may remain in Docker. A readable-tag failure reports the confirmed unique import separately from the uncertain readable tag, which may already have changed. Cancellation stops the client best-effort, not daemon work, and no image/tag rollback is attempted. Errors identify the stage/references/workspace; confirmed loading/tagging followed by result-record failure is partial local success. See [local-load evidence](docs/verification.md#local-docker-loading-evidence) and [readable-tag evidence and limitations](docs/verification.md#readable-local-image-reference-evidence).
+These are examples, **not a package allowlist**. Lupetto resolves exact package names or version-matched providers from the signed Wolfi index. A numeric selector matches leading dotted upstream components and chooses the highest APK-compatible version/revision (`17`, `9.1`, or `9.1.2`); an exact request must include the packaging revision `-rN`. Selectors and `--apk-version` cannot be combined. Missing or ambiguous matches fail rather than substituting another package or version.
 
-## Publish the same built image
+For example, exercised `nginx 1.30` and `valkey 9.1` selected actual APKs `nginx-stable@1.30.2-r0` and `valkey-9.1@9.1.2-r1`. Selection can change with a new index. Both forms enter **one** resolution/lock/composition/validation pipeline.
 
-Only `build` accepts `--registry` / `LUPETTO_REGISTRY` and `--repository` / `LUPETTO_REPOSITORY`. Each flag independently overrides its corresponding environment value, so a registry flag can be combined with a repository environment input (or vice versa). An explicitly empty flag, including `--registry=` or `--repository=`, is an error, not a way to fall back to the environment or disable publication. Empty/unset environment values are absent. Both effective settings absent means local-only; exactly one present is an error. Duplicate/invalid flags and publication with `--no-load` are rejected before tool checks, workspace creation, or network/build side effects. Clear both environment inputs when you want a local-only build.
+Stage progress and live apko lock/build diagnostics go to stderr; default builds also stream Docker load output. Interactive stderr has an ASCII spinner/elapsed time. Redirected stderr and `TERM=dumb` receive plain logs. Publication and signing tool diagnostics are suppressed to avoid credential/secret disclosure. Stdout contains the final summary **only after every requested stage and result recording succeeds**; these human-oriented logs are not an Explorer or machine-readable protocol.
 
-Registry is an authority such as `registry.example.invalid` or `registry.example.invalid:5443`, not a URL or image path. Repository is a lower-case nested prefix such as `team/lupetto/images`, without a tag, digest, empty component, or `.`/`..`. Lupetto requires an unambiguous registry authority and validates the complete eventual Docker reference; it does not silently normalize an ambiguous host or truncate an oversized operator-supplied prefix.
+### Image names and Docker loading
 
-The following are **generic configuration examples, not exercised remote publication commands**. Replace the placeholder authority and prefix with an authorized compatible OCI registry/repository, and configure Docker's credential store separately:
+Success reports the actual APK/version, signed-index checksum, OCI layout, validated architecture SPDX path/checksum, workspace, and separate load/publication/signing/attestation outcomes.
+
+The readable local reference is:
+
+```text
+lupetto/<resolved-actual-apk>:<exact-apk-version>-<oci-architecture>
+```
+
+For example, `lupetto/nginx-stable:1.30.2-r0-amd64`. Every build also retains a unique `lupetto/local:build-<workspace-suffix>` reference. The readable tag can move when rebuilding; **it is not immutable identity**. Docker-incompatible or oversized APK components use deterministic SHA-256 naming fallbacks without changing the displayed/recorded exact APK identity. Older images are not automatically renamed.
+
+Loading exports the validated image once to `docker-image.tar`, imports/verifies the unique reference, then tags the **verified local image ID** with the readable name and inspects that name's ID/platform. If Docker reports a manifest ID instead of the OCI config digest, Lupetto saves the imported unique reference to `docker-loaded.tar` and checks its config digest before tagging.
 
 ```bash
-go run ./cmd/lupetto build nginx 1.30 \
-  --registry registry.example.invalid --repository team/lupetto/images
-
-LUPETTO_REGISTRY=registry.example.invalid LUPETTO_REPOSITORY=team/lupetto/images \
-  go run ./cmd/lupetto build nginx --apk-version 1.30.2-r0
+docker image ls lupetto/nginx-stable
+docker image ls lupetto/local
+docker image inspect lupetto/nginx-stable:1.30.2-r0-amd64
 ```
 
-Publication reuses the single validated composition and verified Docker load. The unique remote name is `HOST/PREFIX/<resolved-apk-component>:<local-readable-tag>-build-<workspace-suffix>`. It reuses the same literal-or-SHA-256-fallback APK component and exact-version/OCI-architecture tag as the readable local name; an overlong combined tag uses a deterministic SHA-256 fallback for the entire combined tag. The exact APK identity remains unchanged in output/evidence. Lupetto tags from the verified local image ID, **not** the mutable readable alias, and inspects the remote tag for that ID/platform before pushing. It uses Docker's existing credential store only: no Lupetto login, credential arguments, or copied Docker configuration.
+Use the actual reference printed by your build. `--no-load` and `sbom` skip archive creation and all Docker commands; their reported references are **intended names**, not proof a tag exists or points to that build. Publication/signing cannot be combined with `--no-load`.
 
-Digest capture accepts exactly one supported Docker 27.4 summary for the expected unique tag. Missing, duplicate (even identical), conflicting, malformed, or wrong-tag summaries fail closed. The pushed immutable reference is `HOST/PREFIX/<resolved-apk-component>@sha256:<digest>`, never the local Docker ID. Lupetto then pulls that immutable reference, saves it to retained mode-0600 `docker-published.tar`, and verifies the saved config digest against the original OCI config plus the actual uncompressed saved layer bytes in manifest order against the source `rootfs.diff_ids`. A successful push or a matching claimed diffID array alone is not identity proof. Publication is reported successful only after these content/platform checks; registry manifest serialization need not match Docker's local image ID.
+## Generate validated SPDX
 
-Authentication-bearing publication tool diagnostics are discarded rather than streamed, captured in errors, or retained. Push stdout is processed by a bounded streaming summary parser that retains only the validated digest; errors expose sanitized stage/status information. Stage progress remains visible, but there is no retained publication transcript or credential collection.
+```bash
+lupetto sbom valkey --apk-version 9.1.2-r1
+```
 
-Successful publication writes a private version-4 `result.json` with separate build/load/publication outcomes, unique remote reference, captured pushed digest, immutable reference, and identity-verification status. Signing and attestation are explicitly `skipped`; **no image signature or signed SPDX attestation is implemented yet**. Local-only builds and SBOM retain version 3 unchanged. This is not an Explorer compatibility contract.
+`sbom` composes a **new OCI image and workspace** through the same exact-build path. It does not extract metadata from an existing image. It requires `--apk-version`, never loads/publishes/signs, rejects `--no-load` and all explicit publication/signing flags (including empty/false forms), and ignores all `LUPETTO_*` publication/signing environment inputs.
 
-For publication-requested workflows, typed partial failures drive CLI reporting and a separate mode-0600 version-4 `failure.json` when a workspace exists. They distinguish build, Docker load, publication, identity verification, signing, and attestation outcomes; `result.json` remains success-only. A captured digest survives later verification failure but stays unverified, not a successful publication or authorization to sign. A final result-record failure can report confirmed publication without complete workflow success. Failed/canceled operations may already have changed local/remote tags, pushed an image, or pulled content; no rollback is attempted. Failure-record writing cannot hide the original stage failure. Real Lupetto registry interoperability remains to be exercised; these contracts are not a claim of observed remote publication.
+Lupetto checks the selected installed APK's name/version/architecture and requires the complete locked Wolfi APK identity set to match apko's architecture SPDX APK entries, including the supported `distro`/installed `origin` purl forms. Non-APK image, OS, and build-recipe entries are excluded. The supplemental index SPDX is **not** lock-validated. This validation does not independently compare every installed dependency against the image, prove SPDX completeness, or scan vulnerabilities.
 
-## Documentation map
+## Retained evidence and failures
+
+Each build uses a unique mode-0700 workspace under the OS user cache, `lupetto/builds/image-<suffix>`. Success prints its location. It retains:
+
+- `APKINDEX.tar.gz`, `APKINDEX.sha256`, and the pinned `wolfi-signing.rsa.pub`;
+- `apko.yaml`, `lock.json`, and the local OCI layout `image/`;
+- `sbom/sbom-<wolfi-architecture>.spdx.json` plus supplemental `sbom/sbom-index.spdx.json`;
+- Docker archives when loading/publication requires them;
+- private mode-0600 `result.json`, written only after all requested stages succeed.
+
+Local-only/SBOM results use version 3; publication-only results use version 4; signing-requested results use version 5. These are private evidence formats, **not a supported Explorer integration contract**, and older records are not migrated. The local Docker image ID is never substituted for the pushed registry digest.
+
+Failures/cancellation exit nonzero and retain partial workspaces. Publication/signing workflows additionally attempt a separate private `failure.json` when a workspace exists; they do not write success-only `result.json` or a complete-success summary. Build, load, publication/identity verification, signing, and attestation remain separate outcomes. Images, tags, signatures, or attestations may already exist after a failure; cancellation is best-effort and **there is no rollback**. Confirmed loading/publication/signing followed by final-record failure is partial success, not completed workflow success. See [failure handling](docs/registry-signing.md#partial-outcomes-and-failure-records).
+
+Retaining an index and dependency lock does not preserve remote APK bytes or guarantee historical rebuildability. Keep needed workspaces/evidence deliberately; no persistent catalog/history or automatic retention service is implemented.
+
+## Publish, sign, and verify
+
+Continue with the [registry, signing, and verification guide](docs/registry-signing.md) for nested repository prefixes, flag/environment precedence, Docker authentication, pushed-digest content verification, password-safe Cosign setup, production templates, and the explicitly local HTTP/offline exception. Signing and verification details live there rather than being duplicated here.
+
+## Rebuild documentation map
 
 | Document | Purpose |
 | --- | --- |
-| [Scope and behavior](docs/scope.md) | What to rebuild, recovered command contracts, and explicit exclusions. |
-| [Architecture](docs/architecture.md) | Recommended component boundaries, data flow, and evidence handling. |
-| [Decisions](docs/decisions.md) | Distinguish specification constraints, design proposals, and open questions. |
-| [Implementation checklist](docs/implementation-plan.md) | Single actionable checklist, with separate CLI and Explorer workstreams and release gates. |
-| [Verification](docs/verification.md) | Observable checks required before claiming a feature works. |
+| [Scope and behavior](docs/scope.md) | Current behavior, full compatibility targets, and exclusions. |
+| [Architecture](docs/architecture.md) | CLI/Explorer boundaries, pipeline, and evidence ownership. |
+| [Decisions](docs/decisions.md) | Resolved contracts, proposals, and open decisions. |
+| [Implementation checklist](docs/implementation-plan.md) | Single progress record and CLI/Explorer release gates. |
+| [Verification](docs/verification.md) | Recorded observations, limitations, and remaining checks. |
+| [Registry, signing, and verification](docs/registry-signing.md) | Detailed operator instructions and security boundaries. |
 
-Start with scope, then resolve the decisions needed for the next implementation milestone. Update these documents when a decision changes; do not turn proposed behavior into a claim of implemented behavior.
+The rebuild is based on the operator-documentation request for a lost implementation. The overwritten older checkout is excluded from evidence/design; no historical source or executable claims are inferred from it. [AGENTS.md](AGENTS.md) contains repository instructions for coding agents.
 
-[AGENTS.md](AGENTS.md) defines repository instructions for coding agents, including evidence requirements and the CLI/Explorer boundary.
-
-## Core workflow
-
-```text
-Wolfi snapshot → package selection → exact APK version
-                                      │
-                                      ▼
-                              apko resolution/build
-                                      │
-                         lock + image + validated SPDX
-                                      │
-                               local Docker load
-                                      │ optional
-                               registry publication
-                                      │
-                              immutable image digest
-                                      │ optional
-                         image signature + SPDX attestation
-```
-
-Numeric selectors are implemented for the current signed index: they resolve to an exact package/version before entering the same build pipeline as explicit version requests. Persistent snapshot catalog ingestion and historical selections are deferred; retaining an index does not preserve APK bytes or guarantee historical rebuildability.
-
-## CLI and Explorer separation
-
-The CLI is a standalone application. Explorer is an optional application that consumes it for builds; the CLI never depends on Explorer. Explorer owns the web UI, not a second build engine.
-
-Whether Explorer lives beside the CLI or becomes a separate product, repository, or Go module is intentionally undecided. [The application boundaries and integration contracts](docs/architecture.md#application-and-dependency-boundaries) must support either choice. CLI delivery does not wait for Explorer.
-
-## Working principles
-
-- Prefer a small coordinator of apko, Docker, and Cosign over a new build platform.
-- Keep exact package selection and dependency resolution evidence explicit.
-- Separate successful image creation, publication, signing, and attestation outcomes.
-- Never store real passwords, tokens, private keys, or copied credentials in documentation or fixtures.
-- Do not introduce remote Konflux execution, registry inventory, or vulnerability scanning as prerequisites for local builds.
-
-## Operator documentation later
-
-Once the build workflow is implemented and exercised, replace this landing page with the verified operator guide and add `docs/registry-signing.md` for detailed publication and verification instructions. Preserve links to the rebuild documents. Do not publish invented defaults or unexercised commands as current operator instructions.
+Explorer remains an optional separate application/consumer, not a second build engine or CLI prerequisite. Its product/repository/module packaging and a public CLI integration contract are undecided. Remote Konflux execution, registry inventory, vulnerability scanning, production credential/key management, and invented service recipes are not prerequisites or implemented features.

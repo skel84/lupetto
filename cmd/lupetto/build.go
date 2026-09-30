@@ -23,6 +23,7 @@ var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 type buildResult struct {
 	packageName, version, arch, indexSHA256, workspace, imageDir, spdxPath, spdxSHA256 string
 	imageReference, buildReference, dockerLoad, dockerImageID                          string
+	signing, attestation                                                               string
 	publication                                                                        publicationOutcome
 }
 
@@ -53,6 +54,7 @@ func buildLocal(ctx context.Context, request buildRequest) (buildResult, error) 
 		command: executeLocalCommand, cacheDir: os.UserCacheDir,
 		publicFile: getPublicFile, signingKey: getWolfiSigningKey,
 		publicationCommand: executePublicationCommand,
+		signingCommand:     executeSigningCommand,
 	})
 }
 
@@ -61,16 +63,22 @@ func buildLocal(ctx context.Context, request buildRequest) (buildResult, error) 
 type buildServices struct {
 	command            localCommand
 	publicationCommand localCommand
+	signingCommand     localCommand
 	cacheDir           func() (string, error)
 	publicFile         func(context.Context, string, int64) ([]byte, error)
 	signingKey         func(context.Context) ([]byte, error)
 }
 
 func buildLocalWith(ctx context.Context, request buildRequest, services buildServices) (buildResult, error) {
+	signingStatus := "skipped"
+	if request.signing.enabled() {
+		signingStatus = "not-attempted"
+	}
+	initial := buildResult{dockerLoad: "skipped", publication: publicationOutcome{status: "skipped"},
+		signing: signingStatus, attestation: signingStatus}
 	earlyFail := func(err error) (buildResult, error) {
 		if request.publication.enabled() {
-			result := buildResult{dockerLoad: "skipped", publication: publicationOutcome{status: "skipped"}}
-			return result, newWorkflowFailure(result, "build", err, false)
+			return initial, newWorkflowFailure(initial, "build", err, false)
 		}
 		return buildResult{}, err
 	}
@@ -82,6 +90,15 @@ func buildLocalWith(ctx context.Context, request buildRequest, services buildSer
 	}
 	if request.publication.enabled() && request.noLoad {
 		return buildResult{}, fmt.Errorf("publication requires Docker loading; --no-load is incompatible")
+	}
+	if err := validateSigningOptions(request.signing, request.publication, request.noLoad); err != nil {
+		return buildResult{}, err
+	}
+	if request.signing.enabled() {
+		buildStage(ctx, "Checking Cosign v3.1.3 compatibility")
+		if err := requireCosignVersion(ctx, services.signingCommand); err != nil {
+			return initial, newWorkflowFailure(initial, "cosign-version", err, false)
+		}
 	}
 	buildStage(ctx, "Checking build tools")
 	arch, err := targetArch()
@@ -105,7 +122,8 @@ func buildLocalWith(ctx context.Context, request buildRequest, services buildSer
 		return earlyFail(fmt.Errorf("create build workspace: %w", err))
 	}
 	buildReference := "lupetto/local:build-" + strings.TrimPrefix(filepath.Base(workspace), "image-")
-	result := buildResult{workspace: workspace, dockerLoad: "skipped", publication: publicationOutcome{status: "skipped"}}
+	result := initial
+	result.workspace = workspace
 	fail := func(err error) (buildResult, error) {
 		if request.publication.enabled() {
 			return result, newWorkflowFailure(result, "build", err, false)
@@ -202,6 +220,7 @@ func buildLocalWith(ctx context.Context, request buildRequest, services buildSer
 		indexSHA256: indexDigest, workspace: workspace, imageDir: imageDir,
 		spdxPath: spdxPath, spdxSHA256: spdxSHA256, imageReference: imageReference,
 		buildReference: buildReference, dockerLoad: "skipped", publication: publicationOutcome{status: "skipped"},
+		signing: signingStatus, attestation: signingStatus,
 	}
 	if !request.noLoad {
 		imageID, err := loadDockerImage(ctx, services.command, imageDir, workspace, buildReference, arch)
@@ -231,6 +250,17 @@ func buildLocalWith(ctx context.Context, request buildRequest, services buildSer
 		result.publication, err = publishDockerImage(ctx, command, result, request.publication)
 		if err != nil {
 			return result, newWorkflowFailure(result, "publication", err, true)
+		}
+	}
+	if request.signing.enabled() {
+		outcome, signingErr := signAndAttestDigest(ctx, services.signingCommand, result, request.signing)
+		result.signing, result.attestation = outcome.signing, outcome.attestation
+		if signingErr != nil {
+			stage := "signing"
+			if outcome.signing == "signed" {
+				stage = "attestation"
+			}
+			return result, newWorkflowFailure(result, stage, signingErr, true)
 		}
 	}
 	buildStage(ctx, "Recording build result")

@@ -304,6 +304,10 @@ func retainBuildResult(ctx context.Context, result buildResult, lockPath string)
 		publication := result.publication.evidence()
 		record.Version, record.Publication = 4, &publication
 		record.Build, record.Signing, record.Attestation = "completed", "skipped", "skipped"
+		if result.signing != "" && result.signing != "skipped" {
+			record.Version = 5
+			record.Signing, record.Attestation = result.signing, result.attestation
+		}
 	}
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {

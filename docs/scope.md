@@ -1,12 +1,12 @@
 # Scope and behavior
 
-[Documentation home](../README.md) · [Decisions](decisions.md)
+[Documentation home](../README.md) · [Registry/signing guide](registry-signing.md) · [Decisions](decisions.md)
 
 ## Evidence boundary
 
 The original operator-documentation request supplies the workflow targets below. Product-specific command and environment names here are adapted to Lupetto, not recovered historical spellings. The request is not executable proof. The lost source, tests, defaults, and database schema are unavailable; the overwritten checkout must not be used to fill those gaps.
 
-Architecture and selection rules proposed for the rebuild are identified separately. The CLI discovers exact versions in the live signed Wolfi index, composes local OCI images for exact package names or version-matched providers, validates apko-generated architecture SPDX APK identities against the resolved lock, and checks local tool availability. Default build loading and explicit `--no-load` extend that same pipeline under the [resolved local-loading contract](decisions.md#local-docker-loading-decisions-resolved-before-implementation); `sbom` remains image-only. Registry-publication checkpoint source now extends the verified local-load path; real Lupetto registry interoperability is not yet recorded. Observed local interoperability and limitations are recorded in [verification](verification.md#local-docker-loading-evidence). Persistent snapshot ingestion, signing, signed attestation, and Explorer remain unimplemented.
+Architecture and selection rules proposed for the rebuild are identified separately. The standalone CLI discovers exact versions in the live signed Wolfi index, composes local OCI images for exact package names or version-matched providers, validates apko-generated architecture SPDX APK identities against the resolved lock, and checks local tool availability. Default Docker loading and explicit `--no-load` extend the same pipeline; publication verifies the pushed immutable image's content before optional Cosign signing and SPDX attestation. The current source contract is described in the [operator guides](../README.md); observed local/registry interoperability and unexercised cases remain distinguished in [verification](verification.md). Production HTTPS/TUF/transparency-log verification is not established by local HTTP/offline checks. Persistent snapshot ingestion, historical catalog queries, Explorer, and runnable service recipes remain deferred.
 
 ## Local workflow to restore
 
@@ -24,12 +24,12 @@ The [user-approved publication-first roadmap](decisions.md#publication-first-roa
 
 ## CLI compatibility targets
 
-The generic signed-index `discover` command, numeric-selector/exact-APK `build` forms, and exact-version `sbom` command below are implemented. `build` loads into local Docker by default and optionally publishes; `--no-load` skips Docker only when publication is absent. `sbom` composes a new image using the same exact-build pipeline, not a separate metadata-only path, and never loads Docker or publishes; it rejects `--no-load`, `--registry`, and `--repository`, and ignores publication environment inputs. Signing flags are not implemented. Angle-bracket terms must be replaced with actual values.
+The generic signed-index `discover` command, numeric-selector/exact-APK `build` forms, and exact-version `sbom` command below are implemented. `build` loads into local Docker by default and optionally publishes/signs/attests; `--no-load` is valid only without publication/signing. `sbom` composes a new image through the same exact-build pipeline, never loads/publishes/signs, rejects `--no-load` and all explicit publication/signing flags (including false/empty forms), and ignores their environment inputs. Angle-bracket terms must be replaced with actual values.
 
 ```text
 lupetto discover <package-or-provider>
-lupetto build <package-or-provider> <dotted-numeric-selector> [--no-load] [--registry <authority> --repository <prefix>]
-lupetto build <package-or-provider> --apk-version <exact-apk-version> [--no-load] [--registry <authority> --repository <prefix>]
+lupetto build <package-or-provider> <dotted-numeric-selector> [--no-load] [--registry <authority> --repository <prefix>] [--cosign-key <key> [--cosign-signing-config <file>] [--cosign-allow-http[=true|false]]]
+lupetto build <package-or-provider> --apk-version <exact-apk-version> [--no-load] [--registry <authority> --repository <prefix>] [--cosign-key <key> [--cosign-signing-config <file>] [--cosign-allow-http[=true|false]]]
 lupetto sbom <package-or-provider> --apk-version <exact-apk-version>
 ```
 
@@ -43,8 +43,11 @@ Publication rejects `--no-load` before tool checks, workspace creation, network 
 | --- | --- |
 | `--registry` | `LUPETTO_REGISTRY` |
 | `--repository` | `LUPETTO_REPOSITORY` |
+| `--cosign-key` | `LUPETTO_COSIGN_KEY` |
+| `--cosign-signing-config` | `LUPETTO_COSIGN_SIGNING_CONFIG` |
+| `--cosign-allow-http` | `LUPETTO_COSIGN_ALLOW_HTTP` |
 
-Resolve each setting independently: an explicit flag overrides only its corresponding environment input, including an explicitly empty flag, which is rejected rather than falling back or disabling publication. Empty/unset environment values mean absent. Both settings absent means local-only; exactly one present is an incomplete-configuration error. Reject duplicates and invalid settings before build side effects. `sbom` rejects explicit publication flags, including empty forms, and ignores both environment inputs.
+Resolve each setting independently: an explicit flag overrides only its corresponding environment input; explicitly empty flags are rejected rather than falling back or disabling a stage. Empty/unset environment values mean absent. Both registry/repository absent means publication is skipped; exactly one present is an error. Reject duplicates and invalid settings before build side effects. A signing key requires publication/loading; signing config or enabled HTTP consent requires a key. The HTTP value is strictly `true`/`false` (valueless flag means true, explicit false overrides environment true). `sbom` rejects all explicit publication/signing flags, including false/empty forms, and ignores all five environment inputs.
 
 Registry is a validated authority (DNS name, IPv4, or bracketed IPv6, optionally with a port), not a URL, user information, or path. An unambiguous authority needs a dot, `localhost`, an IP address, or an explicit port on a single-label DNS name. `--repository` is a lower-case nested OCI prefix such as `team/lupetto/images`, without tags, digests, empty components, or `.`/`..`. Validate the complete eventual reference with the pinned Docker reference parser; do not normalize the intended authority or shorten an oversized operator-supplied prefix. No registry vendor is required.
 
@@ -54,14 +57,14 @@ Docker registry authentication uses Docker's existing credential store only: no 
 
 Pull the immutable reference, save it into retained mode-0600 `docker-published.tar`, and require its config digest to equal the original OCI config digest. Hash the actual uncompressed saved layers in manifest order and compare the ordered hashes with the source config's `rootfs.diff_ids`, with platform/archive validation. Matching claimed diffIDs or a successful push alone is insufficient; registry manifest serialization may differ from local identity. Only then report publication `published` with identity verified.
 
-Publication-requested success records are private version-4 `result.json` files separating build/load/publication, unique remote reference, captured digest/immutable reference, and verification status; signing/attestation are `skipped`. Local-only version 3 remains unchanged. Typed `workflowFailure` outcomes drive CLI partial-status reporting and separate mode-0600 version-4 `failure.json` retention when a workspace exists. Preserve a captured digest on later verification failure but mark it unverified and do not enable signing. Failures may leave changed tags, a pushed image, or pulled content; final result-record failure can follow confirmed publication. No rollback or complete-success output is claimed, and failure-record errors do not hide the original failure.
+Publication-only success records are private version-4 `result.json` files separating build/load/publication, unique remote reference, captured digest/immutable reference, and verification status; signing/attestation are `skipped`. Signing-requested results use version 5 and preserve actual signing/attestation outcomes. Local-only version 3 remains unchanged. Typed `workflowFailure` outcomes drive CLI partial-status reporting and separate mode-0600 `failure.json` retention when a workspace exists. Preserve a captured digest on later verification failure but mark it unverified and do not enable signing. Requested but unreached signing/attestation remains `not-attempted`. Failures may leave changed tags, images, signatures, or attestations; final result-record failure can follow confirmed publication/signing/attestation. No rollback or complete-success output is claimed, and failure-record errors do not hide the original failure.
 
-Cosign image signing and signed `spdxjson` attestation are the next checkpoint, not implemented flags or outcomes. Their chosen future inputs are `--cosign-key` / `LUPETTO_COSIGN_KEY`, `--cosign-signing-config` / `LUPETTO_COSIGN_SIGNING_CONFIG`, and `--cosign-allow-http` / `LUPETTO_COSIGN_ALLOW_HTTP`; see the [next-checkpoint contract](decisions.md#cosign-signing-contract-chosen-for-the-next-checkpoint). `COSIGN_PASSWORD` is future process-environment input, never a command argument. Generic placeholder publication examples in the [README](../README.md#publish-the-same-built-image) are not evidence of exercised remote publication.
+Cosign v3.1.3 signing and signed `spdxjson` attestation consume the same verified pushed immutable reference and the existing checksum-checked validated architecture SPDX. `COSIGN_PASSWORD` is inherited process-environment input only, never an argument or retained secret. Detailed key/config inputs, literal-loopback HTTP consent, production-default versus local/offline exceptions, verification forms, and predicate inspection are centralized in the [registry/signing operator guide](registry-signing.md); the [decision record](decisions.md#cosign-signing-contract-chosen-for-the-next-checkpoint) records the chosen contract. Generic production examples are templates, not exercised production proof.
 
-### Major selection: proposed deterministic rule
+### Numeric selection: implemented live-index rule
 
 - Select against one identified snapshot and target architecture.
-- Match the requested major within an unambiguous package or explicitly mapped package family.
+- Match leading dotted upstream version components within exact package names or matching-version providers; reject ambiguous selections.
 - Choose the highest matching APK version using APK-compatible ordering, not lexical sorting or generic SemVer assumptions.
 - Display and record the exact package/version before building.
 - Reject conflicting selectors, ambiguous mappings, and missing matches. Never fall back to another major.
@@ -93,6 +96,6 @@ These are not interchangeable or automatically synchronized. Signature validity 
 
 Remote Konflux execution, policy enforcement, registry-discovery UI, vulnerability scanning, source-package builds, and production credential/key management are outside this local rebuild.
 
-HTTP registry access is local-development only. Production use requires HTTPS, least-privilege registry credentials, and protected signing keys or an appropriately designed keyless workflow. Keyless support in upstream Cosign is not evidence that Lupetto supports it.
+HTTP registry access is local-development only. Production use requires HTTPS, least-privilege registry credentials, and protected signing keys. Keyless/KMS interoperability and production key management are not established by upstream Cosign support. See the [operator security boundaries](registry-signing.md).
 
 Signing without transparency-log evidence can authenticate the key and signed claims but does not provide public Rekor inclusion/auditability.

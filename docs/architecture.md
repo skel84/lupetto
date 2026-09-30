@@ -1,10 +1,10 @@
 # Proposed architecture
 
-[Documentation home](../README.md) · [Scope](scope.md) · [Verification](verification.md)
+[Documentation home](../README.md) · [Scope](scope.md) · [Registry/signing guide](registry-signing.md) · [Verification](verification.md)
 
-This is a rebuild proposal, not recovered source structure. A local Go module now contains a standalone CLI, read-only discovery from the live signed Wolfi index, a generic local OCI build path with apko-generated architecture SPDX/lock identity validation, default Docker loading, and the first registry-publication checkpoint implementation. Real Lupetto publication interoperability has not yet been recorded; signing, persistent snapshot catalog ingestion, and broader runtime build defaults remain pending.
+This records current rebuild boundaries and proposed future components, not recovered historical source structure. A local Go module contains a standalone CLI, read-only discovery from the live signed Wolfi index, a generic OCI build path with apko-generated architecture SPDX/lock identity validation, default Docker loading, and optional registry publication, Cosign signing, and signed SPDX attestation. Persistent snapshot catalog ingestion, Explorer, and runnable service recipes remain deferred. Current source contracts are distinct from observed interoperability in the [verification record](verification.md); local HTTP/offline checks do not establish production HTTPS/TUF/transparency-log behavior.
 
-The [approved roadmap](decisions.md#publication-first-roadmap-user-approved) extends the existing live signed-index exact-build path first with registry publication, then Cosign image signing and signed SPDX attestation. The publication source contracts below do not establish observed registry interoperability or implemented signing. Persistent catalog ingestion/querying is deferred and is not a dependency of publication/signing or the standalone CLI release. Retain per-build snapshot and lock evidence without introducing SQLite or Explorer into that path.
+The [approved roadmap](decisions.md#publication-first-roadmap-user-approved) extends the existing live signed-index exact-build path with publication, then image signing and signed SPDX attestation. Persistent catalog ingestion/querying is deferred and is not a dependency of publication/signing or the standalone CLI release. Retain per-build snapshot and lock evidence without introducing SQLite or Explorer into that path. The [operator guides](../README.md) describe usage, while this document describes ownership and execution boundaries.
 
 ## Components
 
@@ -14,7 +14,7 @@ Treat `lupetto` and `lupetto-explorer` as separate applications. The CLI is inde
 | --- | --- |
 | Catalog | Import snapshots, retain provenance, query package versions, resolve selectors. |
 | Build implementation | Turn an exact request into configuration, resolved lock, image, SPDX, and validation outcome. |
-| Local loading/publication/signing | Export/load the validated image locally; tag/push from its verified ID, capture and verify immutable registry identity; signing and attestation are future stages. |
+| Local loading/publication/signing | Export/load the validated image; tag/push from its verified ID; verify immutable registry content; sign and attest the same verified pushed digest. |
 | CLI | Parse operator input, run the shared operations, report results and failures. |
 | Explorer | Browse catalog/evidence and launch the configured CLI for builds. |
 
@@ -66,11 +66,11 @@ A separate Explorer product does not inherently require a remote service. Keep t
 
 ## External tools
 
-The exact-build path invokes native apko 1.4.5 with a signed Wolfi index/key and exact package lock, producing a local OCI layout and validated per-architecture SPDX. Read-only `discover` verifies the same signed index and pinned key without invoking apko or building an image. APK version ordering uses a pinned apko 1.4.5 Go dependency. The [local-loading decision](decisions.md#local-docker-loading-decisions-resolved-before-implementation) adds a post-validation Docker archive export/load/identity check to this same path; `--no-load` without publication and `sbom` skip it. Publication uses the supported Docker 27.4 push-summary grammar and subsequent immutable pull/save/content verification. Cosign signing remains a future stage; no containerized apko build has been exercised.
+The exact-build path invokes native apko 1.4.5 with a signed Wolfi index/key and exact package lock, producing a local OCI layout and validated per-architecture SPDX. Read-only `discover` verifies the same signed index and pinned key without invoking apko. APK ordering uses the pinned apko Go dependency. Post-validation Docker archive export/load/identity checking consumes the same image; `--no-load` without publication/signing and `sbom` skip Docker. Publication uses the supported Docker 27.4 push-summary grammar and subsequent immutable pull/save/content verification. Requested signing checks exactly Cosign v3.1.3 before workspace/network/build/publication work. No containerized apko build or multi-platform path is implied.
 
 Use explicit argument arrays, not shell interpolation. Propagate cancellation, capture safe local failures, and avoid logging secret-bearing environment values. Publication uses a separate secret-safe subprocess adapter, not the capturing/live local executor: discard auth-bearing tool diagnostics, sanitize failures, and feed push stdout only to a bounded summary parser retaining the validated digest. Docker inspect retains only a bounded, re-encoded identity object for internal checks. Do not retain unmatched lines, credential-helper output, command transcripts, environment, or Docker configuration. Structured artifact records hold outcomes, not tool transcripts.
 
-Cosign remains optional until signing is requested. Do not design a Lupetto key store or a new signing-config file format.
+Cosign remains optional until signing is requested. Its separate secret-safe adapter discards sign/attest stdout/stderr and returns sanitized failures; the bounded version probe retains only parsed version information. Inherit `COSIGN_PASSWORD` without copying it into arguments, logs, or evidence. Do not design a Lupetto key store or signing-config schema. Optional upstream configuration and HTTP/offline versus production-default policy are documented in the [registry/signing guide](registry-signing.md), not duplicated here.
 
 ## One exact-build pipeline
 
@@ -89,10 +89,14 @@ CLI selector → snapshot-scoped resolution → exact build request
                                                 │
                                    immutable pull/save/content check
                                                 │
+                                    optional immutable image signature
+                                                │
+                                 optional validated SPDX attestation
+                                                │
                                          artifact/result record
 ```
 
-The implemented `sbom --apk-version` command invokes the same selector and image-composition function as `build` but remains image-only; apko writes the architecture SPDX during the build. It ignores publication environment inputs and rejects publication flags and `--no-load`; signing flags are not implemented. The apko index SPDX is supplemental and not lock-validated. Local loading and publication consume the already-validated OCI image and verified Docker ID, not another build or resolution path. Historical snapshot ingestion and any future Explorer integration remain separate decisions.
+The implemented `sbom --apk-version` command invokes the same selector and image-composition function as `build` but remains image-only; apko writes the architecture SPDX during the build. It ignores publication/signing environment inputs and rejects all explicit publication/signing flags and `--no-load`. The index SPDX is supplemental and not lock-validated. Loading/publication consume the already-validated image and verified Docker ID, not another build/resolution path. Signing consumes verified immutable publication identity; attestation reuses the existing validated architecture document and rechecks its recorded checksum. Historical snapshot ingestion and Explorer integration remain separate decisions.
 
 A selected top-level version does not pin its dependency closure. A snapshot does not preserve the referenced APK bytes. Do not promise historical rebuildability unless the required artifacts and toolchain inputs remain available.
 
@@ -100,25 +104,25 @@ A selected top-level version does not pin its dependency closure. A snapshot doe
 
 The unique, mode-0700 user-cache build workspace retains signed index/key, config, lock, OCI image, architecture/index SPDX, and a versioned local `result.json` only after all requested stages succeed. The version-3 readable-naming record retains primary `imageReference` and unique `buildReference`, separate loaded/skipped outcome, and verified local Docker image ID alongside snapshot, exact APK, architecture, apko version, artifact paths, and validated SPDX checksum. The sole apko composition/export/import uses the unique name; readable tagging follows verified import and uses the verified image ID, then checks the readable name's ID/platform. A readable version tag is mutable, not immutable build identity; concurrent builds are not an atomic multi-tag transaction. Skipped builds record intended names without touching Docker. The archive is retained when loading is attempted; a local image ID is not a registry digest. This is not an Explorer compatibility contract, and older result records/images are not migrated. Failures retain partial diagnostics/workspaces without a success record or validated-evidence success output; confirmed unique import followed by tag/inspect failure is partial local success with uncertain readable-tag effects, not rollback. Never record private keys, passwords, or tokens.
 
-The local-only version-3 format remains unchanged. Publication success writes private version-4 `result.json`, preserving the local evidence while adding separate build/publication/signing/attestation outcomes, unique remote reference, captured pushed digest, immutable reference, and publication identity-verification status. Signing and attestation are `skipped` at this checkpoint. The mode-0600 `docker-published.tar` retains immutable pull/save content for verification. No successful record is written until every requested stage and finalization succeeds.
+Local-only/SBOM version 3 remains unchanged. Publication-only success writes private mode-0600 version-4 `result.json`; signing-requested success uses version 5. Both preserve local evidence and separate build/load/publication/signing/attestation outcomes, unique remote reference, captured pushed digest, immutable reference, and publication identity-verification status. Signing/attestation are `skipped` when not requested; requested but unreached stages are `not-attempted`. The mode-0600 `docker-published.tar` retains immutable pull/save content for verification. No successful record is written until every requested stage and finalization succeeds.
 
-Publication-requested workflows return a typed `workflowFailure` carrying sanitized separate build/load/publication/verification/signing/attestation outcomes, workspace, and any captured digest. The CLI consumes this type instead of parsing error strings, and a separate mode-0600 version-4 `failure.json` retains partial outcomes when a workspace exists. A captured-but-unverified digest remains recorded after verification failure, but cannot authorize signing or imply publication success. Final record failure can follow confirmed publication; failure-record writing must not hide the original failure. Do not migrate old records or expand this private evidence format into an Explorer contract.
+Publication/signing workflows return a typed `workflowFailure` carrying sanitized separate build/load/publication/verification/signing/attestation outcomes, workspace, and any captured digest. The CLI consumes this type instead of parsing error strings, and a separate private mode-0600 `failure.json` retains partial outcomes when a workspace exists. A captured-but-unverified digest remains recorded after verification failure but cannot authorize signing or imply publication success. Signing failure preserves confirmed publication and prevents attestation; attestation failure preserves confirmed publication/signing. Final-record failure can follow confirmed publication/signing/attestation without complete workflow success. Failure-record writing must not hide the original failure. Do not migrate old records or expand this private format into an Explorer contract.
 
-SQLite owns catalog queries and immutable Explorer SBOM evidence. Workspace paths alone are insufficient for immutable downloads: retain the document bytes or a durable content-addressed copy and its checksum. Deleting a temporary workspace must not silently destroy retained evidence.
+The deferred catalog/Explorer design assigns SQLite catalog queries and immutable downloaded SBOM evidence, not current build execution state. Workspace paths alone are insufficient for immutable Explorer downloads: retain document bytes or a durable content-addressed copy and its checksum. Deleting a workspace must not silently destroy evidence that Explorer claims to retain.
 
 Avoid competing mutable descriptions of the same build. Final workspace results describe execution; Explorer may index them and report transient local job progress.
 
 ## Publication boundary
 
-The implemented publication checkpoint preserves the specification's Docker sequence, with a content-verification gate before any future signing:
+Publication preserves the specification's Docker sequence, with a content-verification gate before optional signing:
 
 ```text
 build/validate → Docker load → tag/inspect/push → pushed digest
                                                     │
                                       immutable pull/save/content check
-                                                    │ future
+                                                    │ optional
                                               image signature
-                                                    │ future
+                                                    │ optional
                                               SPDX attestation
 ```
 
@@ -132,11 +136,11 @@ Require exactly one supported Docker 27.4 digest summary for the expected unique
 
 Pull and save that immutable reference, then require its saved config digest to match the source OCI config and hash the actual uncompressed saved layers in manifest order against the source config's ordered `rootfs.diff_ids`. Validate platform and reject ambiguous/malformed archives. Comparing only saved config claims is not layer proof; remote manifest serialization may change without changing built-image content. Publication is `published` with identity verified only after these checks. Preserve a captured digest with unverified status on later failure.
 
-Report confirmed local loading, publication, identity verification, signing, and attestation separately through the typed outcomes and records above. Tag/push/pull failure or cancellation may already have changed local/remote tags, published an image, or pulled content; no rollback is attempted and no complete-success summary is printed. Authentication-bearing tool diagnostics are suppressed by the separate safe adapter. Real Lupetto publication smoke evidence remains pending.
+Report confirmed local loading, publication, identity verification, signing, and attestation separately through typed outcomes and records. Failure/cancellation may already have changed tags, published/pulled content, signatures, or attestations; there is no rollback or complete-success summary. Authentication-bearing publication/signing diagnostics are suppressed by separate safe adapters. Recorded observations and unexercised scenarios are in [verification](verification.md).
 
-Signing and attestation are not implemented here. Their future operations must bind to the same verified immutable registry reference and attest the existing validated architecture document, not regenerated or supplemental index SPDX. A successful publication followed by failed signing would be published but not successfully signed; this is a future partial-success rule, not an implemented signing claim.
+Signing and attestation require the same verified immutable registry reference. Attestation checksum-checks and uses the existing validated architecture document, not regenerated or supplemental index SPDX. A successful publication followed by failed signing remains published but not successfully signed; successful signing followed by failed attestation remains signed but not attested. No secret key/config paths, contents, passwords, or environment/tool transcripts are serialized into the result/failure evidence.
 
-apko also supports direct publication, but adopting it would change the compatibility contract and remove the reason publishing rejects `--no-load`. Do not implement two publication paths without a concrete need. Generic placeholder examples are in the [README](../README.md#publish-the-same-built-image), explicitly not evidence of exercised remote publication.
+apko also supports direct publication, but adopting it would change the compatibility contract and remove the reason publishing rejects `--no-load`. Do not implement two publication paths without a concrete need. Configuration and explicitly labeled production/local templates live in the [registry/signing guide](registry-signing.md); templates are not observed production proof.
 
 ## Explorer boundary
 

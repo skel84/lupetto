@@ -81,8 +81,14 @@ func safeStageError(ctx context.Context, stage string, err error) error {
 }
 
 func newWorkflowFailure(result buildResult, stage string, cause error, attempted bool) *workflowFailure {
+	if result.signing == "" {
+		result.signing = "skipped"
+	}
+	if result.attestation == "" {
+		result.attestation = "skipped"
+	}
 	f := &workflowFailure{result: result, build: "completed", load: result.dockerLoad,
-		signing: "skipped", attestation: "skipped", stage: stage, attempted: attempted,
+		signing: result.signing, attestation: result.attestation, stage: stage, attempted: attempted,
 		cause: safeStageError(nil, stage, cause)}
 	var safe *publicationStageError
 	if errors.As(cause, &safe) {
@@ -91,11 +97,11 @@ func newWorkflowFailure(result buildResult, stage string, cause error, attempted
 	if stage == "build" {
 		f.build, f.load = "failed", "not-attempted"
 	}
+	if stage == "cosign-version" {
+		f.build, f.load = "not-attempted", "not-attempted"
+	}
 	if stage == "readable-tag" {
 		f.load = "loaded; readable tag unconfirmed"
-	}
-	if stage != "publication" && stage != "record" {
-		f.result.publication.status = "skipped"
 	}
 	f.failureRecord = retainWorkflowFailure(f) == nil
 	return f
@@ -104,6 +110,10 @@ func newWorkflowFailure(result buildResult, stage string, cause error, attempted
 func retainWorkflowFailure(f *workflowFailure) error {
 	if f.result.workspace == "" {
 		return errors.New("no workspace")
+	}
+	version := 4
+	if f.signing != "skipped" {
+		version = 5
 	}
 	record := struct {
 		Version        int                 `json:"version"`
@@ -119,7 +129,7 @@ func retainWorkflowFailure(f *workflowFailure) error {
 		Attestation    string              `json:"attestation"`
 		Attempted      bool                `json:"sideEffectsPossible"`
 		Error          string              `json:"error"`
-	}{4, f.result.workspace, f.stage, f.build, f.load, f.result.publication.evidence(),
+	}{version, f.result.workspace, f.stage, f.build, f.load, f.result.publication.evidence(),
 		f.result.imageReference, f.result.buildReference, f.result.dockerImageID,
 		f.signing, f.attestation, f.attempted, f.cause.Error()}
 	data, err := json.MarshalIndent(record, "", "  ")
@@ -153,7 +163,7 @@ func reportWorkflowFailure(stderr io.Writer, err error) bool {
 	}
 	fmt.Fprintf(stderr, "lupetto: %v\n", f)
 	if f.attempted {
-		fmt.Fprintln(stderr, "lupetto: Docker operations were attempted and may have changed local/remote tags, published an image, or pulled content; cancellation cannot undo daemon work; no rollback attempted")
+		fmt.Fprintln(stderr, "lupetto: Docker or Cosign operations were attempted and may have changed local/remote tags, published an image, signature, or attestation, or pulled content; cancellation cannot undo completed side effects; no rollback attempted")
 	}
 	if !f.failureRecord {
 		fmt.Fprintln(stderr, "lupetto: sanitized failure record could not be retained")

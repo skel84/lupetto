@@ -2,11 +2,11 @@
 
 [Documentation home](../README.md) · [Scope](scope.md) · [Implementation checklist](implementation-plan.md)
 
-**Current status: live signed-index discovery, generic local OCI images with scoped architecture SPDX/lock identity validation, default local Docker loading with explicit no-load behavior, and implemented registry publication verified against an authenticated loopback registry.** The standalone CLI has exercised metadata listing, numeric/exact-version composition, exact-version SBOM, real Docker loading, and immutable pushed-content verification; the final focused race-enabled and full test gates passed. Lupetto signing/attestation is next; persistent snapshot ingestion and Explorer scenarios remain future acceptance criteria.
+**Current status: live signed-index discovery, generic local OCI images with scoped architecture SPDX/lock identity validation, default local Docker loading with explicit no-load behavior, and authenticated loopback registry publication are verified within their recorded scopes.** The installed standalone CLI has now also completed real local HTTP/offline Cosign signing and signed SPDX attestation, with trusted-key verification, wrong-key/unrelated-digest rejection, and separate real signing/attestation partial-failure proofs; see [checkpoint 2 evidence](#local-cosign-signing-and-spdx-attestation-evidence). The final focused race and full Go test gates passed, completing signing acceptance within that local scope. Persistent snapshot ingestion and Explorer scenarios remain future acceptance criteria.
 
 Use focused regression tests for uncertain behavior and real smoke runs for external-tool integration. Do not replace a real build or registry check with mocks that merely echo arguments.
 
-Under the [approved publication-first roadmap](decisions.md#publication-first-roadmap-user-approved), the registry publication checkpoint is implemented and verified within the scope below; image signing and signed SPDX attestation are the next CLI acceptance work. Persistent snapshot ingestion/history and Explorer checks remain deferred full-scope criteria, not prerequisites for that milestone or the standalone CLI release. Existing live-index selection, exact revision preservation, lock/SPDX validation, local loading, and per-build provenance checks still apply.
+Under the [approved publication-first roadmap](decisions.md#publication-first-roadmap-user-approved), registry publication, image signing, and signed SPDX attestation are implemented and verified within the recorded local scopes below. Persistent snapshot ingestion/history and Explorer checks remain deferred full-scope criteria, not prerequisites for that milestone or the standalone CLI release. Existing live-index selection, exact revision preservation, lock/SPDX validation, local loading, and per-build provenance checks still apply.
 
 For this documentation-only reprioritization, relative links/heading anchors across the six required docs, checklist task/status preservation and milestone-order checks, `git diff --check`, and `go test ./...` passed (`ok lupetto/cmd/lupetto (cached)`). Independent read-only review found no concrete findings. Earlier source/untracked work was unchanged. No registry publication, signing, credentials, remote infrastructure changes, or new application behavior were exercised.
 
@@ -141,6 +141,81 @@ Earlier gate attempts exposed two corrected test regressions: a publication fixt
 
 Actual signature prerequisite verification on a synthetic image also succeeded using an upstream-generated no-service signing configuration. This is upstream Cosign interoperability evidence, not Lupetto signing or SPDX attestation implementation. Production HTTPS/transparency-log verification remains unexercised. Push-summary parsing intentionally supports a strict grammar; other Docker versions have not been verified. No secret values, credential configurations, keys, or runtime files were committed.
 
+## Local Cosign signing and SPDX attestation evidence
+
+Checkpoint 2 used the same isolated synthetic-authenticated HTTP `registry:3` at `127.0.0.1:54355`, with a fresh nested repository prefix, disposable encrypted keys and upstream-generated no-service signing config outside the repository, and an isolated `DOCKER_CONFIG`. The host/target was darwin/amd64 → linux/amd64; native apko was 1.4.5, Docker client/server 27.4.0, and upstream Cosign v3.1.3. This is an observed **Lupetto** interoperability run, not merely the earlier synthetic-image prerequisite.
+
+The observed command forms below retain the actual target and prefix. `<temporary>` substitutes the disposable directory outside the checkout; it is not a literal path or a production instruction. Key/config contents and password values are deliberately omitted. Go installation and the installed absolute-binary help, doctor, and discovery commands ran in an environment **without `COSIGN_PASSWORD`** and each exited 0. Only the actual signing build below inherited `COSIGN_PASSWORD`; it also exited 0:
+
+```text
+env GOBIN=<temporary>/bin go install ./cmd/lupetto
+<temporary>/bin/lupetto --help
+<temporary>/bin/lupetto doctor
+<temporary>/bin/lupetto discover busybox-static
+<temporary>/bin/lupetto build busybox-static 1 --registry 127.0.0.1:54355 --repository tests/lupetto-test-01c1b8dd6fc2/signed/nested/images --cosign-key <temporary>/throwaway.key --cosign-signing-config <temporary>/local-signing-config.json --cosign-allow-http
+```
+
+The last command selected `busybox-static@1.38.0-r2` for `x86_64` from verified APKINDEX SHA-256 `550f367b5eaaac0532ac767106d8223e68781494461d2513c3e7ee8d57d0cb91`. Workspace `/Users/skel/Library/Caches/lupetto/builds/image-974928037` retained validated architecture SPDX SHA-256 `a3087fbd0bbfe83b4a225cacca0b629a20eac8d8a5dc1d7291314482007b838c` and a private version-5 `result.json`. It recorded build `completed`, Docker load `loaded`, publication `published` with `verified: true`, signing `signed`, and attestation `attested`. Its unique published tag was `127.0.0.1:54355/tests/lupetto-test-01c1b8dd6fc2/signed/nested/images/busybox-static:1.38.0-r2-amd64-build-974928037`.
+
+Both actual Cosign argument audits used exactly this same immutable reference:
+
+```text
+127.0.0.1:54355/tests/lupetto-test-01c1b8dd6fc2/signed/nested/images/busybox-static@sha256:5b1c28b46aca9d18fd9d744f74052d37681ac03e67692359763fa913188e574e
+```
+
+The audit recorded only the nonsecret boolean `passwordPresent: true` and confirmed no password argument; it did not record the password. The Docker wrapper temporarily replaced the freshly built readable alias `lupetto/busybox-static:1.38.0-r2-amd64` with an unrelated synthetic image during remote tagging, then restored it. The published config/source-content validation still succeeded, exercising publication from the verified local ID rather than the mutable alias. Both wrappers **delegated to actual Docker/Cosign binaries**; they were not argument-echo mocks. This establishes the observed alias-replacement case, not an atomic multi-tag or general concurrency guarantee.
+
+With `IMMUTABLE` set to the exact reference above and `PUBLIC_KEY` set to the separately trusted throwaway public key outside the checkout, both real verification commands exited 0:
+
+```bash
+cosign verify --key "$PUBLIC_KEY" --allow-http-registry --insecure-ignore-tlog "$IMMUTABLE"
+cosign verify-attestation --key "$PUBLIC_KEY" --allow-http-registry --insecure-ignore-tlog --type spdxjson "$IMMUTABLE"
+```
+
+Independent inspection checked the verified signature claims and decoded attestation statement, requiring the exact subject repository and pushed digest. The statement's `predicateType` was `https://spdx.dev/Document`; its predicate was semantically equal as JSON to the retained validated architecture SPDX. The document checksum matched the result record, and all three locked APK identities agreed with both the SPDX `distro=wolfi` purl set and the installed `origin` purl set. This is neither validation of the supplemental index SPDX nor a vulnerability/completeness/runtime-readiness certification.
+
+Repeating the same two verification forms with the wrong public key rejected both (exit 1 each). A real unrelated synthetic image was pushed into the **same exact repository** at `127.0.0.1:54355/tests/lupetto-test-01c1b8dd6fc2/signed/nested/images/busybox-static@sha256:38863a056169f921360a99605ba980374bb663e60dd730129bef6039ae1a78ac`, deliberately without a signature or attestation there. With the trusted public key and that unrelated reference, real `cosign verify` exited 10 and `cosign verify-attestation --type spdxjson` exited 1. Thus the negative digest check used an existing image in the intended repository, not a missing-image lookup.
+
+The negative command forms were as follows, with `WRONG_PUBLIC_KEY` denoting the separate wrong public key and `UNRELATED` set to the exact existing unrelated reference above. Exit codes were 1, 1, 10, and 1 respectively:
+
+```bash
+cosign verify --key "$WRONG_PUBLIC_KEY" --allow-http-registry --insecure-ignore-tlog "$IMMUTABLE"
+cosign verify-attestation --key "$WRONG_PUBLIC_KEY" --allow-http-registry --insecure-ignore-tlog --type spdxjson "$IMMUTABLE"
+cosign verify --key "$PUBLIC_KEY" --allow-http-registry --insecure-ignore-tlog "$UNRELATED"
+cosign verify-attestation --key "$PUBLIC_KEY" --allow-http-registry --insecure-ignore-tlog --type spdxjson "$UNRELATED"
+```
+
+Additional real installed-binary compatibility checks used an unreachable `DOCKER_HOST`. `build busybox-static --apk-version 1.38.0-r2 --no-load` exited 0 and retained workspace `image-350811122`; `sbom busybox-static --apk-version 1.38.0-r2` exited 0 and retained workspace `image-1088045541`. Both retained version-3 results with loading `skipped` and no Docker image IDs or Docker archives. The SBOM run additionally ignored all five deliberately invalid publication/signing environment settings: `LUPETTO_REGISTRY`, `LUPETTO_REPOSITORY`, `LUPETTO_COSIGN_KEY`, `LUPETTO_COSIGN_SIGNING_CONFIG`, and `LUPETTO_COSIGN_ALLOW_HTTP`. This preserves image-only SBOM behavior rather than silently enabling publication or signing.
+
+With `PATH=/nonexistent`, three actual upfront rejection checks each exited 2 with empty stdout: `sbom` with explicit `--cosign-allow-http=false`, `build` with a signing key but no publication target, and a loopback publication/signing build without explicit HTTP consent. These checks establish argument/configuration rejection before external-tool lookup, not tool invocation or registry side effects.
+
+### Real signing and attestation partial failures
+
+Two additional runs repeated the exact installed-binary build command above against the same isolated prefix. The signing-failure run supplied a deliberately incorrect throwaway-key password **only through inherited `COSIGN_PASSWORD`**, with its value omitted here. Actual upstream Cosign attempted signing; Lupetto exited 1 with empty stdout and no `result.json`. Workspace `image-4099220242` retained private version-5 `failure.json`: stage `signing`, build `completed`, load `loaded`, publication `published` with `verified: true`, signing `failed`, attestation `not-attempted`, `sideEffectsPossible: true`, and sanitized error `image signing failed`. Its published immutable reference was `127.0.0.1:54355/tests/lupetto-test-01c1b8dd6fc2/signed/nested/images/busybox-static@sha256:15e310db2cbb8afc7ea7cda09e6d0e92ebd94d9a56f685f67dc5f7099294d9a2`.
+
+The attestation-failure run used an external wrapper delegating to **real Cosign**, changing only the inherited password for the `attest` invocation. Real image signing used the correct inherited password and succeeded; actual upstream attestation then failed with the deliberately wrong throwaway password. This was controlled environment injection, not a fake success/error or argument-echo mock. Lupetto exited 1 with empty stdout and no `result.json`. Workspace `image-3072750206` retained private version-5 `failure.json`: stage `attestation`, build `completed`, load `loaded`, publication `published` with `verified: true`, signing `signed`, attestation `failed`, `sideEffectsPossible: true`, and sanitized error `SPDX attestation failed`.
+
+With `PARTIAL_IMMUTABLE` set to `127.0.0.1:54355/tests/lupetto-test-01c1b8dd6fc2/signed/nested/images/busybox-static@sha256:12e1d904ebda6ab73f80b3d1780dd53c8aa1de253cd859d88a4ce69714862fa0`, these actual verification commands exited 0 and 1 respectively:
+
+```bash
+cosign verify --key "$PUBLIC_KEY" --allow-http-registry --insecure-ignore-tlog "$PARTIAL_IMMUTABLE"
+cosign verify-attestation --key "$PUBLIC_KEY" --allow-http-registry --insecure-ignore-tlog --type spdxjson "$PARTIAL_IMMUTABLE"
+```
+
+This independently establishes the persisted valid image signature and rejection of completed attestation for that partial run. Captured output and both failure records were checked against the actual registry/key password values and incorrect-password canaries; none appeared, and upstream password/error diagnostics were not exposed. Failed clients can leave remote/local side effects: these observations do not establish rollback or rule out every possible post-upload failure.
+
+The parent additionally checked signing/publication success and failure runtime JSON, captured CLI output, and the nonsecret argument audit against all actual throwaway key/registry passwords and encrypted private-key contents; none appeared. Retained JSON omitted key/config paths. Results, failure records, and Docker archives were mode 0600; build workspaces were mode 0700. The owned disposable registry was stopped successfully and its `--rm` container removed; synthetic credentials/helper/config and both throwaway keypairs were removed outside the checkout. Nonsecret logs, the initial user-work backup, and cache build workspaces were retained. No image/tag rollback or deletion and no Git push were performed.
+
+Earlier gate attempts exposed a strict-boolean test false positive: its substring assertion matched part of the fixed error text rather than a leaked input value. The assertion was corrected to require the exact sanitized constant `LUPETTO_COSIGN_ALLOW_HTTP must be true or false`; production boolean parsing behavior was unchanged. Final `go test -race ./cmd/lupetto -run 'Test(Signing|ResolveSigning|ValidateSigning|BuildSigning|ExecuteSigning|Cosign|SignAndAttest|Publication|BuildPublication|CLIClosesProgress)' -count=1` passed, followed by passing `go test ./...` and `git diff --check`.
+
+Source and regression coverage in `cmd/lupetto/signing.go`, `signing_options_test.go`, `signing_test.go`, and `build_signing_test.go` checks independent flag/environment precedence, strict environment booleans, literal-loopback HTTP consent, invalid configuration rejection before external boundaries, exact Cosign v3.1.3 preflight, inherited password handling with discarded diagnostics, and signing/attesting the same verified canonical pushed digest using the existing validated SPDX. Tests also cover one composition, private version-5 success/failure evidence, cancellation and typed partial outcomes, and disabled signing for local/publication-only/no-load/SBOM paths. Parser/help coverage and standalone installation evidence complement these source checks; the real external-tool proofs above remain distinct from synthetic regression fixtures.
+
+Independent signing security/lifecycle source review through two lenses completed with no findings. `gopls` was unavailable to the parent; the passing compiler/test gates are recorded above, not substituted with a claimed language-server check. This verification update does not change the [single checklist](implementation-plan.md#cli-workstream). Production command templates and documentation links are not additional executed production verification.
+
+After the latest source changes, the final release gates `go test ./... -count=1`, `go test -race ./... -count=1`, and `git diff --check` all passed. Relative links and heading anchors across all seven required/operator documentation files passed, as did `bash -n` for all 18 Bash-fenced example blocks; the latter checks syntax only, not production execution. The parent reviewed the exact staged 18 source/test/documentation files for scope and content: no actual throwaway credentials, passwords, encrypted private-key material, or key/config/runtime artifact files were present, and the index matched working-tree bytes at that check. Final independent review through two lenses found no code, scope, or security defects; its sole finding was a stale operator-guide local-acceptance phrase being corrected separately. These are observed release checks, not a claim of a final commit hash or executed production templates.
+
+Production HTTPS, TUF/default-service interaction, and Rekor/transparency-log verification remain **unexercised**, not authorized by this local proof. The explicitly selected upstream-generated config had no services, and verification intentionally used the local-only transparency-log exception. No production credentials/keys or targets were used, and no secret values, credentials, key/config files, or runtime evidence files were committed.
+
 ## Selection and snapshots
 
 Persistent catalog import/history checks in this section are deferred. Exercise the existing live-index selectors and retained per-build provenance for publication/signing without requiring a catalog database; retaining an index alone does not establish historical APK availability.
@@ -171,14 +246,14 @@ Use isolated test targets and synthetic credentials/keys; publication/signing ag
 - Exercise push failure and signing/attestation failure separately; report partial success accurately.
 - Confirm secrets are not passed in password arguments or included in logs, result files, or downloaded evidence.
 
-The target verification forms below are adapted to the Lupetto name. They are templates, not current runnable Lupetto instructions:
+The production verification forms below are templates, not observed production interoperability. The [operator guide](registry-signing.md#verify-signature-and-spdx-attestation) documents both these forms and the separately labeled local variants exercised in [checkpoint 2](#local-cosign-signing-and-spdx-attestation-evidence):
 
 ```text
 cosign verify --key /path/to/lupetto.pub registry.example.com/team/lupetto/<image>@sha256:<digest>
 cosign verify-attestation --key /path/to/lupetto.pub --type spdxjson registry.example.com/team/lupetto/<image>@sha256:<digest>
 ```
 
-Exercise the pinned Cosign version before publishing operator examples. Local HTTP access and verification without transparency-log evidence require separately labeled variants; never make them production defaults. Successful cryptographic verification does not prove absence of vulnerabilities, SBOM completeness, or policy compliance.
+The pinned Cosign v3.1.3 local HTTP/no-service forms were exercised above; production forms remain unexercised. Local HTTP access and verification without transparency-log evidence require separately labeled variants; never make them production defaults. Successful cryptographic verification does not prove absence of vulnerabilities, SBOM completeness, or policy compliance.
 
 ## Explorer
 

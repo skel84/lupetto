@@ -16,6 +16,101 @@ type optionalString struct {
 	set   bool
 }
 
+type optionalBool struct {
+	value bool
+	set   bool
+}
+
+type signingFlags struct {
+	key, config optionalString
+	allowHTTP   optionalBool
+}
+
+type signingOptions struct {
+	key, config string
+	allowHTTP   bool
+}
+
+func (opts signingOptions) enabled() bool {
+	return opts.key != ""
+}
+
+func resolveSigning(raw signingFlags, pub publicationOptions, noLoad bool, lookupEnv func(string) (string, bool)) (signingOptions, error) {
+	resolveString := func(flag optionalString, envName, flagName string) (string, error) {
+		if flag.set {
+			if flag.value == "" {
+				return "", fmt.Errorf("%s must not be empty", flagName)
+			}
+			return flag.value, nil
+		}
+		if lookupEnv != nil {
+			if value, present := lookupEnv(envName); present {
+				return value, nil
+			}
+		}
+		return "", nil
+	}
+	key, err := resolveString(raw.key, "LUPETTO_COSIGN_KEY", "--cosign-key")
+	if err != nil {
+		return signingOptions{}, err
+	}
+	config, err := resolveString(raw.config, "LUPETTO_COSIGN_SIGNING_CONFIG", "--cosign-signing-config")
+	if err != nil {
+		return signingOptions{}, err
+	}
+	allowHTTP := raw.allowHTTP.set && raw.allowHTTP.value
+	if !raw.allowHTTP.set && lookupEnv != nil {
+		if value, present := lookupEnv("LUPETTO_COSIGN_ALLOW_HTTP"); present && value != "" {
+			switch value {
+			case "true":
+				allowHTTP = true
+			case "false":
+				allowHTTP = false
+			default:
+				return signingOptions{}, fmt.Errorf("LUPETTO_COSIGN_ALLOW_HTTP must be true or false")
+			}
+		}
+	}
+	opts := signingOptions{key: key, config: config, allowHTTP: allowHTTP}
+	if err := validateSigningOptions(opts, pub, noLoad); err != nil {
+		return signingOptions{}, err
+	}
+	return opts, nil
+}
+
+func validateSigningOptions(opts signingOptions, pub publicationOptions, noLoad bool) error {
+	if err := validatePublicationOptions(pub); err != nil {
+		return err
+	}
+	if !opts.enabled() {
+		if opts.config != "" || opts.allowHTTP {
+			return fmt.Errorf("Cosign signing config and enabled HTTP allowance require --cosign-key / LUPETTO_COSIGN_KEY")
+		}
+		return nil
+	}
+	if noLoad {
+		return fmt.Errorf("signing cannot be used with --no-load")
+	}
+	if !pub.enabled() {
+		return fmt.Errorf("signing requires publication with both registry and repository settings")
+	}
+	host := pub.registry
+	if strings.HasPrefix(host, "[") {
+		host = host[1:strings.IndexByte(host, ']')]
+	} else if before, _, hasPort := strings.Cut(host, ":"); hasPort {
+		host = before
+	}
+	ip := net.ParseIP(host)
+	loopback := strings.EqualFold(host, "localhost") || (ip != nil && ip.IsLoopback())
+	if opts.allowHTTP && !loopback {
+		return fmt.Errorf("--cosign-allow-http is restricted to literal-loopback registries")
+	}
+	if loopback && !opts.allowHTTP {
+		return fmt.Errorf("signing against a literal-loopback registry requires --cosign-allow-http=true")
+	}
+	return nil
+}
+
 type publicationFlags struct {
 	registry, repository optionalString
 }

@@ -116,7 +116,7 @@ func TestHelpDescribesCurrentCapabilities(t *testing.T) {
 	if code := run(context.Background(), []string{"--help"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), "lupetto discover <package-or-provider>") || !strings.Contains(stdout.String(), "lupetto build <package-or-provider>") || !strings.Contains(stdout.String(), "lupetto sbom <package-or-provider>") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	for _, phrase := range []string{"log stages and live tool diagnostics to stderr", "ASCII spinner on interactive terminals", "--registry / LUPETTO_REGISTRY", "--repository / LUPETTO_REPOSITORY", "nested lower-case prefix", "Docker's credential store", "no signing or attestation is performed", "ignores publication environment inputs"} {
+	for _, phrase := range []string{"log stages and live tool diagnostics to stderr", "ASCII spinner on interactive terminals", "--registry / LUPETTO_REGISTRY", "--repository / LUPETTO_REPOSITORY", "nested lower-case prefix", "Docker's credential store", "Cosign v3.1.3", "--cosign-key / LUPETTO_COSIGN_KEY", "--cosign-signing-config / LUPETTO_COSIGN_SIGNING_CONFIG", "--cosign-allow-http / LUPETTO_COSIGN_ALLOW_HTTP", "no implicit keyless path", "COSIGN_PASSWORD only from the process environment", "Cosign tool diagnostics are discarded", "literal loopback requires explicit effective HTTP consent", "cosign signing-config create --out <file>", "ignores publication and signing environment inputs"} {
 		if !strings.Contains(stdout.String(), phrase) {
 			t.Fatalf("help missing %q: %s", phrase, stdout.String())
 		}
@@ -247,6 +247,11 @@ func TestSBOMRejectsExplicitPublicationBeforeCallback(t *testing.T) {
 		{"--cosign-key="},
 		{"--cosign-signing-config="},
 		{"--cosign-allow-http"},
+		{"--cosign-allow-http=false"},
+		{"--cosign-allow-http="},
+		{"--cosign-key", ""},
+		{"--cosign-signing-config", ""},
+		{"--cosign-key=/synthetic/key", "--cosign-signing-config=/synthetic/config"},
 	} {
 		called := false
 		callback := func(context.Context, buildRequest) (buildResult, error) {
@@ -276,7 +281,7 @@ func TestSBOMIgnoresPublicationAndSigningEnvironment(t *testing.T) {
 		calls := 0
 		callback := func(_ context.Context, request buildRequest) (buildResult, error) {
 			calls++
-			if request.publication.enabled() || request.publicationFlags.registry.set || request.publicationFlags.repository.set || !request.noLoad || request.packageName != "nginx" || request.version != "1.30.2-r0" {
+			if request.publication.enabled() || request.publicationFlags.registry.set || request.publicationFlags.repository.set || request.signing.enabled() || request.signing.config != "" || request.signing.allowHTTP || request.signingFlags != (signingFlags{}) || !request.noLoad || request.packageName != "nginx" || request.version != "1.30.2-r0" {
 				t.Fatalf("SBOM lost image-only isolation: %+v", request)
 			}
 			return buildResult{dockerLoad: "skipped", publication: publicationOutcome{status: "skipped"}}, nil
@@ -353,5 +358,83 @@ func TestRunBuildConsumesTypedWorkflowFailure(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "outer wrapper must not be printed") {
 		t.Fatalf("CLI printed the enclosing error instead of consuming typed outcomes: %s", stderr.String())
+	}
+}
+
+func TestRunBuildReportsSignedAndAttestedImmutableIdentity(t *testing.T) {
+	for _, name := range []string{"LUPETTO_REGISTRY", "LUPETTO_REPOSITORY", "LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP"} {
+		t.Setenv(name, "")
+	}
+	immutable := "registry.example/team/images/pkg@sha256:" + strings.Repeat("b", 64)
+	calls := 0
+	callback := func(_ context.Context, request buildRequest) (buildResult, error) {
+		calls++
+		if request.signing != (signingOptions{key: "/synthetic/key", config: "/synthetic/config"}) || !request.publication.enabled() || request.noLoad {
+			t.Fatalf("lost signing/publication request: %+v", request)
+		}
+		return buildResult{
+			dockerLoad: "loaded", dockerImageID: "sha256:" + strings.Repeat("a", 64),
+			imageReference: "lupetto/pkg:1.0-r0-amd64", buildReference: "lupetto/local:build-123",
+			publication: publicationOutcome{status: "published", reference: "registry.example/team/images/pkg:1.0-r0-amd64-build-123", pushedDigest: "sha256:" + strings.Repeat("b", 64), immutableReference: immutable, verified: true},
+			signing:     "signed", attestation: "attested",
+		}, nil
+	}
+	var stdout, stderr bytes.Buffer
+	args := []string{"build", "pkg", "1", "--registry=registry.example", "--repository=team/images", "--cosign-key=/synthetic/key", "--cosign-signing-config=/synthetic/config"}
+	if code := runWithBuild(context.Background(), args, &stdout, &stderr, callback); code != 0 || calls != 1 || stderr.Len() != 0 {
+		t.Fatalf("code=%d calls=%d stdout=%q stderr=%q", code, calls, stdout.String(), stderr.String())
+	}
+	for _, phrase := range []string{"Build completed", "Docker loaded:", "Registry published:", "Immutable reference: " + immutable, "Image signing: signed (" + immutable + ")", "SPDX attestation: attested (" + immutable + ")", "Image reference: lupetto/pkg:1.0-r0-amd64", "Build reference: lupetto/local:build-123"} {
+		if !strings.Contains(stdout.String(), phrase) {
+			t.Fatalf("success output missing %q: %s", phrase, stdout.String())
+		}
+	}
+	for _, forbidden := range []string{"skipped", "/synthetic/key", "/synthetic/config"} {
+		if strings.Contains(stdout.String(), forbidden) {
+			t.Fatalf("success output contains %q: %s", forbidden, stdout.String())
+		}
+	}
+}
+
+func TestRunBuildConsumesTypedSigningPartialFailures(t *testing.T) {
+	for _, name := range []string{"LUPETTO_REGISTRY", "LUPETTO_REPOSITORY", "LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP"} {
+		t.Setenv(name, "")
+	}
+	digest := "sha256:" + strings.Repeat("b", 64)
+	immutable := "registry.example/team/images/pkg@" + digest
+	for _, tc := range []struct{ stage, signing, attestation string }{
+		{"signing", "failed", "not-attempted"},
+		{"attestation", "signed", "failed"},
+		{"result record", "signed", "attested"},
+	} {
+		t.Run(tc.stage, func(t *testing.T) {
+			callback := func(context.Context, buildRequest) (buildResult, error) {
+				failure := &workflowFailure{
+					result: buildResult{
+						workspace: "/synthetic/image-123", dockerLoad: "loaded",
+						publication: publicationOutcome{status: "published", pushedDigest: digest, immutableReference: immutable, verified: true},
+						signing:     tc.signing, attestation: tc.attestation,
+					},
+					build: "completed", load: "loaded", signing: tc.signing, attestation: tc.attestation,
+					stage: tc.stage, attempted: true, cause: errors.New("sanitized stage failure"), failureRecord: true,
+				}
+				return buildResult{}, errors.Join(errors.New("secret-outer-wrapper-canary"), failure)
+			}
+			var stdout, stderr bytes.Buffer
+			args := []string{"build", "pkg", "1", "--registry=registry.example", "--repository=team/images", "--cosign-key=secret-key-canary"}
+			if code := runWithBuild(context.Background(), args, &stdout, &stderr, callback); code != 1 || stdout.Len() != 0 {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+			for _, phrase := range []string{"build: completed", "Docker load: loaded", "publication: published", "signing: " + tc.signing, "attestation: " + tc.attestation, "immutable reference: " + immutable, "identity verified: true", "workspace: /synthetic/image-123", "no rollback attempted"} {
+				if !strings.Contains(stderr.String(), phrase) {
+					t.Fatalf("typed partial output missing %q: %s", phrase, stderr.String())
+				}
+			}
+			for _, forbidden := range []string{"secret-outer-wrapper-canary", "secret-key-canary", "Build completed"} {
+				if strings.Contains(stderr.String(), forbidden) {
+					t.Fatalf("typed partial output contains %q: %s", forbidden, stderr.String())
+				}
+			}
+		})
 	}
 }
