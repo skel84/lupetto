@@ -104,7 +104,7 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 **Redesign round** ([decision](decisions.md#dashboard-redesign-and-local-inventory-user-approved-2026-10-01)):
 
 - [ ] Clickable mockup with two visual directions; user picks one.
-- [ ] `lupetto products list|add|remove`.
+- [x] `lupetto products list|add|remove`. Actual create/list/idempotent-add/remove JSON commands succeeded; absent files and read-only files/directories exited 1 with empty stdout. Comment/order/mode/validation/atomic-failure regressions and isolated full/race gates passed; see [products evidence](verification.md#products-management-redesign-round).
 - [ ] `lupetto images --json` (build history + local Docker).
 - [ ] `lupetto inspect --json` for registry image package sets.
 - [ ] Advisory severity in status document version 2.

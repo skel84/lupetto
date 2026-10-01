@@ -39,6 +39,17 @@ func LoadProducts(path string) (Products, error) {
 // ParseProducts rejects unknown/duplicate fields, multiple documents, unquoted
 // numeric selectors, empty lists, and duplicate package/selector tracks.
 func ParseProducts(reader io.Reader) (Products, error) {
+	return parseProducts(reader, false)
+}
+
+// ParseTrackingProducts uses the same strict format as status, but permits an
+// empty products sequence so tracking management can remove the final product.
+// Status deliberately continues to require at least one track.
+func ParseTrackingProducts(reader io.Reader) (Products, error) {
+	return parseProducts(reader, true)
+}
+
+func parseProducts(reader io.Reader, allowEmpty bool) (Products, error) {
 	data, err := io.ReadAll(io.LimitReader(reader, MaxProductsBytes+1))
 	if err != nil {
 		return Products{}, errors.New("cannot read products file")
@@ -66,7 +77,7 @@ func ParseProducts(reader io.Reader) (Products, error) {
 	if err := strict.Decode(&products); err != nil {
 		return Products{}, errors.New("invalid products fields or types")
 	}
-	if err := ValidateProducts(products); err != nil {
+	if err := validateProducts(products, allowEmpty); err != nil {
 		return Products{}, err
 	}
 	return products, nil
@@ -97,10 +108,14 @@ func checkYAMLTypes(node *yaml.Node) error {
 }
 
 func ValidateProducts(products Products) error {
+	return validateProducts(products, false)
+}
+
+func validateProducts(products Products, allowEmpty bool) error {
 	if products.Version != 1 {
 		return errors.New("products version must be 1")
 	}
-	if len(products.Products) == 0 {
+	if len(products.Products) == 0 && !allowEmpty {
 		return errors.New("products must contain at least one product")
 	}
 	seen := map[string]bool{}

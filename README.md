@@ -129,6 +129,22 @@ An unparseable secdb fixed-version key is never sorted heuristically or silently
 
 Fixed-version entries with **no recognised advisory IDs** are also reported as unevaluated, globally and on affected installed tracks, with their original unsupported IDs retained. They are never silently dropped just because their IDs have an unknown format. Mixed entries use their recognised CVE/GHSA/Go IDs for evaluated comparisons; consumers must inspect unevaluated warnings even when the fixed APK version parses.
 
+## Manage tracked products
+
+```bash
+lupetto products list --products products.yaml --json
+lupetto products add postgresql 16 17 --products products.yaml --create
+lupetto products add nginx 1.30 --products products.yaml --json
+lupetto products remove postgresql 16 --products products.yaml
+lupetto products remove nginx --products products.yaml --json
+```
+
+These commands never contact the network. Names/providers and dotted numeric selectors use the same validation as build/status. `add` appends absent selectors or a new package, preserving existing ordering; adding an existing pair (including duplicate arguments) succeeds without rewriting the file and says `Already tracked; no changes`. `remove` removes only the supplied selectors, or the whole package when none are supplied; removing an absent pair is also a no-op. Removing the final selector removes that product. Management permits `products: []` after removing the last product, while `status` still requires at least one track.
+
+A missing file is an error unless **`add --create`** explicitly permits creation (mode 0600). Edits use a same-directory temporary file, fsync, and atomic rename, preserving the existing file's permission mode. YAML node editing retains comments and ordering on surviving nodes, but formatting may be normalized and comments attached to removed nodes disappear. Symlinks are rejected. Read-only files/directories fail clearly; mount the **products directory writable**, not a single bind-mounted file, so atomic replacement can work. Concurrent editors are not serialized; the last atomic replacement wins.
+
+`--json` returns one document with `kind: "products"`, `version: 1`, `products: [{package, selectors: [...]}, ...]`, `changed`, and `message`. Lists are arrays, including an empty products list. Human output is a compact package/selector table plus the message. Invalid invocation or products YAML exits **2**; filesystem failures exit **1**; both report stderr diagnostics without JSON. Successful no-ops exit **0**. See [products evidence](docs/verification.md#products-management-redesign-round).
+
 ## Build a local OCI image
 
 For a local-only session, clear publication/signing environment settings described in the [configuration table](docs/registry-signing.md#configuration-and-upfront-errors). Otherwise environment configuration can request additional stages.
