@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"lupetto/internal/build"
 )
 
 const helperLiveOutput = "\x1b[31mstdout diagnostic\x1b[0m\r\nstderr diagnostic\n"
@@ -49,7 +51,7 @@ func TestMain(m *testing.M) {
 
 func progressHelperOutput(executable string, args []string) (string, string) {
 	if executable == "apko" && len(args) > 0 && args[0] == "version" {
-		return "GitVersion:    " + apkoBuildVersion + "\n", ""
+		return "GitVersion:    " + build.ApkoVersion + "\n", ""
 	}
 	if executable == "docker" && len(args) > 1 && args[1] == "inspect" {
 		return `{"Id":"sha256:` + strings.Repeat("a", 64) + `","Os":"linux","Architecture":"amd64"}` + "\n", ""
@@ -139,11 +141,11 @@ func startProgressCommand(t *testing.T, executable string, args []string, output
 	t.Setenv("LUPETTO_PROGRESS_TEST_FAILURE", failure)
 	ctx, cancel := context.WithCancel(context.Background())
 	progress := newBuildProgress(ctx, output, false)
-	ctx = context.WithValue(ctx, buildProgressKey{}, progress)
+	ctx = build.WithReporter(ctx, progress)
 	result := make(chan progressCommandResult, 1)
 	completed := make(chan struct{})
 	go func() {
-		captured, err := executeLocalCommand(ctx, tool, args...)
+		captured, err := build.ExecuteLocalCommand(ctx, tool, args...)
 		result <- progressCommandResult{captured, err}
 		close(completed)
 	}()
@@ -240,7 +242,7 @@ func TestCommandParsingOutputStaysInternal(t *testing.T) {
 			}
 			if tc.executable == "apko" {
 				command := func(context.Context, string, ...string) ([]byte, error) { return result.output, nil }
-				if err := requireApkoVersion(context.Background(), command); err != nil {
+				if err := build.RequireApkoVersion(context.Background(), command); err != nil {
 					t.Fatalf("version parser lost captured output: %v", err)
 				}
 			} else if tc.args[1] == "inspect" {
@@ -445,23 +447,23 @@ func TestCLIClosesProgressBeforeFinalSuccessFailureOrCancellation(t *testing.T) 
 				}
 				return stderr.Write(data)
 			})
-			build := func(buildCtx context.Context, _ buildRequest) (buildResult, error) {
-				p = progressFromContext(buildCtx)
+			runBuild := func(buildCtx context.Context, _ cliRequest) (build.Result, error) {
+				p, _ = build.ReporterFrom(buildCtx).(*buildProgress)
 				if p == nil {
 					t.Fatal("CLI did not install progress reporter")
 				}
-				buildStage(buildCtx, "Composing OCI image with apko")
+				p.Stage("Composing OCI image with apko")
 				p.Write([]byte("partial diagnostic"))
 				if outcome == "failure" {
-					return buildResult{}, errors.New("\x1b[31mfinal failure\x1b[0m\r")
+					return build.Result{}, errors.New("\x1b[31mfinal failure\x1b[0m\r")
 				}
 				if outcome == "cancellation" {
 					cancel()
-					return buildResult{}, buildCtx.Err()
+					return build.Result{}, buildCtx.Err()
 				}
-				return buildResult{packageName: "busybox", version: "1.0-r0", imageDir: "image", workspace: "workspace", spdxPath: "sbom", imageReference: "lupetto/busybox:1.0-r0-amd64", buildReference: "lupetto/local:build-fixture", dockerLoad: "skipped"}, nil
+				return build.Result{PackageName: "busybox", Version: "1.0-r0", ImageDir: "image", Workspace: "workspace", SPDXPath: "sbom", ImageReference: "lupetto/busybox:1.0-r0-amd64", BuildReference: "lupetto/local:build-fixture", DockerLoad: "skipped"}, nil
 			}
-			code := runWithBuild(ctx, []string{"build", "busybox", "--apk-version", "1.0-r0", "--no-load"}, out, errOut, build)
+			code := runWithBuild(ctx, []string{"build", "busybox", "--apk-version", "1.0-r0", "--no-load"}, out, errOut, runBuild)
 			if outcome == "success" {
 				want := "Build completed\nSelected busybox@1.0-r0 (APKINDEX sha256:)\nOCI image: image\nValidated SPDX: sbom (sha256:)\nBuild evidence: workspace\nImage reference: lupetto/busybox:1.0-r0-amd64\nBuild reference: lupetto/local:build-fixture\nDocker loading: skipped\nRegistry publication: skipped\nImage signing: skipped\nSPDX attestation: skipped\n"
 				if code != 0 || stdout.String() != want {

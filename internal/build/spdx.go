@@ -1,4 +1,4 @@
-package main
+package build
 
 import (
 	"encoding/json"
@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"lupetto/internal/wolfi"
 )
 
 type apkIdentity struct {
@@ -35,7 +37,7 @@ func validateSPDX(lockPath, spdxPath, arch string) (string, error) {
 	want := make(map[apkIdentity]bool, len(lock.Contents.Packages))
 	for _, pkg := range lock.Contents.Packages {
 		id := apkIdentity{pkg.Name, pkg.Version, pkg.Architecture}
-		if !packageName.MatchString(id.name) || id.version == "" || id.arch != arch || want[id] {
+		if !wolfi.PackageNamePattern.MatchString(id.name) || id.version == "" || id.arch != arch || want[id] {
 			return "", fmt.Errorf("invalid, duplicate, or wrong-architecture apko lock APK %q@%q (%q)", id.name, id.version, id.arch)
 		}
 		want[id] = true
@@ -102,7 +104,7 @@ func validateSPDX(lockPath, spdxPath, arch string) (string, error) {
 			return "", fmt.Errorf("SPDX missing installed APK entry %s@%s (%s)", id.name, id.version, id.arch)
 		}
 	}
-	return sha256Hex(data), nil
+	return wolfi.SHA256Hex(data), nil
 }
 
 func parseAPKRef(ref, arch string) (apkIdentity, string, error) {
@@ -112,7 +114,7 @@ func parseAPKRef(ref, arch string) (apkIdentity, string, error) {
 	}
 	path, query, ok := strings.Cut(body, "?")
 	name, version, found := strings.Cut(path, "@")
-	if !ok || !found || !packageName.MatchString(name) || version == "" || strings.ContainsAny(version, "/@#?") {
+	if !ok || !found || !wolfi.PackageNamePattern.MatchString(name) || version == "" || strings.ContainsAny(version, "/@#?") {
 		return apkIdentity{}, "", fmt.Errorf("malformed Wolfi APK purl")
 	}
 	values, err := url.ParseQuery(query)

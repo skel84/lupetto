@@ -1,4 +1,6 @@
-package main
+// Package wolfitest builds synthetic (optionally signed) APKINDEX archives
+// for wolfi, build, and CLI tests. It must not import internal/wolfi.
+package wolfitest
 
 import (
 	"archive/tar"
@@ -10,15 +12,10 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
-	"strings"
 	"testing"
 )
 
-func makeSignedIndex(t *testing.T) ([]byte, []byte) {
-	return makeSignedIndexFor(t, "P:postgresql-17\nV:17.10-r1\nA:x86_64\nC:Q1checksum\n\n")
-}
-
-func makeSignedIndexFor(t *testing.T, records string) ([]byte, []byte) {
+func MakeSignedIndexFor(t *testing.T, records string) ([]byte, []byte) {
 	t.Helper()
 	private, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -29,7 +26,7 @@ func makeSignedIndexFor(t *testing.T, records string) ([]byte, []byte) {
 		t.Fatal(err)
 	}
 	publicPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER})
-	indexData := makeIndex(t, records)
+	indexData := MakeIndex(t, records)
 	digest := sha256.Sum256(indexData)
 	sig, err := rsa.SignPKCS1v15(rand.Reader, private, crypto.SHA256, digest[:])
 	if err != nil {
@@ -53,21 +50,22 @@ func makeSignedIndexFor(t *testing.T, records string) ([]byte, []byte) {
 	return append(prefix.Bytes(), indexData...), publicPEM
 }
 
-func TestVerifyAPKINDEXAuthenticatesSelectedSnapshot(t *testing.T) {
-	signed, key := makeSignedIndex(t)
-	verified, err := verifyAPKINDEX(signed, key)
-	if err != nil {
-		t.Fatalf("valid index rejected: %v", err)
+func MakeIndex(t *testing.T, records string) []byte {
+	t.Helper()
+	var out bytes.Buffer
+	gz := gzip.NewWriter(&out)
+	archive := tar.NewWriter(gz)
+	if err := archive.WriteHeader(&tar.Header{Name: "APKINDEX", Mode: 0600, Size: int64(len(records))}); err != nil {
+		t.Fatal(err)
 	}
-	packages, err := parseAPKINDEX(verified, "postgresql-17")
-	if err != nil || len(packages) != 1 || packages[0].version != "17.10-r1" {
-		t.Fatalf("parse verified index: %+v, %v", packages, err)
+	if _, err := archive.Write([]byte(records)); err != nil {
+		t.Fatal(err)
 	}
-	signed[len(signed)-16] ^= 1
-	if _, err := verifyAPKINDEX(signed, key); err == nil || !strings.Contains(err.Error(), "signature verification failed") {
-		t.Fatalf("altered signed index accepted: %v", err)
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := verifyAPKINDEX(makeIndex(t, "P:postgresql-17\n"), key); err == nil {
-		t.Fatal("unsigned index accepted")
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
 	}
+	return out.Bytes()
 }

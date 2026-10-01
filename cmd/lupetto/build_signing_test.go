@@ -9,15 +9,16 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"lupetto/internal/build"
+	"lupetto/internal/build/buildtest"
+	"lupetto/internal/wolfi"
 )
 
-const fixtureCosignKey = "/synthetic/" + signingCanary + "/key"
-const fixtureCosignConfig = "/synthetic/" + signingCanary + "/config"
-
 func signingCLIArgs(registry string, config bool) []string {
-	args := append(publicationCLIArgs(registry), "--cosign-key", fixtureCosignKey, "--cosign-allow-http")
+	args := append(publicationCLIArgs(registry), "--cosign-key", buildtest.CosignKey, "--cosign-allow-http")
 	if config {
-		args = append(args, "--cosign-signing-config", fixtureCosignConfig)
+		args = append(args, "--cosign-signing-config", buildtest.CosignConfig)
 	}
 	return args
 }
@@ -31,7 +32,7 @@ func clearSigningFixtureEnvironment(t *testing.T) {
 
 func addSigningFixture(t *testing.T, f *pipelineFixture, failure string, cancel context.CancelFunc) {
 	t.Helper()
-	f.services.signingCommand = func(ctx context.Context, executable string, args ...string) ([]byte, error) {
+	f.services.SigningCommand = func(ctx context.Context, executable string, args ...string) ([]byte, error) {
 		if executable != "cosign" || len(args) == 0 {
 			t.Fatalf("unexpected signing command: %s %q", executable, args)
 		}
@@ -42,7 +43,7 @@ func addSigningFixture(t *testing.T, f *pipelineFixture, failure string, cancel 
 				t.Fatal("Cosign checked after build workspace was used")
 			}
 			if failure == "version" {
-				return []byte(signingCanary), errors.New(signingCanary)
+				return []byte(buildtest.SigningCanary), errors.New(buildtest.SigningCanary)
 			}
 			if failure == "wrong version" {
 				return []byte("v3.1.2"), nil
@@ -50,33 +51,33 @@ func addSigningFixture(t *testing.T, f *pipelineFixture, failure string, cancel 
 			if failure == "cancel version" {
 				cancel()
 			}
-			return []byte(cosignSigningVersion), nil
+			return []byte(build.CosignVersion), nil
 		}
-		immutable := f.registry.host + "/team/images/postgresql-17@" + f.manifestDigest
+		immutable := f.registry.Host + "/team/images/postgresql-17@" + f.manifestDigest
 		if args[len(args)-1] != immutable {
 			t.Fatalf("wrong signing identity: %q", args)
 		}
 		if failure == stage {
-			return []byte(signingCanary), errors.New(signingCanary)
+			return []byte(buildtest.SigningCanary), errors.New(buildtest.SigningCanary)
 		}
 		if failure == "cancel "+stage {
 			cancel()
 		}
 		if stage == "sign" && (failure == "checksum" || failure == "read") {
-			arch, err := targetArch()
+			arch, err := wolfi.TargetArch()
 			if err != nil {
 				t.Fatal(err)
 			}
 			filename := filepath.Join(f.workspace, "sbom", "sbom-"+arch+".spdx.json")
 			if failure == "checksum" {
-				if err := os.WriteFile(filename, []byte(signingCanary), 0600); err != nil {
+				if err := os.WriteFile(filename, []byte(buildtest.SigningCanary), 0600); err != nil {
 					t.Fatal(err)
 				}
 			} else if err := os.Remove(filename); err != nil {
 				t.Fatal(err)
 			}
 		}
-		return []byte(signingCanary), nil
+		return []byte(buildtest.SigningCanary), nil
 	}
 }
 
@@ -90,13 +91,13 @@ func TestBuildSigningSingleCompositionAndV6Record(t *testing.T) {
 			registry := addRegistryFixture(t, f, "", cancel)
 			addSigningFixture(t, f, "", cancel)
 			var stdout, stderr bytes.Buffer
-			var result buildResult
-			code := runWithBuild(ctx, signingCLIArgs(registry.host, configured), &stdout, &stderr, func(ctx context.Context, request buildRequest) (buildResult, error) {
+			var result build.Result
+			code := runWithBuild(ctx, signingCLIArgs(registry.Host, configured), &stdout, &stderr, func(ctx context.Context, request cliRequest) (build.Result, error) {
 				var err error
-				result, err = buildLocalWith(ctx, request, f.services)
+				result, err = build.RunWith(ctx, request.Request, f.services)
 				return result, err
 			})
-			if code != 0 || result.signing != "signed" || result.attestation != "attested" || result.publication.status != "published" || !result.publication.verified {
+			if code != 0 || result.Signing != "signed" || result.Attestation != "attested" || result.Publication.Status != "published" || !result.Publication.Verified {
 				t.Fatalf("code=%d result=%+v stderr=%q", code, result, stderr.String())
 			}
 			if len(f.events) == 0 || f.events[0] != "cosign version" {
@@ -116,18 +117,18 @@ func TestBuildSigningSingleCompositionAndV6Record(t *testing.T) {
 					t.Fatalf("missing %q: %q", stage, stdout.String())
 				}
 			}
-			if strings.Contains(stdout.String(), signingCanary) || strings.Contains(stderr.String(), signingCanary) {
+			if strings.Contains(stdout.String(), buildtest.SigningCanary) || strings.Contains(stderr.String(), buildtest.SigningCanary) {
 				t.Fatalf("unsafe output stdout=%q stderr=%q", stdout.String(), stderr.String())
 			}
 			if !strings.Contains(stderr.String(), "loopback HTTP") || configured && !strings.Contains(stderr.String(), "custom service configuration") {
 				t.Fatalf("missing explicit exception warning: %q", stderr.String())
 			}
 			data := mustRead(t, filepath.Join(f.workspace, "result.json"))
-			if bytes.Contains(data, []byte(signingCanary)) {
+			if bytes.Contains(data, []byte(buildtest.SigningCanary)) {
 				t.Fatalf("record=%q", data)
 			}
 			record, raw := readRecord(t, filepath.Join(f.workspace, "result.json"))
-			if record.Version != 6 || record.Stages.Build.Status != "completed" || record.Stages.Signing.Status != "signed" || record.Stages.Attestation.Status != "attested" || !record.Stages.Publication.Verified || record.Stages.Publication.ImmutableReference != result.publication.immutableReference || record.Evidence == nil || record.Evidence.SPDXSHA256 != result.spdxSHA256 || !record.Request.Sign || !record.Request.Publish || !record.Request.Load {
+			if record.Version != 6 || record.Stages.Build.Status != "completed" || record.Stages.Signing.Status != "signed" || record.Stages.Attestation.Status != "attested" || !record.Stages.Publication.Verified || record.Stages.Publication.ImmutableReference != result.Publication.ImmutableReference || record.Evidence == nil || record.Evidence.SPDXSHA256 != result.SPDXSHA256 || !record.Request.Sign || !record.Request.Publish || !record.Request.Load {
 				t.Fatalf("record=%+v", record)
 			}
 			assertRecordShape(t, raw)
@@ -169,28 +170,28 @@ func TestBuildSigningTypedPartialFailuresAndV6FailureOnly(t *testing.T) {
 			addSigningFixture(t, f, tc.cosign, cancel)
 			var stdout, stderr bytes.Buffer
 			var caught error
-			stderrWriter := cancelOnSigningStageWriter{output: &stderr, cancel: cancel, stage: tc.cancelStage}
-			code := runWithBuild(ctx, signingCLIArgs(registry.host, true), &stdout, stderrWriter, func(ctx context.Context, request buildRequest) (buildResult, error) {
-				result, err := buildLocalWith(ctx, request, f.services)
+			stderrWriter := buildtest.CancelOnStageWriter{Output: &stderr, Cancel: cancel, Stage: tc.cancelStage}
+			code := runWithBuild(ctx, signingCLIArgs(registry.Host, true), &stdout, stderrWriter, func(ctx context.Context, request cliRequest) (build.Result, error) {
+				result, err := build.RunWith(ctx, request.Request, f.services)
 				caught = err
 				return result, err
 			})
-			var wf *workflowFailure
+			var wf *build.WorkflowFailure
 			if code == 0 || stdout.Len() != 0 || !errors.As(caught, &wf) {
 				t.Fatalf("code=%d stdout=%q error=%v", code, stdout.String(), caught)
 			}
-			r := wf.result
-			load := r.dockerLoad
-			if load == "loaded" && !r.readableConfirmed {
+			r := wf.Result
+			load := r.DockerLoad
+			if load == "loaded" && !r.ReadableConfirmed {
 				load = "loaded; readable tag unconfirmed"
 			}
-			if wf.stage != tc.stage || r.build != tc.build || load != tc.load || r.publication.status != tc.publication || r.publication.verified != tc.verified || r.signing != tc.signing || r.attestation != tc.attestation {
+			if wf.Stage != tc.stage || r.Build != tc.build || load != tc.load || r.Publication.Status != tc.publication || r.Publication.Verified != tc.verified || r.Signing != tc.signing || r.Attestation != tc.attestation {
 				t.Fatalf("workflow=%+v result=%+v", wf, r)
 			}
-			if tc.verified && r.publication.immutableReference != registry.host+"/team/images/postgresql-17@"+f.manifestDigest {
-				t.Fatalf("lost confirmed publication identity: %+v", r.publication)
+			if tc.verified && r.Publication.ImmutableReference != registry.Host+"/team/images/postgresql-17@"+f.manifestDigest {
+				t.Fatalf("lost confirmed publication identity: %+v", r.Publication)
 			}
-			if strings.Contains(caught.Error(), signingCanary) || strings.Contains(stderr.String(), signingCanary) || strings.Contains(stderr.String(), publicationCanary) {
+			if strings.Contains(caught.Error(), buildtest.SigningCanary) || strings.Contains(stderr.String(), buildtest.SigningCanary) || strings.Contains(stderr.String(), buildtest.PublicationCanary) {
 				t.Fatalf("unsafe error=%v stderr=%q", caught, stderr.String())
 			}
 			for _, stage := range []string{"build: " + tc.build, "Docker load: " + tc.load, "publication: " + tc.publication, "signing: " + tc.signing, "attestation: " + tc.attestation} {
@@ -198,7 +199,7 @@ func TestBuildSigningTypedPartialFailuresAndV6FailureOnly(t *testing.T) {
 					t.Fatalf("missing %q: %q", stage, stderr.String())
 				}
 			}
-			if wf.sideEffects && !strings.Contains(stderr.String(), "no rollback attempted") {
+			if wf.SideEffects && !strings.Contains(stderr.String(), "no rollback attempted") {
 				t.Fatalf("missing uncertainty warning: %q", stderr.String())
 			}
 			if strings.Contains(tc.name, "cancel") && !errors.Is(caught, context.Canceled) {
@@ -219,7 +220,7 @@ func TestBuildSigningTypedPartialFailuresAndV6FailureOnly(t *testing.T) {
 			}
 			assertNoSuccessRecord(t, f.workspace)
 			data := mustRead(t, filepath.Join(f.workspace, "failure.json"))
-			if bytes.Contains(data, []byte(signingCanary)) || bytes.Contains(data, []byte(publicationCanary)) {
+			if bytes.Contains(data, []byte(buildtest.SigningCanary)) || bytes.Contains(data, []byte(buildtest.PublicationCanary)) {
 				t.Fatalf("record=%q", data)
 			}
 			record, _ := readRecord(t, filepath.Join(f.workspace, "failure.json"))
@@ -239,14 +240,14 @@ func TestBuildNoLoadPublicationAndSigningOrchestration(t *testing.T) {
 	registry := addRegistryFixture(t, f, "", cancel)
 	addSigningFixture(t, f, "", cancel)
 	var stdout, stderr bytes.Buffer
-	var result buildResult
-	args := append(signingCLIArgs(registry.host, false), "--no-load", "--json")
-	code := runWithBuild(ctx, args, &stdout, &stderr, func(ctx context.Context, request buildRequest) (buildResult, error) {
+	var result build.Result
+	args := append(signingCLIArgs(registry.Host, false), "--no-load", "--json")
+	code := runWithBuild(ctx, args, &stdout, &stderr, func(ctx context.Context, request cliRequest) (build.Result, error) {
 		var err error
-		result, err = buildLocalWith(ctx, request, f.services)
+		result, err = build.RunWith(ctx, request.Request, f.services)
 		return result, err
 	})
-	if code != 0 || result.dockerLoad != "skipped" || result.publication.status != "published" || !result.publication.verified || result.signing != "signed" || result.attestation != "attested" {
+	if code != 0 || result.DockerLoad != "skipped" || result.Publication.Status != "published" || !result.Publication.Verified || result.Signing != "signed" || result.Attestation != "attested" {
 		t.Fatalf("code=%d result=%+v stderr=%q", code, result, stderr.String())
 	}
 	want := []string{"cosign version", "apko version", "index", "apko lock", "apko build", "cosign sign", "cosign attest"}
@@ -309,23 +310,23 @@ func TestBuildSigningVersionPreflightBeforeWorkspaceNetworkAndBuild(t *testing.T
 		t.Run(failure, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			services := buildServices{
-				command: func(context.Context, string, ...string) ([]byte, error) {
+			services := build.Services{
+				Command: func(context.Context, string, ...string) ([]byte, error) {
 					t.Fatal("build tool invoked after failed signing preflight")
 					return nil, nil
 				},
-				cacheDir: func() (string, error) { t.Fatal("workspace used after failed signing preflight"); return "", nil },
-				publicFile: func(context.Context, string, int64) ([]byte, error) {
+				CacheDir: func() (string, error) { t.Fatal("workspace used after failed signing preflight"); return "", nil },
+				PublicFile: func(context.Context, string, int64) ([]byte, error) {
 					t.Fatal("network used after failed signing preflight")
 					return nil, nil
 				},
-				signingCommand: func(context.Context, string, ...string) ([]byte, error) {
+				SigningCommand: func(context.Context, string, ...string) ([]byte, error) {
 					switch failure {
 					case "version":
-						return []byte(signingCanary), errors.New(signingCanary)
+						return []byte(buildtest.SigningCanary), errors.New(buildtest.SigningCanary)
 					case "cancel version":
 						cancel()
-						return []byte(cosignSigningVersion), nil
+						return []byte(build.CosignVersion), nil
 					default:
 						return []byte("v3.1.4"), nil
 					}
@@ -333,39 +334,22 @@ func TestBuildSigningVersionPreflightBeforeWorkspaceNetworkAndBuild(t *testing.T
 			}
 			var stdout, stderr bytes.Buffer
 			var caught error
-			code := runWithBuild(ctx, signingCLIArgs("localhost:5000", true), &stdout, &stderr, func(ctx context.Context, request buildRequest) (buildResult, error) {
-				result, err := buildLocalWith(ctx, request, services)
+			code := runWithBuild(ctx, signingCLIArgs("localhost:5000", true), &stdout, &stderr, func(ctx context.Context, request cliRequest) (build.Result, error) {
+				result, err := build.RunWith(ctx, request.Request, services)
 				caught = err
 				return result, err
 			})
-			var wf *workflowFailure
-			if code != 1 || stdout.Len() != 0 || !errors.As(caught, &wf) || wf.stage != "cosign-version" || wf.result.workspace != "" || wf.result.build != "not-attempted" || wf.result.dockerLoad != "not-attempted" || wf.result.publication.status != "not-attempted" || wf.result.signing != "not-attempted" || wf.result.attestation != "not-attempted" || wf.sideEffects || len(wf.record) == 0 {
+			var wf *build.WorkflowFailure
+			if code != 1 || stdout.Len() != 0 || !errors.As(caught, &wf) || wf.Stage != "cosign-version" || wf.Result.Workspace != "" || wf.Result.Build != "not-attempted" || wf.Result.DockerLoad != "not-attempted" || wf.Result.Publication.Status != "not-attempted" || wf.Result.Signing != "not-attempted" || wf.Result.Attestation != "not-attempted" || wf.SideEffects || len(wf.Record) == 0 {
 				t.Fatalf("code=%d workflow=%+v error=%v stdout=%q", code, wf, caught, stdout.String())
 			}
-			if strings.Contains(stderr.String(), signingCanary) || strings.Contains(caught.Error(), signingCanary) {
+			if strings.Contains(stderr.String(), buildtest.SigningCanary) || strings.Contains(caught.Error(), buildtest.SigningCanary) {
 				t.Fatalf("unsafe preflight diagnostics: %q", stderr.String())
 			}
 			if failure == "cancel version" && !errors.Is(caught, context.Canceled) {
 				t.Fatalf("lost cancellation: %v", caught)
 			}
 		})
-	}
-}
-
-func TestBuildSigningEarlierApkoFailureKeepsRequestedNotAttempted(t *testing.T) {
-	request := buildRequest{publication: publicationOptions{registry: "localhost:5000", repository: "team/images"},
-		signing: signingOptions{key: fixtureCosignKey, allowHTTP: true}}
-	services := buildServices{
-		signingCommand: func(context.Context, string, ...string) ([]byte, error) { return []byte(cosignSigningVersion), nil },
-		command: func(context.Context, string, ...string) ([]byte, error) {
-			return []byte(signingCanary), errors.New(signingCanary)
-		},
-		cacheDir: func() (string, error) { t.Fatal("workspace used after failed apko preflight"); return "", nil },
-	}
-	result, err := buildLocalWith(context.Background(), request, services)
-	var wf *workflowFailure
-	if !errors.As(err, &wf) || wf.stage != "build" || wf.result.build != "failed" || result.signing != "not-attempted" || result.attestation != "not-attempted" || wf.result.signing != "not-attempted" || wf.result.attestation != "not-attempted" || strings.Contains(err.Error(), signingCanary) {
-		t.Fatalf("result=%+v workflow=%+v err=%v", result, wf, err)
 	}
 }
 
@@ -376,14 +360,14 @@ func TestBuildSigningDisabledLocalPublicationNoLoadAndSBOMNeverInvokeCosign(t *t
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			f := newPipelineFixture(t, "", cancel)
-			f.services.signingCommand = func(context.Context, string, ...string) ([]byte, error) {
+			f.services.SigningCommand = func(context.Context, string, ...string) ([]byte, error) {
 				t.Fatal("Cosign invoked without signing request")
 				return nil, nil
 			}
 			args := []string{"build", "postgresql-17", "--apk-version", "17.10-r1"}
 			if mode == "publication" {
 				registry := addRegistryFixture(t, f, "", cancel)
-				args = publicationCLIArgs(registry.host)
+				args = publicationCLIArgs(registry.Host)
 			}
 			if mode == "no-load" {
 				args = append(args, "--no-load")
@@ -392,21 +376,21 @@ func TestBuildSigningDisabledLocalPublicationNoLoadAndSBOMNeverInvokeCosign(t *t
 				args[0] = "sbom"
 				t.Setenv("LUPETTO_REGISTRY", "invalid registry")
 				t.Setenv("LUPETTO_REPOSITORY", "INVALID")
-				t.Setenv("LUPETTO_COSIGN_KEY", fixtureCosignKey)
-				t.Setenv("LUPETTO_COSIGN_SIGNING_CONFIG", fixtureCosignConfig)
+				t.Setenv("LUPETTO_COSIGN_KEY", buildtest.CosignKey)
+				t.Setenv("LUPETTO_COSIGN_SIGNING_CONFIG", buildtest.CosignConfig)
 				t.Setenv("LUPETTO_COSIGN_ALLOW_HTTP", "invalid")
 			}
 			var stdout, stderr bytes.Buffer
-			var result buildResult
-			code := runWithBuild(ctx, args, &stdout, &stderr, func(ctx context.Context, request buildRequest) (buildResult, error) {
-				if request.signing.enabled() {
+			var result build.Result
+			code := runWithBuild(ctx, args, &stdout, &stderr, func(ctx context.Context, request cliRequest) (build.Result, error) {
+				if request.Signing.Enabled() {
 					t.Fatal("unexpected signing request")
 				}
 				var err error
-				result, err = buildLocalWith(ctx, request, f.services)
+				result, err = build.RunWith(ctx, request.Request, f.services)
 				return result, err
 			})
-			if code != 0 || result.signing != "skipped" || result.attestation != "skipped" {
+			if code != 0 || result.Signing != "skipped" || result.Attestation != "skipped" {
 				t.Fatalf("code=%d result=%+v stderr=%q", code, result, stderr.String())
 			}
 			record, _ := readRecord(t, filepath.Join(f.workspace, "result.json"))
@@ -418,33 +402,5 @@ func TestBuildSigningDisabledLocalPublicationNoLoadAndSBOMNeverInvokeCosign(t *t
 				t.Fatalf("unexpected record=%+v", record)
 			}
 		})
-	}
-}
-
-func TestBuildSigningInvalidOptionsRejectedBeforeExternalBoundaries(t *testing.T) {
-	for _, request := range []buildRequest{
-		{signing: signingOptions{key: fixtureCosignKey}},
-		{publication: publicationOptions{registry: "localhost:5000", repository: "team/images"}, signing: signingOptions{key: fixtureCosignKey}},
-		{publication: publicationOptions{registry: "registry.example.invalid", repository: "team/images"}, signing: signingOptions{key: fixtureCosignKey, allowHTTP: true}},
-		{noLoad: true, signing: signingOptions{key: fixtureCosignKey, allowHTTP: true}},
-	} {
-		services := buildServices{
-			command: func(context.Context, string, ...string) ([]byte, error) {
-				t.Fatal("tool invoked before validation")
-				return nil, nil
-			},
-			signingCommand: func(context.Context, string, ...string) ([]byte, error) {
-				t.Fatal("Cosign invoked before validation")
-				return nil, nil
-			},
-			cacheDir: func() (string, error) { t.Fatal("workspace invoked before validation"); return "", nil },
-			publicFile: func(context.Context, string, int64) ([]byte, error) {
-				t.Fatal("network invoked before validation")
-				return nil, nil
-			},
-		}
-		if _, err := buildLocalWith(context.Background(), request, services); err == nil {
-			t.Fatalf("accepted %+v", request)
-		}
 	}
 }

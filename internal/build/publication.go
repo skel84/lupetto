@@ -1,4 +1,4 @@
-package main
+package build
 
 import (
 	"bufio"
@@ -31,13 +31,14 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/go-containerregistry/pkg/v1/types"
+	"lupetto/internal/wolfi"
 )
 
 const maxRegistryMetadataBytes = 4 << 20
 
-type publicationOutcome struct {
-	status, reference, pushedDigest, immutableReference string
-	verified                                            bool
+type PublicationOutcome struct {
+	Status, Reference, PushedDigest, ImmutableReference string
+	Verified                                            bool
 }
 
 // Only safe, stage-specific text enters this type. Registry bodies, URLs,
@@ -57,6 +58,7 @@ func (e *publicationStageError) Error() string {
 	}
 	return e.stage + " failed"
 }
+
 func (e *publicationStageError) Unwrap() error { return e.cause }
 
 func stageCancellation(ctx context.Context, err error) error {
@@ -312,35 +314,35 @@ func openPublicationSource(ctx context.Context, imageDir, arch string) (publicat
 
 // publishOCIImage pushes the validated layout manifest unchanged and verifies
 // the registry copy by digest-addressed readback before reporting success.
-func publishOCIImage(ctx context.Context, services buildServices, result buildResult, opts publicationOptions) (publicationOutcome, error) {
-	outcome := publicationOutcome{status: "skipped"}
+func publishOCIImage(ctx context.Context, services Services, result Result, opts PublicationOptions) (PublicationOutcome, error) {
+	outcome := PublicationOutcome{Status: "skipped"}
 	if err := validatePublicationOptions(opts); err != nil {
 		return outcome, safeStageError(ctx, "publication configuration", err)
 	}
-	if !opts.enabled() {
+	if !opts.Enabled() {
 		return outcome, nil
 	}
-	outcome.status = "failed"
-	fail := func(stage string, err error) (publicationOutcome, error) {
+	outcome.Status = "failed"
+	fail := func(stage string, err error) (PublicationOutcome, error) {
 		return outcome, registryStageError(ctx, stage, err)
 	}
-	target, err := publicationReferences(indexedPackage{name: result.packageName, version: result.version}, result.arch, result.workspace, opts)
+	target, err := publicationReferences(wolfi.Package{Name: result.PackageName, Version: result.Version}, result.Arch, result.Workspace, opts)
 	if err != nil {
 		return fail("publication reference", err)
 	}
-	outcome.reference = target.reference
-	source, err := openPublicationSource(ctx, result.imageDir, result.arch)
+	outcome.Reference = target.reference
+	source, err := openPublicationSource(ctx, result.ImageDir, result.Arch)
 	if err != nil {
 		return fail("publication source", err)
 	}
-	keychain := services.registryKeychain
+	keychain := services.RegistryKeychain
 	if keychain == nil {
 		keychain = dockerConfigKeychain{}
 	}
 	options := []remote.Option{
 		remote.WithContext(ctx),
 		remote.WithAuthFromKeychain(keychain),
-		remote.WithTransport(loopbackHTTPOnly{base: cmp.Or(services.registryTransport, remote.DefaultTransport)}),
+		remote.WithTransport(loopbackHTTPOnly{base: cmp.Or(services.RegistryTransport, remote.DefaultTransport)}),
 		remote.WithUserAgent("lupetto"),
 	}
 
@@ -354,7 +356,7 @@ func publishOCIImage(ctx context.Context, services buildServices, result buildRe
 	// The manifest bytes were pushed unchanged, so the local manifest digest is
 	// the registry digest; readback below proves it before it is verified.
 	digest := source.manifestDigest
-	outcome.pushedDigest, outcome.immutableReference = digest, target.repository+"@"+digest
+	outcome.PushedDigest, outcome.ImmutableReference = digest, target.repository+"@"+digest
 
 	puller, err := remote.NewPuller(options...)
 	if err != nil {
@@ -365,7 +367,7 @@ func publishOCIImage(ctx context.Context, services buildServices, result buildRe
 		return name.NewDigest(target.repository+"@"+blob, target.nameOptions()...)
 	}
 	sameManifest := func(data []byte) bool {
-		return len(data) <= maxRegistryMetadataBytes && "sha256:"+sha256Hex(data) == digest && bytes.Equal(data, source.manifest)
+		return len(data) <= maxRegistryMetadataBytes && "sha256:"+wolfi.SHA256Hex(data) == digest && bytes.Equal(data, source.manifest)
 	}
 
 	buildStage(ctx, "Verifying registry manifest by digest")
@@ -427,13 +429,13 @@ func publishOCIImage(ctx context.Context, services buildServices, result buildRe
 	if err := ctx.Err(); err != nil {
 		return fail("publication manifest retention", err)
 	}
-	if err := writeExclusiveFile(filepath.Join(result.workspace, "published-manifest.json"), byDigest.Manifest); err != nil {
+	if err := writeExclusiveFile(filepath.Join(result.Workspace, "published-manifest.json"), byDigest.Manifest); err != nil {
 		return fail("publication manifest retention", err)
 	}
 	if err := ctx.Err(); err != nil {
 		return fail("publication manifest retention", err)
 	}
-	outcome.status, outcome.verified = "published", true
+	outcome.Status, outcome.Verified = "published", true
 	return outcome, nil
 }
 
@@ -458,7 +460,7 @@ func verifyRegistryConfig(ctx context.Context, source publicationSource, digestR
 	if err != nil {
 		return err
 	}
-	if len(data) > maxRegistryMetadataBytes || "sha256:"+sha256Hex(data) != source.configDigest || !bytes.Equal(data, source.config) {
+	if len(data) > maxRegistryMetadataBytes || "sha256:"+wolfi.SHA256Hex(data) != source.configDigest || !bytes.Equal(data, source.config) {
 		return errRegistryContentMismatch
 	}
 	return ctx.Err()

@@ -1,4 +1,4 @@
-package main
+package build
 
 import (
 	"bytes"
@@ -10,9 +10,10 @@ import (
 	"strings"
 	"testing"
 	"time"
-)
 
-const signingCanary = "synthetic-cosign-secret-never-retain"
+	"lupetto/internal/build/buildtest"
+	"lupetto/internal/wolfi"
+)
 
 func fakeSigningCosign(t *testing.T, body string) {
 	t.Helper()
@@ -21,16 +22,16 @@ func fakeSigningCosign(t *testing.T, body string) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("COSIGN_PASSWORD", signingCanary)
+	t.Setenv("COSIGN_PASSWORD", buildtest.SigningCanary)
 }
 
 func TestExecuteSigningCommandPasswordInheritedAndAllDiagnosticsDiscarded(t *testing.T) {
 	for _, stage := range []string{"sign", "attest", "version"} {
 		t.Run(stage, func(t *testing.T) {
-			body := "test \"$COSIGN_PASSWORD\" = '" + signingCanary + "' || exit 9\n" +
+			body := "test \"$COSIGN_PASSWORD\" = '" + buildtest.SigningCanary + "' || exit 9\n" +
 				"for arg in \"$@\"; do test \"$arg\" != \"$COSIGN_PASSWORD\" || exit 8; done\n" +
 				"printf '%s\\n' \"$COSIGN_PASSWORD\" >&2\n"
-			args := []string{stage, "--yes", "--key", "/synthetic/private-input", "registry.example.invalid/team/image@" + fixturePushDigest}
+			args := []string{stage, "--yes", "--key", "/synthetic/private-input", "registry.example.invalid/team/image@" + buildtest.PushDigest}
 			if stage == "version" {
 				args = []string{"version", "--json"}
 				body += "printf '{\"gitVersion\":\"v3.1.3\",\"other\":\"%s\"}\\n' \"$COSIGN_PASSWORD\""
@@ -39,14 +40,12 @@ func TestExecuteSigningCommandPasswordInheritedAndAllDiagnosticsDiscarded(t *tes
 			}
 			fakeSigningCosign(t, body)
 			var diagnostics bytes.Buffer
-			progress := newBuildProgress(context.Background(), &diagnostics, false)
-			ctx := context.WithValue(context.Background(), buildProgressKey{}, progress)
+			ctx := WithReporter(context.Background(), lineReporter{&diagnostics})
 			output, err := executeSigningCommand(ctx, "cosign", args...)
-			progress.Close()
-			if err != nil || diagnostics.Len() != 0 || bytes.Contains(output, []byte(signingCanary)) {
+			if err != nil || diagnostics.Len() != 0 || bytes.Contains(output, []byte(buildtest.SigningCanary)) {
 				t.Fatalf("output=%q err=%v diagnostics=%q", output, err, diagnostics.String())
 			}
-			if stage == "version" && string(output) != cosignSigningVersion || stage != "version" && len(output) != 0 {
+			if stage == "version" && string(output) != CosignVersion || stage != "version" && len(output) != 0 {
 				t.Fatalf("retained output=%q", output)
 			}
 		})
@@ -60,7 +59,7 @@ func TestExecuteSigningCommandFailuresAndVersionParsingAreSecretSafe(t *testing.
 			body := "printf '%s\\n' \"$COSIGN_PASSWORD\" >&2\n"
 			switch failure {
 			case "sign exit", "attest exit":
-				args = []string{strings.Fields(failure)[0], "--yes", "--key", "/synthetic/private-input", "registry.example.invalid/team/image@" + fixturePushDigest}
+				args = []string{strings.Fields(failure)[0], "--yes", "--key", "/synthetic/private-input", "registry.example.invalid/team/image@" + buildtest.PushDigest}
 				body += "printf '%s\\n' \"$COSIGN_PASSWORD\" \"$@\"; exit 7"
 			case "version exit":
 				body += "printf '%s\\n' '{\"gitVersion\":\"v3.1.3\"}'; exit 7"
@@ -75,7 +74,7 @@ func TestExecuteSigningCommandFailuresAndVersionParsingAreSecretSafe(t *testing.
 			case "version suffix":
 				body += "printf '%s\\n' '{\"gitVersion\":\"v3.1.3-custom\"}'"
 			case "cancel sign", "cancel attest", "cancel version":
-				args = []string{strings.Fields(failure)[1], "--yes", "--key", "/synthetic/private-input", "registry.example.invalid/team/image@" + fixturePushDigest}
+				args = []string{strings.Fields(failure)[1], "--yes", "--key", "/synthetic/private-input", "registry.example.invalid/team/image@" + buildtest.PushDigest}
 				if failure == "cancel version" {
 					args = []string{"version", "--json"}
 				}
@@ -89,7 +88,7 @@ func TestExecuteSigningCommandFailuresAndVersionParsingAreSecretSafe(t *testing.
 				defer cancel()
 			}
 			output, err := executeSigningCommand(ctx, "cosign", args...)
-			if err == nil || len(output) != 0 || strings.Contains(err.Error(), signingCanary) || strings.Contains(err.Error(), "/synthetic/private-input") {
+			if err == nil || len(output) != 0 || strings.Contains(err.Error(), buildtest.SigningCanary) || strings.Contains(err.Error(), "/synthetic/private-input") {
 				t.Fatalf("output=%q err=%v", output, err)
 			}
 			if strings.HasPrefix(failure, "cancel") && !errors.Is(err, context.DeadlineExceeded) {
@@ -100,7 +99,7 @@ func TestExecuteSigningCommandFailuresAndVersionParsingAreSecretSafe(t *testing.
 }
 
 func TestRequireCosignExactVersionAndSafeErrors(t *testing.T) {
-	for _, version := range []string{cosignSigningVersion, "v3.1.2", "v3.1.4", "3.1.3", "v3.1.3-custom", signingCanary, `{"gitVersion":"v3.1.3"}`, ""} {
+	for _, version := range []string{CosignVersion, "v3.1.2", "v3.1.4", "3.1.3", "v3.1.3-custom", buildtest.SigningCanary, `{"gitVersion":"v3.1.3"}`, ""} {
 		t.Run(version, func(t *testing.T) {
 			command := func(ctx context.Context, executable string, args ...string) ([]byte, error) {
 				if executable != "cosign" || !reflect.DeepEqual(args, []string{"version", "--json"}) {
@@ -109,7 +108,7 @@ func TestRequireCosignExactVersionAndSafeErrors(t *testing.T) {
 				return []byte(version), nil
 			}
 			err := requireCosignVersion(context.Background(), command)
-			if (err == nil) != (version == cosignSigningVersion) || err != nil && strings.Contains(err.Error(), signingCanary) {
+			if (err == nil) != (version == CosignVersion) || err != nil && strings.Contains(err.Error(), buildtest.SigningCanary) {
 				t.Fatalf("version=%q err=%v", version, err)
 			}
 		})
@@ -118,15 +117,15 @@ func TestRequireCosignExactVersionAndSafeErrors(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			command := localCommand(func(context.Context, string, ...string) ([]byte, error) {
+			command := CommandFunc(func(context.Context, string, ...string) ([]byte, error) {
 				if mode == "cancel" {
 					t.Fatal("called version after cancellation")
 				}
 				if mode == "cancel after response" {
 					cancel()
-					return []byte(cosignSigningVersion), nil
+					return []byte(CosignVersion), nil
 				}
-				return []byte(signingCanary), errors.New(signingCanary)
+				return []byte(buildtest.SigningCanary), errors.New(buildtest.SigningCanary)
 			})
 			if mode == "cancel" {
 				cancel()
@@ -135,7 +134,7 @@ func TestRequireCosignExactVersionAndSafeErrors(t *testing.T) {
 				command = nil
 			}
 			err := requireCosignVersion(ctx, command)
-			if err == nil || strings.Contains(err.Error(), signingCanary) {
+			if err == nil || strings.Contains(err.Error(), buildtest.SigningCanary) {
 				t.Fatalf("error=%v", err)
 			}
 			if strings.HasPrefix(mode, "cancel") && !errors.Is(err, context.Canceled) {
@@ -145,31 +144,31 @@ func TestRequireCosignExactVersionAndSafeErrors(t *testing.T) {
 	}
 }
 
-func signingTestResult(t *testing.T) buildResult {
+func signingTestResult(t *testing.T) Result {
 	t.Helper()
 	predicate := []byte(`{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT"}`)
 	filename := filepath.Join(t.TempDir(), "sbom-x86_64.spdx.json")
 	if err := os.WriteFile(filename, predicate, 0600); err != nil {
 		t.Fatal(err)
 	}
-	return buildResult{spdxPath: filename, spdxSHA256: sha256Hex(predicate), dockerImageID: "sha256:" + strings.Repeat("b", 64),
-		publication: publicationOutcome{status: "published", verified: true, reference: "registry.example.invalid/team/image:unique",
-			pushedDigest: fixturePushDigest, immutableReference: "registry.example.invalid/team/image@" + fixturePushDigest}}
+	return Result{SPDXPath: filename, SPDXSHA256: wolfi.SHA256Hex(predicate), DockerImageID: "sha256:" + strings.Repeat("b", 64),
+		Publication: PublicationOutcome{Status: "published", Verified: true, Reference: "registry.example.invalid/team/image:unique",
+			PushedDigest: buildtest.PushDigest, ImmutableReference: "registry.example.invalid/team/image@" + buildtest.PushDigest}}
 }
 
 func TestSignAndAttestSameCanonicalDigestExistingSPDXAndDefaultFlags(t *testing.T) {
 	for _, configured := range []bool{false, true} {
 		t.Run(map[bool]string{false: "defaults", true: "key config HTTP"}[configured], func(t *testing.T) {
 			result := signingTestResult(t)
-			opts := signingOptions{key: "/synthetic/key"}
-			common := []string{"--yes", "--key", opts.key}
+			opts := SigningOptions{Key: "/synthetic/key"}
+			common := []string{"--yes", "--key", opts.Key}
 			if configured {
-				opts.config, opts.allowHTTP = "/synthetic/config", true
-				result.publication.reference = "localhost:5000/team/image:unique"
-				result.publication.immutableReference = "localhost:5000/team/image@" + fixturePushDigest
-				common = append(common, "--signing-config", opts.config, "--allow-http-registry")
+				opts.Config, opts.AllowHTTP = "/synthetic/config", true
+				result.Publication.Reference = "localhost:5000/team/image:unique"
+				result.Publication.ImmutableReference = "localhost:5000/team/image@" + buildtest.PushDigest
+				common = append(common, "--signing-config", opts.Config, "--allow-http-registry")
 			}
-			before, err := os.ReadFile(result.spdxPath)
+			before, err := os.ReadFile(result.SPDXPath)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -179,20 +178,20 @@ func TestSignAndAttestSameCanonicalDigestExistingSPDXAndDefaultFlags(t *testing.
 					t.Fatalf("unexpected executable %q", executable)
 				}
 				calls = append(calls, append([]string(nil), args...))
-				return []byte(signingCanary), nil
+				return []byte(buildtest.SigningCanary), nil
 			}
 			outcome, err := signAndAttestDigest(context.Background(), command, result, opts)
 			if err != nil || outcome.signing != "signed" || outcome.attestation != "attested" {
 				t.Fatalf("outcome=%+v err=%v", outcome, err)
 			}
 			sign := append([]string{"sign"}, common...)
-			sign = append(sign, result.publication.immutableReference)
+			sign = append(sign, result.Publication.ImmutableReference)
 			attest := append([]string{"attest"}, common...)
-			attest = append(attest, "--type", "spdxjson", "--predicate", result.spdxPath, result.publication.immutableReference)
+			attest = append(attest, "--type", "spdxjson", "--predicate", result.SPDXPath, result.Publication.ImmutableReference)
 			if !reflect.DeepEqual(calls, [][]string{sign, attest}) {
 				t.Fatalf("calls=%q want=%q", calls, [][]string{sign, attest})
 			}
-			after, err := os.ReadFile(result.spdxPath)
+			after, err := os.ReadFile(result.SPDXPath)
 			if err != nil || !bytes.Equal(before, after) {
 				t.Fatalf("SPDX regenerated: %v", err)
 			}
@@ -206,33 +205,33 @@ func TestSigningRejectsUnverifiedMutableOrMismatchedDigest(t *testing.T) {
 			result := signingTestResult(t)
 			switch mutation {
 			case "unpublished":
-				result.publication.status = "failed"
+				result.Publication.Status = "failed"
 			case "unverified":
-				result.publication.verified = false
+				result.Publication.Verified = false
 			case "digest":
-				result.publication.pushedDigest = result.dockerImageID
+				result.Publication.PushedDigest = result.DockerImageID
 			case "reference digest":
-				result.publication.immutableReference = "registry.example.invalid/team/image@" + result.dockerImageID
+				result.Publication.ImmutableReference = "registry.example.invalid/team/image@" + result.DockerImageID
 			case "repository":
-				result.publication.immutableReference = "registry.example.invalid/other/image@" + fixturePushDigest
+				result.Publication.ImmutableReference = "registry.example.invalid/other/image@" + buildtest.PushDigest
 			case "tag":
-				result.publication.immutableReference = result.publication.reference
+				result.Publication.ImmutableReference = result.Publication.Reference
 			case "tagged digest":
-				result.publication.immutableReference = result.publication.reference + "@" + fixturePushDigest
+				result.Publication.ImmutableReference = result.Publication.Reference + "@" + buildtest.PushDigest
 			case "algorithm":
-				result.publication.pushedDigest = "sha512:" + strings.Repeat("a", 128)
+				result.Publication.PushedDigest = "sha512:" + strings.Repeat("a", 128)
 			case "missing target":
-				result.publication.reference = ""
+				result.Publication.Reference = ""
 			case "target digest":
-				result.publication.reference += "@" + fixturePushDigest
+				result.Publication.Reference += "@" + buildtest.PushDigest
 			case "missing registry":
-				result.publication.reference = "team/image:unique"
-				result.publication.immutableReference = "team/image@" + fixturePushDigest
+				result.Publication.Reference = "team/image:unique"
+				result.Publication.ImmutableReference = "team/image@" + buildtest.PushDigest
 			}
 			outcome, err := signAndAttestDigest(context.Background(), func(context.Context, string, ...string) ([]byte, error) {
 				t.Fatal("Cosign called with invalid publication identity")
 				return nil, nil
-			}, result, signingOptions{key: "/synthetic/key"})
+			}, result, SigningOptions{Key: "/synthetic/key"})
 			if err == nil || outcome.signing != "failed" || outcome.attestation != "not-attempted" {
 				t.Fatalf("outcome=%+v err=%v", outcome, err)
 			}
@@ -244,11 +243,11 @@ func TestSigningHTTPPolicyRejectedBeforeCosign(t *testing.T) {
 	for _, mode := range []string{"nonloopback HTTP", "loopback without consent"} {
 		t.Run(mode, func(t *testing.T) {
 			result := signingTestResult(t)
-			opts := signingOptions{key: "/synthetic/key", allowHTTP: true}
+			opts := SigningOptions{Key: "/synthetic/key", AllowHTTP: true}
 			if mode == "loopback without consent" {
-				opts.allowHTTP = false
-				result.publication.reference = "localhost:5000/team/image:unique"
-				result.publication.immutableReference = "localhost:5000/team/image@" + fixturePushDigest
+				opts.AllowHTTP = false
+				result.Publication.Reference = "localhost:5000/team/image:unique"
+				result.Publication.ImmutableReference = "localhost:5000/team/image@" + buildtest.PushDigest
 			}
 			outcome, err := signAndAttestDigest(context.Background(), func(context.Context, string, ...string) ([]byte, error) {
 				t.Fatal("Cosign called before HTTP policy validation")
@@ -277,13 +276,13 @@ func TestSigningStageFailuresChecksumAndCancellationPreserveOutcomes(t *testing.
 					signs++
 					switch failure {
 					case "sign":
-						return []byte(signingCanary), errors.New(signingCanary)
+						return []byte(buildtest.SigningCanary), errors.New(buildtest.SigningCanary)
 					case "checksum":
-						if err := os.WriteFile(result.spdxPath, []byte(signingCanary), 0600); err != nil {
+						if err := os.WriteFile(result.SPDXPath, []byte(buildtest.SigningCanary), 0600); err != nil {
 							t.Fatal(err)
 						}
 					case "read":
-						if err := os.Remove(result.spdxPath); err != nil {
+						if err := os.Remove(result.SPDXPath); err != nil {
 							t.Fatal(err)
 						}
 					case "cancel sign":
@@ -292,7 +291,7 @@ func TestSigningStageFailuresChecksumAndCancellationPreserveOutcomes(t *testing.
 				case "attest":
 					attests++
 					if failure == "attest" {
-						return []byte(signingCanary), errors.New(signingCanary)
+						return []byte(buildtest.SigningCanary), errors.New(buildtest.SigningCanary)
 					}
 					if failure == "cancel attest" {
 						cancel()
@@ -300,15 +299,13 @@ func TestSigningStageFailuresChecksumAndCancellationPreserveOutcomes(t *testing.
 				default:
 					t.Fatalf("unexpected command %q", args)
 				}
-				return []byte(signingCanary), nil
+				return []byte(buildtest.SigningCanary), nil
 			}
 			if failure == "cancel before attest" {
 				var diagnostics bytes.Buffer
-				progress := newBuildProgress(ctx, cancelOnSigningStageWriter{output: &diagnostics, cancel: cancel, stage: "Attesting validated architecture SPDX"}, false)
-				ctx = context.WithValue(ctx, buildProgressKey{}, progress)
-				defer progress.Close()
+				ctx = WithReporter(ctx, lineReporter{buildtest.CancelOnStageWriter{Output: &diagnostics, Cancel: cancel, Stage: "Attesting validated architecture SPDX"}})
 			}
-			outcome, err := signAndAttestDigest(ctx, command, result, signingOptions{key: "/synthetic/key"})
+			outcome, err := signAndAttestDigest(ctx, command, result, SigningOptions{Key: "/synthetic/key"})
 			signing, attestation := "signed", "failed"
 			wantSigns, wantAttests := 1, 0
 			if failure == "sign" || failure == "cancel sign" || failure == "cancel before sign" {
@@ -320,7 +317,7 @@ func TestSigningStageFailuresChecksumAndCancellationPreserveOutcomes(t *testing.
 			if failure == "attest" || failure == "cancel attest" {
 				wantAttests = 1
 			}
-			if err == nil || strings.Contains(err.Error(), signingCanary) || outcome.signing != signing || outcome.attestation != attestation || signs != wantSigns || attests != wantAttests {
+			if err == nil || strings.Contains(err.Error(), buildtest.SigningCanary) || outcome.signing != signing || outcome.attestation != attestation || signs != wantSigns || attests != wantAttests {
 				t.Fatalf("outcome=%+v signs=%d attests=%d err=%v", outcome, signs, attests, err)
 			}
 			if strings.HasPrefix(failure, "cancel") && !errors.Is(err, context.Canceled) {
@@ -334,22 +331,8 @@ func TestSigningDisabledNeverCallsCosign(t *testing.T) {
 	outcome, err := signAndAttestDigest(context.Background(), func(context.Context, string, ...string) ([]byte, error) {
 		t.Fatal("Cosign called without signing request")
 		return nil, nil
-	}, buildResult{}, signingOptions{})
+	}, Result{}, SigningOptions{})
 	if err != nil || outcome.signing != "skipped" || outcome.attestation != "skipped" {
 		t.Fatalf("outcome=%+v err=%v", outcome, err)
 	}
-}
-
-type cancelOnSigningStageWriter struct {
-	output *bytes.Buffer
-	cancel context.CancelFunc
-	stage  string
-}
-
-func (w cancelOnSigningStageWriter) Write(data []byte) (int, error) {
-	n, err := w.output.Write(data)
-	if strings.Contains(string(data), "lupetto: "+w.stage+"\n") {
-		w.cancel()
-	}
-	return n, err
 }

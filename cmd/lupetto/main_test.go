@@ -7,6 +7,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"lupetto/internal/build"
 )
 
 func TestParseBuildPreservesExactRevision(t *testing.T) {
@@ -18,7 +20,7 @@ func TestParseBuildPreservesExactRevision(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parseBuild(%q): %v", args, err)
 		}
-		if request.packageName != "postgresql" || request.version != "17.10-r12" || request.selector != "" {
+		if request.PackageName != "postgresql" || request.Version != "17.10-r12" || request.Selector != "" {
 			t.Fatalf("parseBuild(%q) = %+v; want exact revision r12", args, request)
 		}
 	}
@@ -34,7 +36,7 @@ func TestParseBuildSelectors(t *testing.T) {
 		{"so:libssl.so.3", "3"},
 	} {
 		request, err := parseBuild([]string{tc.name, tc.selector})
-		if err != nil || request.packageName != tc.name || request.selector != tc.selector || request.version != "" {
+		if err != nil || request.PackageName != tc.name || request.Selector != tc.selector || request.Version != "" {
 			t.Fatalf("selector %s: request=%+v error=%v", tc.selector, request, err)
 		}
 	}
@@ -75,7 +77,7 @@ func TestParseBuildNoLoad(t *testing.T) {
 		{"--apk-version", "9.1.2-r1", "--no-load", "valkey"},
 	} {
 		request, err := parseBuild(args)
-		if err != nil || !request.noLoad {
+		if err != nil || !request.NoLoad {
 			t.Fatalf("args=%q request=%+v err=%v", args, request, err)
 		}
 	}
@@ -135,7 +137,7 @@ func TestParseBuildPublicationFlags(t *testing.T) {
 		{"--repository=team/images", "nginx", "--registry=registry.example", "--apk-version=1.30.2-r0"},
 	} {
 		request, err := parseBuild(args)
-		if err != nil || request.publicationFlags.registry != (optionalString{value: "registry.example", set: true}) || request.publicationFlags.repository != (optionalString{value: "team/images", set: true}) || request.publication.enabled() {
+		if err != nil || request.publicationFlags.Registry != (build.OptionalString{Value: "registry.example", Set: true}) || request.publicationFlags.Repository != (build.OptionalString{Value: "team/images", Set: true}) || request.Publication.Enabled() {
 			t.Fatalf("args=%q request=%+v err=%v", args, request, err)
 		}
 	}
@@ -148,7 +150,7 @@ func TestParseBuildPublicationFlags(t *testing.T) {
 		{"nginx", "1.30", "--repository", ""},
 	} {
 		request, err := parseBuild(args)
-		if err != nil || (!request.publicationFlags.registry.set && !request.publicationFlags.repository.set) {
+		if err != nil || (!request.publicationFlags.Registry.Set && !request.publicationFlags.Repository.Set) {
 			t.Fatalf("explicit empty flag not preserved: args=%q request=%+v err=%v", args, request, err)
 		}
 	}
@@ -196,9 +198,9 @@ func TestRunBuildPublicationConfigurationBeforeCallback(t *testing.T) {
 			t.Setenv("LUPETTO_REGISTRY", tc.registry)
 			t.Setenv("LUPETTO_REPOSITORY", tc.repository)
 			called := false
-			callback := func(context.Context, buildRequest) (buildResult, error) {
+			callback := func(context.Context, cliRequest) (build.Result, error) {
 				called = true
-				return buildResult{}, nil
+				return build.Result{}, nil
 			}
 			var stdout, stderr bytes.Buffer
 			args := append([]string{"build", "nginx", "1.30"}, tc.flags...)
@@ -214,20 +216,20 @@ func TestRunBuildResolvesPublicationBeforeSameBuildCallback(t *testing.T) {
 	t.Setenv("LUPETTO_REPOSITORY", "env/team")
 	for _, tc := range []struct {
 		flags []string
-		want  publicationOptions
+		want  build.PublicationOptions
 	}{
-		{want: publicationOptions{"registry.example", "env/team"}},
-		{flags: []string{"--registry=localhost:5000"}, want: publicationOptions{"localhost:5000", "env/team"}},
-		{flags: []string{"--repository=flag/team"}, want: publicationOptions{"registry.example", "flag/team"}},
-		{flags: []string{"--registry=localhost:5000", "--repository=flag/team"}, want: publicationOptions{"localhost:5000", "flag/team"}},
+		{want: build.PublicationOptions{Registry: "registry.example", Repository: "env/team"}},
+		{flags: []string{"--registry=localhost:5000"}, want: build.PublicationOptions{Registry: "localhost:5000", Repository: "env/team"}},
+		{flags: []string{"--repository=flag/team"}, want: build.PublicationOptions{Registry: "registry.example", Repository: "flag/team"}},
+		{flags: []string{"--registry=localhost:5000", "--repository=flag/team"}, want: build.PublicationOptions{Registry: "localhost:5000", Repository: "flag/team"}},
 	} {
 		calls := 0
-		callback := func(_ context.Context, request buildRequest) (buildResult, error) {
+		callback := func(_ context.Context, request cliRequest) (build.Result, error) {
 			calls++
-			if request.publication != tc.want || request.packageName != "nginx" || request.selector != "1.30" || request.noLoad {
+			if request.Publication != tc.want || request.PackageName != "nginx" || request.Selector != "1.30" || request.NoLoad {
 				t.Fatalf("request=%+v want publication=%+v", request, tc.want)
 			}
-			return buildResult{}, errors.New("synthetic callback failure")
+			return build.Result{}, errors.New("synthetic callback failure")
 		}
 		var stdout, stderr bytes.Buffer
 		args := append([]string{"build", "nginx", "1.30"}, tc.flags...)
@@ -258,9 +260,9 @@ func TestSBOMRejectsExplicitPublicationBeforeCallback(t *testing.T) {
 		{"--cosign-key=/synthetic/key", "--cosign-signing-config=/synthetic/config"},
 	} {
 		called := false
-		callback := func(context.Context, buildRequest) (buildResult, error) {
+		callback := func(context.Context, cliRequest) (build.Result, error) {
 			called = true
-			return buildResult{}, nil
+			return build.Result{}, nil
 		}
 		var stdout, stderr bytes.Buffer
 		args := append([]string{"sbom", "nginx", "--apk-version=1.30.2-r0"}, flags...)
@@ -283,12 +285,12 @@ func TestSBOMIgnoresPublicationAndSigningEnvironment(t *testing.T) {
 		t.Setenv("LUPETTO_COSIGN_SIGNING_CONFIG", "/synthetic/config")
 		t.Setenv("LUPETTO_COSIGN_ALLOW_HTTP", "invalid")
 		calls := 0
-		callback := func(_ context.Context, request buildRequest) (buildResult, error) {
+		callback := func(_ context.Context, request cliRequest) (build.Result, error) {
 			calls++
-			if request.publication.enabled() || request.publicationFlags.registry.set || request.publicationFlags.repository.set || request.signing.enabled() || request.signing.config != "" || request.signing.allowHTTP || request.signingFlags != (signingFlags{}) || !request.noLoad || request.packageName != "nginx" || request.version != "1.30.2-r0" {
+			if request.Publication.Enabled() || request.publicationFlags.Registry.Set || request.publicationFlags.Repository.Set || request.Signing.Enabled() || request.Signing.Config != "" || request.Signing.AllowHTTP || request.signingFlags != (build.SigningFlags{}) || !request.NoLoad || request.PackageName != "nginx" || request.Version != "1.30.2-r0" {
 				t.Fatalf("SBOM lost image-only isolation: %+v", request)
 			}
-			return buildResult{dockerLoad: "skipped", publication: publicationOutcome{status: "skipped"}}, nil
+			return build.Result{DockerLoad: "skipped", Publication: build.PublicationOutcome{Status: "skipped"}}, nil
 		}
 		var stdout, stderr bytes.Buffer
 		if code := runWithBuild(context.Background(), []string{"sbom", "nginx", "--apk-version=1.30.2-r0"}, &stdout, &stderr, callback); code != 0 || calls != 1 || stderr.Len() != 0 || !strings.Contains(stdout.String(), "Registry publication: skipped") {
@@ -301,13 +303,13 @@ func TestRunBuildReportsPublicationImmutableIdentity(t *testing.T) {
 	t.Setenv("LUPETTO_REGISTRY", "")
 	t.Setenv("LUPETTO_REPOSITORY", "")
 	immutable := "registry.example/team/images/pkg@sha256:" + strings.Repeat("b", 64)
-	callback := func(_ context.Context, request buildRequest) (buildResult, error) {
-		if !request.publication.enabled() {
+	callback := func(_ context.Context, request cliRequest) (build.Result, error) {
+		if !request.Publication.Enabled() {
 			t.Fatal("publication was not requested")
 		}
-		return buildResult{
-			dockerLoad: "loaded", dockerImageID: "sha256:" + strings.Repeat("a", 64),
-			publication: publicationOutcome{status: "published", reference: "registry.example/team/images/pkg:1.0-r0-amd64-build-123", pushedDigest: "sha256:" + strings.Repeat("b", 64), immutableReference: immutable, verified: true},
+		return build.Result{
+			DockerLoad: "loaded", DockerImageID: "sha256:" + strings.Repeat("a", 64),
+			Publication: build.PublicationOutcome{Status: "published", Reference: "registry.example/team/images/pkg:1.0-r0-amd64-build-123", PushedDigest: "sha256:" + strings.Repeat("b", 64), ImmutableReference: immutable, Verified: true},
 		}, nil
 	}
 	var stdout, stderr bytes.Buffer
@@ -321,12 +323,12 @@ func TestRunBuildNoPublicationAllowsNoLoad(t *testing.T) {
 	t.Setenv("LUPETTO_REGISTRY", "")
 	t.Setenv("LUPETTO_REPOSITORY", "")
 	calls := 0
-	callback := func(_ context.Context, request buildRequest) (buildResult, error) {
+	callback := func(_ context.Context, request cliRequest) (build.Result, error) {
 		calls++
-		if !request.noLoad || request.publication.enabled() {
+		if !request.NoLoad || request.Publication.Enabled() {
 			t.Fatalf("local-only request=%+v", request)
 		}
-		return buildResult{dockerLoad: "skipped", publication: publicationOutcome{status: "skipped"}}, nil
+		return build.Result{DockerLoad: "skipped", Publication: build.PublicationOutcome{Status: "skipped"}}, nil
 	}
 	var stdout, stderr bytes.Buffer
 	if code := runWithBuild(context.Background(), []string{"build", "pkg", "1", "--no-load"}, &stdout, &stderr, callback); code != 0 || calls != 1 || stderr.Len() != 0 || !strings.Contains(stdout.String(), "Docker loading: skipped") || !strings.Contains(stdout.String(), "Registry publication: skipped") {
@@ -339,15 +341,15 @@ func TestRunBuildConsumesTypedWorkflowFailure(t *testing.T) {
 	t.Setenv("LUPETTO_REPOSITORY", "")
 	digest := "sha256:" + strings.Repeat("b", 64)
 	immutable := "registry.example/team/images/pkg@" + digest
-	callback := func(context.Context, buildRequest) (buildResult, error) {
-		failure := &workflowFailure{
-			result: buildResult{
-				workspace: "/synthetic/image-123", build: "completed", dockerLoad: "loaded", readableConfirmed: true, signing: "skipped", attestation: "skipped",
-				publication: publicationOutcome{status: "failed", reference: "registry.example/team/images/pkg:1.0-r0-amd64-build-123", pushedDigest: digest, immutableReference: immutable, verified: false},
+	callback := func(context.Context, cliRequest) (build.Result, error) {
+		failure := &build.WorkflowFailure{
+			Result: build.Result{
+				Workspace: "/synthetic/image-123", Build: "completed", DockerLoad: "loaded", ReadableConfirmed: true, Signing: "skipped", Attestation: "skipped",
+				Publication: build.PublicationOutcome{Status: "failed", Reference: "registry.example/team/images/pkg:1.0-r0-amd64-build-123", PushedDigest: digest, ImmutableReference: immutable, Verified: false},
 			},
-			stage: "publication", sideEffects: true, cause: errors.New("publication identity verification failed"),
+			Stage: "publication", SideEffects: true, Cause: errors.New("publication identity verification failed"),
 		}
-		return buildResult{}, errors.Join(errors.New("outer wrapper must not be printed"), failure)
+		return build.Result{}, errors.Join(errors.New("outer wrapper must not be printed"), failure)
 	}
 	var stdout, stderr bytes.Buffer
 	args := []string{"build", "pkg", "1", "--registry=registry.example", "--repository=team/images"}
@@ -370,16 +372,16 @@ func TestRunBuildReportsSignedAndAttestedImmutableIdentity(t *testing.T) {
 	}
 	immutable := "registry.example/team/images/pkg@sha256:" + strings.Repeat("b", 64)
 	calls := 0
-	callback := func(_ context.Context, request buildRequest) (buildResult, error) {
+	callback := func(_ context.Context, request cliRequest) (build.Result, error) {
 		calls++
-		if request.signing != (signingOptions{key: "/synthetic/key", config: "/synthetic/config"}) || !request.publication.enabled() || request.noLoad {
+		if request.Signing != (build.SigningOptions{Key: "/synthetic/key", Config: "/synthetic/config"}) || !request.Publication.Enabled() || request.NoLoad {
 			t.Fatalf("lost signing/publication request: %+v", request)
 		}
-		return buildResult{
-			dockerLoad: "loaded", dockerImageID: "sha256:" + strings.Repeat("a", 64),
-			imageReference: "lupetto/pkg:1.0-r0-amd64", buildReference: "lupetto/local:build-123",
-			publication: publicationOutcome{status: "published", reference: "registry.example/team/images/pkg:1.0-r0-amd64-build-123", pushedDigest: "sha256:" + strings.Repeat("b", 64), immutableReference: immutable, verified: true},
-			signing:     "signed", attestation: "attested",
+		return build.Result{
+			DockerLoad: "loaded", DockerImageID: "sha256:" + strings.Repeat("a", 64),
+			ImageReference: "lupetto/pkg:1.0-r0-amd64", BuildReference: "lupetto/local:build-123",
+			Publication: build.PublicationOutcome{Status: "published", Reference: "registry.example/team/images/pkg:1.0-r0-amd64-build-123", PushedDigest: "sha256:" + strings.Repeat("b", 64), ImmutableReference: immutable, Verified: true},
+			Signing:     "signed", Attestation: "attested",
 		}, nil
 	}
 	var stdout, stderr bytes.Buffer
@@ -411,16 +413,16 @@ func TestRunBuildConsumesTypedSigningPartialFailures(t *testing.T) {
 		{"result record", "signed", "attested"},
 	} {
 		t.Run(tc.stage, func(t *testing.T) {
-			callback := func(context.Context, buildRequest) (buildResult, error) {
-				failure := &workflowFailure{
-					result: buildResult{
-						workspace: "/synthetic/image-123", build: "completed", dockerLoad: "loaded", readableConfirmed: true,
-						publication: publicationOutcome{status: "published", pushedDigest: digest, immutableReference: immutable, verified: true},
-						signing:     tc.signing, attestation: tc.attestation,
+			callback := func(context.Context, cliRequest) (build.Result, error) {
+				failure := &build.WorkflowFailure{
+					Result: build.Result{
+						Workspace: "/synthetic/image-123", Build: "completed", DockerLoad: "loaded", ReadableConfirmed: true,
+						Publication: build.PublicationOutcome{Status: "published", PushedDigest: digest, ImmutableReference: immutable, Verified: true},
+						Signing:     tc.signing, Attestation: tc.attestation,
 					},
-					stage: tc.stage, sideEffects: true, cause: errors.New("sanitized stage failure"),
+					Stage: tc.stage, SideEffects: true, Cause: errors.New("sanitized stage failure"),
 				}
-				return buildResult{}, errors.Join(errors.New("secret-outer-wrapper-canary"), failure)
+				return build.Result{}, errors.Join(errors.New("secret-outer-wrapper-canary"), failure)
 			}
 			var stdout, stderr bytes.Buffer
 			args := []string{"build", "pkg", "1", "--registry=registry.example", "--repository=team/images", "--cosign-key=secret-key-canary"}
@@ -457,12 +459,12 @@ func TestRunBuildAllowsNoLoadWithPublication(t *testing.T) {
 			t.Setenv("LUPETTO_REGISTRY", tc.registry)
 			t.Setenv("LUPETTO_REPOSITORY", tc.repository)
 			calls := 0
-			callback := func(_ context.Context, request buildRequest) (buildResult, error) {
+			callback := func(_ context.Context, request cliRequest) (build.Result, error) {
 				calls++
-				if !request.noLoad || !request.publication.enabled() {
+				if !request.NoLoad || !request.Publication.Enabled() {
 					t.Fatalf("request=%+v", request)
 				}
-				return buildResult{}, errors.New("synthetic callback failure")
+				return build.Result{}, errors.New("synthetic callback failure")
 			}
 			var stdout, stderr bytes.Buffer
 			args := append([]string{"build", "nginx", "1.30"}, tc.flags...)
@@ -503,11 +505,11 @@ func TestRunJSONOutput(t *testing.T) {
 		t.Setenv(name, "")
 	}
 	record := []byte("{\n  \"version\": 6\n}\n")
-	success := func(_ context.Context, request buildRequest) (buildResult, error) {
+	success := func(_ context.Context, request cliRequest) (build.Result, error) {
 		if !request.json {
 			t.Fatal("--json not passed to the build")
 		}
-		return buildResult{record: record}, nil
+		return build.Result{Record: record}, nil
 	}
 	for _, command := range [][]string{{"build", "pkg", "1", "--json"}, {"sbom", "pkg", "--apk-version=1.0-r0", "--json"}} {
 		var stdout, stderr bytes.Buffer
@@ -516,27 +518,27 @@ func TestRunJSONOutput(t *testing.T) {
 		}
 	}
 	// A typed failure prints its record on stdout; stderr keeps human output.
-	failure := newWorkflowFailure(initialBuildResult(buildRequest{packageName: "pkg", selector: "1"}), "build", errors.New("synthetic local failure"), false)
+	failure := build.NewWorkflowFailure(build.InitialResult(build.Request{PackageName: "pkg", Selector: "1"}), "build", errors.New("synthetic local failure"), false)
 	var stdout, stderr bytes.Buffer
-	code := runWithBuild(context.Background(), []string{"build", "pkg", "1", "--json"}, &stdout, &stderr, func(context.Context, buildRequest) (buildResult, error) {
-		return buildResult{}, failure
+	code := runWithBuild(context.Background(), []string{"build", "pkg", "1", "--json"}, &stdout, &stderr, func(context.Context, cliRequest) (build.Result, error) {
+		return build.Result{}, failure
 	})
-	var decoded buildRecord
-	if code != 1 || !bytes.Equal(stdout.Bytes(), failure.record) || json.Unmarshal(stdout.Bytes(), &decoded) != nil || decoded.Failure == nil || decoded.Failure.Error != "synthetic local failure" || decoded.Request.Package != "pkg" || decoded.Stages.Build.Status != "not-attempted" || decoded.Stages.Load.Status != "not-attempted" || decoded.Stages.Publication.Status != "skipped" || !strings.Contains(stderr.String(), "synthetic local failure") {
+	var decoded build.Record
+	if code != 1 || !bytes.Equal(stdout.Bytes(), failure.Record) || json.Unmarshal(stdout.Bytes(), &decoded) != nil || decoded.Failure == nil || decoded.Failure.Error != "synthetic local failure" || decoded.Request.Package != "pkg" || decoded.Stages.Build.Status != "not-attempted" || decoded.Stages.Load.Status != "not-attempted" || decoded.Stages.Publication.Status != "skipped" || !strings.Contains(stderr.String(), "synthetic local failure") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	// Untyped failures and invocation errors print nothing on stdout.
 	stdout.Reset()
-	if code := runWithBuild(context.Background(), []string{"build", "pkg", "1", "--json"}, &stdout, &stderr, func(context.Context, buildRequest) (buildResult, error) {
-		return buildResult{}, errors.New("untyped")
+	if code := runWithBuild(context.Background(), []string{"build", "pkg", "1", "--json"}, &stdout, &stderr, func(context.Context, cliRequest) (build.Result, error) {
+		return build.Result{}, errors.New("untyped")
 	}); code != 1 || stdout.Len() != 0 {
 		t.Fatalf("code=%d stdout=%q", code, stdout.String())
 	}
 	for _, args := range [][]string{{"build", "pkg", "1", "--json", "--json"}, {"build", "pkg", "--json"}, {"sbom", "pkg", "1", "--json"}, {"build", "pkg", "1", "--json", "--registry=registry.example"}} {
 		stdout.Reset()
-		if code := runWithBuild(context.Background(), args, &stdout, &stderr, func(context.Context, buildRequest) (buildResult, error) {
+		if code := runWithBuild(context.Background(), args, &stdout, &stderr, func(context.Context, cliRequest) (build.Result, error) {
 			t.Fatal("invalid invocation started a build")
-			return buildResult{}, nil
+			return build.Result{}, nil
 		}); code != 2 || stdout.Len() != 0 {
 			t.Fatalf("args=%q code=%d stdout=%q", args, code, stdout.String())
 		}

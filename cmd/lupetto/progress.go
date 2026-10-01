@@ -9,23 +9,8 @@ import (
 	"time"
 
 	"golang.org/x/term"
+	"lupetto/internal/build"
 )
-
-type buildProgressKey struct{}
-
-// Presentation stays in the CLI context; direct pipeline callers need no reporter.
-func progressFromContext(ctx context.Context) *buildProgress {
-	progress, _ := ctx.Value(buildProgressKey{}).(*buildProgress)
-	return progress
-}
-
-func buildStage(ctx context.Context, stage string) {
-	progressFromContext(ctx).Stage(stage)
-}
-
-func buildMessage(ctx context.Context, format string, args ...any) {
-	progressFromContext(ctx).Write([]byte("lupetto: " + fmt.Sprintf(format, args...) + "\n"))
-}
 
 func progressTerminal(output io.Writer) bool {
 	file, ok := output.(*os.File)
@@ -44,7 +29,7 @@ type buildProgress struct {
 	lineOpen  bool
 	closed    bool
 	failed    bool
-	sanitizer progressSanitizer
+	sanitizer build.TextSanitizer
 	stop      chan struct{}
 	done      chan struct{}
 	stopOnce  sync.Once
@@ -111,10 +96,10 @@ func (p *buildProgress) Stage(stage string) {
 	if p.closed || p.failed || p.ctx.Err() != nil {
 		return
 	}
-	p.sanitizer = progressSanitizer{}
+	p.sanitizer = build.TextSanitizer{}
 	p.clearLocked()
 	p.finishLineLocked()
-	p.stage = plainProgressText(stage)
+	p.stage = build.PlainText(stage)
 	p.writeLocked([]byte("lupetto: " + p.stage + "\n"))
 	p.drawLocked(time.Now())
 }
@@ -129,7 +114,7 @@ func (p *buildProgress) Write(data []byte) (int, error) {
 	if p.closed || p.failed || p.ctx.Err() != nil {
 		return len(data), nil
 	}
-	clean := p.sanitizer.clean(data)
+	clean := p.sanitizer.Clean(data)
 	if len(clean) != 0 {
 		p.clearLocked()
 		p.writeLocked(clean)
@@ -203,58 +188,4 @@ func progressFrame(stage string, frame int, elapsed time.Duration, columns int) 
 		return text[:min(len(text), cells)]
 	}
 	return prefix + stage[:min(len(stage), stageCells)] + suffix
-}
-
-// Keep upstream ANSI/OSC sequences and carriage-return animation out of logs.
-// State survives tool writes, including escape sequences split across chunks.
-// Captured command bytes are deliberately not passed through this sanitizer.
-type progressSanitizer struct {
-	state byte
-}
-
-func (s *progressSanitizer) clean(data []byte) []byte {
-	clean := make([]byte, 0, len(data))
-	for _, b := range data {
-		switch s.state {
-		case 1: // ESC sequence, possibly with intermediate bytes.
-			switch b {
-			case '[':
-				s.state = 2
-			case ']', 'P', 'X', '^', '_':
-				s.state = 3
-			default:
-				if b < 0x20 || b > 0x2f {
-					s.state = 0
-				}
-			}
-		case 2: // CSI ends at its final byte.
-			if b >= 0x40 && b <= 0x7e {
-				s.state = 0
-			}
-		case 3: // OSC/control string ends at BEL or ESC-backslash.
-			if b == '\a' {
-				s.state = 0
-			} else if b == 0x1b {
-				s.state = 4
-			}
-		case 4:
-			if b == '\\' {
-				s.state = 0
-			} else if b != 0x1b {
-				s.state = 3
-			}
-		default:
-			if b == 0x1b {
-				s.state = 1
-			} else if b == '\n' || b == '\t' || (b >= 0x20 && b != 0x7f) {
-				clean = append(clean, b)
-			}
-		}
-	}
-	return clean
-}
-
-func plainProgressText(text string) string {
-	var sanitizer progressSanitizer
-	return string(sanitizer.clean([]byte(text)))
 }

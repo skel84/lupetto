@@ -1,4 +1,4 @@
-package main
+package build
 
 import (
 	"fmt"
@@ -10,39 +10,40 @@ import (
 
 	"github.com/distribution/reference"
 	"github.com/google/go-containerregistry/pkg/name"
+	"lupetto/internal/wolfi"
 )
 
-type optionalString struct {
-	value string
-	set   bool
+type OptionalString struct {
+	Value string
+	Set   bool
 }
 
-type optionalBool struct {
-	value bool
-	set   bool
+type OptionalBool struct {
+	Value bool
+	Set   bool
 }
 
-type signingFlags struct {
-	key, config optionalString
-	allowHTTP   optionalBool
+type SigningFlags struct {
+	Key, Config OptionalString
+	AllowHTTP   OptionalBool
 }
 
-type signingOptions struct {
-	key, config string
-	allowHTTP   bool
+type SigningOptions struct {
+	Key, Config string
+	AllowHTTP   bool
 }
 
-func (opts signingOptions) enabled() bool {
-	return opts.key != ""
+func (opts SigningOptions) Enabled() bool {
+	return opts.Key != ""
 }
 
-func resolveSigning(raw signingFlags, pub publicationOptions, lookupEnv func(string) (string, bool)) (signingOptions, error) {
-	resolveString := func(flag optionalString, envName, flagName string) (string, error) {
-		if flag.set {
-			if flag.value == "" {
+func ResolveSigning(raw SigningFlags, pub PublicationOptions, lookupEnv func(string) (string, bool)) (SigningOptions, error) {
+	resolveString := func(flag OptionalString, envName, flagName string) (string, error) {
+		if flag.Set {
+			if flag.Value == "" {
 				return "", fmt.Errorf("%s must not be empty", flagName)
 			}
-			return flag.value, nil
+			return flag.Value, nil
 		}
 		if lookupEnv != nil {
 			if value, present := lookupEnv(envName); present {
@@ -51,16 +52,16 @@ func resolveSigning(raw signingFlags, pub publicationOptions, lookupEnv func(str
 		}
 		return "", nil
 	}
-	key, err := resolveString(raw.key, "LUPETTO_COSIGN_KEY", "--cosign-key")
+	key, err := resolveString(raw.Key, "LUPETTO_COSIGN_KEY", "--cosign-key")
 	if err != nil {
-		return signingOptions{}, err
+		return SigningOptions{}, err
 	}
-	config, err := resolveString(raw.config, "LUPETTO_COSIGN_SIGNING_CONFIG", "--cosign-signing-config")
+	config, err := resolveString(raw.Config, "LUPETTO_COSIGN_SIGNING_CONFIG", "--cosign-signing-config")
 	if err != nil {
-		return signingOptions{}, err
+		return SigningOptions{}, err
 	}
-	allowHTTP := raw.allowHTTP.set && raw.allowHTTP.value
-	if !raw.allowHTTP.set && lookupEnv != nil {
+	allowHTTP := raw.AllowHTTP.Set && raw.AllowHTTP.Value
+	if !raw.AllowHTTP.Set && lookupEnv != nil {
 		if value, present := lookupEnv("LUPETTO_COSIGN_ALLOW_HTTP"); present && value != "" {
 			switch value {
 			case "true":
@@ -68,35 +69,35 @@ func resolveSigning(raw signingFlags, pub publicationOptions, lookupEnv func(str
 			case "false":
 				allowHTTP = false
 			default:
-				return signingOptions{}, fmt.Errorf("LUPETTO_COSIGN_ALLOW_HTTP must be true or false")
+				return SigningOptions{}, fmt.Errorf("LUPETTO_COSIGN_ALLOW_HTTP must be true or false")
 			}
 		}
 	}
-	opts := signingOptions{key: key, config: config, allowHTTP: allowHTTP}
+	opts := SigningOptions{Key: key, Config: config, AllowHTTP: allowHTTP}
 	if err := validateSigningOptions(opts, pub); err != nil {
-		return signingOptions{}, err
+		return SigningOptions{}, err
 	}
 	return opts, nil
 }
 
-func validateSigningOptions(opts signingOptions, pub publicationOptions) error {
+func validateSigningOptions(opts SigningOptions, pub PublicationOptions) error {
 	if err := validatePublicationOptions(pub); err != nil {
 		return err
 	}
-	if !opts.enabled() {
-		if opts.config != "" || opts.allowHTTP {
+	if !opts.Enabled() {
+		if opts.Config != "" || opts.AllowHTTP {
 			return fmt.Errorf("Cosign signing config and enabled HTTP allowance require --cosign-key / LUPETTO_COSIGN_KEY")
 		}
 		return nil
 	}
-	if !pub.enabled() {
+	if !pub.Enabled() {
 		return fmt.Errorf("signing requires publication with both registry and repository settings")
 	}
-	loopback := registryAuthorityIsLoopback(pub.registry)
-	if opts.allowHTTP && !loopback {
+	loopback := registryAuthorityIsLoopback(pub.Registry)
+	if opts.AllowHTTP && !loopback {
 		return fmt.Errorf("--cosign-allow-http is restricted to literal-loopback registries")
 	}
-	if loopback && !opts.allowHTTP {
+	if loopback && !opts.AllowHTTP {
 		return fmt.Errorf("signing against a literal-loopback registry requires --cosign-allow-http=true")
 	}
 	return nil
@@ -124,25 +125,25 @@ func loopbackHost(host string) bool {
 	return strings.EqualFold(host, "localhost") || (ip != nil && ip.IsLoopback())
 }
 
-type publicationFlags struct {
-	registry, repository optionalString
+type PublicationFlags struct {
+	Registry, Repository OptionalString
 }
 
-type publicationOptions struct {
-	registry, repository string
+type PublicationOptions struct {
+	Registry, Repository string
 }
 
-func (opts publicationOptions) enabled() bool {
-	return opts.registry != "" || opts.repository != ""
+func (opts PublicationOptions) Enabled() bool {
+	return opts.Registry != "" || opts.Repository != ""
 }
 
-func resolvePublication(raw publicationFlags, lookupEnv func(string) (string, bool)) (publicationOptions, error) {
-	resolve := func(flag optionalString, envName, flagName string) (string, error) {
-		if flag.set {
-			if flag.value == "" {
+func ResolvePublication(raw PublicationFlags, lookupEnv func(string) (string, bool)) (PublicationOptions, error) {
+	resolve := func(flag OptionalString, envName, flagName string) (string, error) {
+		if flag.Set {
+			if flag.Value == "" {
 				return "", fmt.Errorf("%s must not be empty", flagName)
 			}
-			return flag.value, nil
+			return flag.Value, nil
 		}
 		if lookupEnv != nil {
 			if value, present := lookupEnv(envName); present {
@@ -151,44 +152,47 @@ func resolvePublication(raw publicationFlags, lookupEnv func(string) (string, bo
 		}
 		return "", nil
 	}
-	registry, err := resolve(raw.registry, "LUPETTO_REGISTRY", "--registry")
+	registry, err := resolve(raw.Registry, "LUPETTO_REGISTRY", "--registry")
 	if err != nil {
-		return publicationOptions{}, err
+		return PublicationOptions{}, err
 	}
-	repository, err := resolve(raw.repository, "LUPETTO_REPOSITORY", "--repository")
+	repository, err := resolve(raw.Repository, "LUPETTO_REPOSITORY", "--repository")
 	if err != nil {
-		return publicationOptions{}, err
+		return PublicationOptions{}, err
 	}
-	opts := publicationOptions{registry: registry, repository: repository}
+	opts := PublicationOptions{Registry: registry, Repository: repository}
 	if err := validatePublicationOptions(opts); err != nil {
-		return publicationOptions{}, err
+		return PublicationOptions{}, err
 	}
 	return opts, nil
 }
 
 var registryDNSLabel = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$`)
+
 var registryPort = regexp.MustCompile(`^[0-9]+$`)
+
 var registryNumericHost = regexp.MustCompile(`^[0-9.]+$`)
+
 var publicationWorkspaceSuffix = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
-func validatePublicationOptions(opts publicationOptions) error {
-	if !opts.enabled() {
+func validatePublicationOptions(opts PublicationOptions) error {
+	if !opts.Enabled() {
 		return nil
 	}
-	if opts.registry == "" || opts.repository == "" {
+	if opts.Registry == "" || opts.Repository == "" {
 		return fmt.Errorf("publication requires both --registry / LUPETTO_REGISTRY and --repository / LUPETTO_REPOSITORY")
 	}
-	if err := validateRegistryAuthority(opts.registry); err != nil {
+	if err := validateRegistryAuthority(opts.Registry); err != nil {
 		return err
 	}
-	for _, component := range strings.Split(opts.repository, "/") {
+	for _, component := range strings.Split(opts.Repository, "/") {
 		if !dockerRepositoryComponent.MatchString(component) {
 			return fmt.Errorf("repository must be a nested lower-case OCI prefix without tags, digests, or empty components")
 		}
 	}
 	// Even the shortest APK component must fit; the selected exact component
 	// is checked again when the final unique reference can be derived.
-	return validatePublicationReference(opts.registry, opts.repository+"/x", "validation")
+	return validatePublicationReference(opts.Registry, opts.Repository+"/x", "validation")
 }
 
 func validateRegistryAuthority(authority string) error {
@@ -277,11 +281,11 @@ func (t publicationTarget) nameOptions() []name.Option {
 	return []name.Option{name.StrictValidation}
 }
 
-func publicationReferences(selected indexedPackage, arch, workspace string, opts publicationOptions) (publicationTarget, error) {
+func publicationReferences(selected wolfi.Package, arch, workspace string, opts PublicationOptions) (publicationTarget, error) {
 	if err := validatePublicationOptions(opts); err != nil {
 		return publicationTarget{}, err
 	}
-	if !opts.enabled() {
+	if !opts.Enabled() {
 		return publicationTarget{}, nil
 	}
 	local, err := readableImageReference(selected, arch)
@@ -299,14 +303,14 @@ func publicationReferences(selected indexedPackage, arch, workspace string, opts
 	}
 	tag += "-build-" + suffix
 	if !dockerTagComponent.MatchString(tag) {
-		tag = "_apk-sha256-" + sha256Hex([]byte(tag))
+		tag = "_apk-sha256-" + wolfi.SHA256Hex([]byte(tag))
 	}
-	path := opts.repository + "/" + component
-	if err := validatePublicationReference(opts.registry, path, tag); err != nil {
+	path := opts.Repository + "/" + component
+	if err := validatePublicationReference(opts.Registry, path, tag); err != nil {
 		return publicationTarget{}, err
 	}
-	repository := opts.registry + "/" + path
-	target := publicationTarget{repository: repository, reference: repository + ":" + tag, insecure: registryAuthorityIsLoopback(opts.registry)}
+	repository := opts.Registry + "/" + path
+	target := publicationTarget{repository: repository, reference: repository + ":" + tag, insecure: registryAuthorityIsLoopback(opts.Registry)}
 	// Parse once with the client that pushes, before any build side effect, and
 	// reject any registry, repository, or tag normalization. Only Docker Hub's
 	// documented docker.io -> index.docker.io authority alias is accepted.
@@ -314,7 +318,7 @@ func publicationReferences(selected indexedPackage, arch, workspace string, opts
 	if err != nil {
 		return publicationTarget{}, fmt.Errorf("invalid publication image reference")
 	}
-	registryMatches := parsed.RegistryStr() == opts.registry || (opts.registry == "docker.io" && parsed.RegistryStr() == name.DefaultRegistry)
+	registryMatches := parsed.RegistryStr() == opts.Registry || (opts.Registry == "docker.io" && parsed.RegistryStr() == name.DefaultRegistry)
 	if !registryMatches || parsed.RepositoryStr() != path || parsed.TagStr() != tag {
 		return publicationTarget{}, fmt.Errorf("publication image reference normalizes to a different registry, repository, or tag")
 	}

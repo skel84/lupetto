@@ -13,6 +13,10 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
+	"lupetto/internal/build"
+	"lupetto/internal/build/buildtest"
+	"lupetto/internal/wolfi"
+	"lupetto/internal/wolfi/wolfitest"
 )
 
 type cancelOnRecordingWriter struct {
@@ -29,25 +33,22 @@ func (w cancelOnRecordingWriter) Write(data []byte) (int, error) {
 }
 
 type pipelineFixture struct {
-	services                                                   buildServices
+	services                                                   build.Services
 	events                                                     []string
 	workspace, imageID, dockerID, reference, readableReference string
 	manifestDigest                                             string
-	registry                                                   *testRegistry
+	registry                                                   *buildtest.Registry
 	afterBuild                                                 []func(imageDir string)
 }
 
 func newPipelineFixture(t *testing.T, failure string, cancel context.CancelFunc) *pipelineFixture {
 	t.Helper()
-	arch, err := targetArch()
+	arch, err := wolfi.TargetArch()
 	if err != nil {
 		t.Fatal(err)
 	}
-	ociArch, err := ociArchitecture(arch)
-	if err != nil {
-		t.Fatal(err)
-	}
-	index, key := makeSignedIndexFor(t, "P:postgresql-17\nV:17.10-r1\nA:"+arch+"\nC:Q1checksum\n\n")
+	ociArch := buildtest.OCIArch(t, arch)
+	index, key := wolfitest.MakeSignedIndexFor(t, "P:postgresql-17\nV:17.10-r1\nA:"+arch+"\nC:Q1checksum\n\n")
 	cache := t.TempDir()
 	f := &pipelineFixture{}
 	f.readableReference = "lupetto/postgresql-17:17.10-r1-" + ociArch
@@ -57,9 +58,9 @@ func newPipelineFixture(t *testing.T, failure string, cancel context.CancelFunc)
 			t.Fatal(err)
 		}
 	}
-	f.services = buildServices{
-		cacheDir: func() (string, error) { return cache, nil },
-		publicFile: func(ctx context.Context, url string, max int64) ([]byte, error) {
+	f.services = build.Services{
+		CacheDir: func() (string, error) { return cache, nil },
+		PublicFile: func(ctx context.Context, url string, max int64) ([]byte, error) {
 			f.events = append(f.events, "index")
 			if failure == "cancel index" {
 				cancel()
@@ -67,8 +68,8 @@ func newPipelineFixture(t *testing.T, failure string, cancel context.CancelFunc)
 			}
 			return index, nil
 		},
-		signingKey: func(ctx context.Context) ([]byte, error) { return key, nil },
-		command: func(ctx context.Context, executable string, args ...string) ([]byte, error) {
+		SigningKey: func(ctx context.Context) ([]byte, error) { return key, nil },
+		Command: func(ctx context.Context, executable string, args ...string) ([]byte, error) {
 			stage := args[0]
 			if executable == "docker" {
 				stage = args[1]
@@ -86,7 +87,7 @@ func newPipelineFixture(t *testing.T, failure string, cancel context.CancelFunc)
 			}
 			switch executable + " " + stage {
 			case "apko version":
-				return []byte("GitVersion:    " + apkoBuildVersion + "\n"), nil
+				return []byte("GitVersion:    " + build.ApkoVersion + "\n"), nil
 			case "apko lock":
 				lockPath := args[4]
 				f.workspace = filepath.Dir(lockPath)
@@ -102,9 +103,9 @@ func newPipelineFixture(t *testing.T, failure string, cancel context.CancelFunc)
 				if failure == "image package" {
 					version = "17.10-r2"
 				}
-				f.imageID, _, _ = makeLoadOCI(t, imageDir, "postgresql-17", version, arch)
+				f.imageID, _, _ = buildtest.MakeLoadOCI(t, imageDir, "postgresql-17", version, arch)
 				f.dockerID = f.imageID
-				f.manifestDigest = fixtureManifestDigest(t, imageDir)
+				f.manifestDigest = buildtest.ManifestDigest(t, imageDir)
 				for _, hook := range f.afterBuild {
 					hook(imageDir)
 				}
@@ -198,7 +199,7 @@ func newPipelineFixture(t *testing.T, failure string, cancel context.CancelFunc)
 				if !reflect.DeepEqual(args, []string{"image", "save", "--output", wantPath, f.reference}) {
 					t.Fatalf("unexpected save arguments: %q", args)
 				}
-				writeSavedDockerFixture(t, filepath.Join(f.workspace, "docker-image.tar"), wantPath, failure)
+				buildtest.WriteSavedDockerFixture(t, filepath.Join(f.workspace, "docker-image.tar"), wantPath, failure)
 			default:
 				t.Fatalf("unexpected command: %s %q", executable, args)
 			}
@@ -237,10 +238,10 @@ func TestBuildLocalLoadAndSkippedStageOrchestration(t *testing.T) {
 				args[0] = "sbom"
 			}
 			var stdout, stderr bytes.Buffer
-			build := func(ctx context.Context, request buildRequest) (buildResult, error) {
-				return buildLocalWith(ctx, request, f.services)
+			runBuild := func(ctx context.Context, request cliRequest) (build.Result, error) {
+				return build.RunWith(ctx, request.Request, f.services)
 			}
-			if code := runWithBuild(ctx, args, &stdout, &stderr, build); code != 0 {
+			if code := runWithBuild(ctx, args, &stdout, &stderr, runBuild); code != 0 {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 			}
 			wantEvents := []string{"apko version", "index", "apko lock", "apko build"}
@@ -308,10 +309,10 @@ func TestBuildLocalLoadAndSkippedStageOrchestration(t *testing.T) {
 			if record.Version != 6 || record.Command != wantCommand || record.Outcome != "succeeded" || record.Workspace != f.workspace || load.ImageReference != wantReadableRef || load.BuildReference != wantRef || load.Status != status || load.DockerImageID != imageID || load.ReadableReferenceConfirmed != (status == "loaded") || record.Evidence == nil || !record.Evidence.SPDXValidated || record.Evidence.SPDXSHA256 == "" {
 				t.Fatalf("record=%+v", record)
 			}
-			if record.Request != (recordRequest{Package: "postgresql-17", APKVersion: "17.10-r1", Load: status == "loaded"}) || record.Stages.Build.Status != "completed" || record.Stages.Publication != (recordPublication{Status: "skipped"}) || record.Stages.Signing.Status != "skipped" || record.Stages.Attestation.Status != "skipped" {
+			if record.Request != (build.RecordRequest{Package: "postgresql-17", APKVersion: "17.10-r1", Load: status == "loaded"}) || record.Stages.Build.Status != "completed" || record.Stages.Publication != (build.RecordPublication{Status: "skipped"}) || record.Stages.Signing.Status != "skipped" || record.Stages.Attestation.Status != "skipped" {
 				t.Fatalf("request/stages=%+v %+v", record.Request, record.Stages)
 			}
-			if record.Selection == nil || *record.Selection != (recordSelection{Package: "postgresql-17", Version: "17.10-r1", Architecture: record.Selection.Architecture, IndexSHA256: record.Selection.IndexSHA256}) || record.Selection.IndexSHA256 == "" || record.Selection.Architecture == "" || record.Evidence.ApkoVersion != apkoBuildVersion || record.Evidence.ImageDirectory == "" || record.Evidence.ImageDigest != f.manifestDigest || record.Evidence.LockPath == "" || record.Evidence.SPDXPath == "" {
+			if record.Selection == nil || *record.Selection != (build.RecordSelection{Package: "postgresql-17", Version: "17.10-r1", Architecture: record.Selection.Architecture, IndexSHA256: record.Selection.IndexSHA256}) || record.Selection.IndexSHA256 == "" || record.Selection.Architecture == "" || record.Evidence.ApkoVersion != build.ApkoVersion || record.Evidence.ImageDirectory == "" || record.Evidence.ImageDigest != f.manifestDigest || record.Evidence.LockPath == "" || record.Evidence.SPDXPath == "" {
 				t.Fatalf("selected APK/artifact evidence lost: %+v %+v", record.Selection, record.Evidence)
 			}
 			if _, ok := raw["failure"]; ok {
@@ -347,10 +348,10 @@ func TestBuildLocalFailedStagesNeverReportSuccess(t *testing.T) {
 				args = append(args, "--no-load")
 			}
 			var stdout, stderr bytes.Buffer
-			var typed *workflowFailure
-			build := func(ctx context.Context, request buildRequest) (buildResult, error) {
-				result, err := buildLocalWith(ctx, request, f.services)
-				if !errors.As(err, &typed) || typed.result.workspace == "" {
+			var typed *build.WorkflowFailure
+			runBuild := func(ctx context.Context, request cliRequest) (build.Result, error) {
+				result, err := build.RunWith(ctx, request.Request, f.services)
+				if !errors.As(err, &typed) || typed.Result.Workspace == "" {
 					t.Fatalf("local failure is not a typed workflow failure with a workspace: %v", err)
 				}
 				if strings.HasPrefix(failure, "cancel") && !errors.Is(err, context.Canceled) {
@@ -362,7 +363,7 @@ func TestBuildLocalFailedStagesNeverReportSuccess(t *testing.T) {
 			if failure == "cancel finalization" {
 				stderrWriter.cancel = cancel
 			}
-			if code := runWithBuild(ctx, args, &stdout, stderrWriter, build); code != 1 || stdout.Len() != 0 {
+			if code := runWithBuild(ctx, args, &stdout, stderrWriter, runBuild); code != 1 || stdout.Len() != 0 {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 			}
 			assertNoSuccessRecord(t, f.workspace)
@@ -417,7 +418,7 @@ func TestBuildLocalFailedStagesNeverReportSuccess(t *testing.T) {
 			}
 			// Local-only workflows now also leave a version-6 failure record
 			// with the same detailed message the CLI prints.
-			record, _ := readRecord(t, filepath.Join(typed.result.workspace, "failure.json"))
+			record, _ := readRecord(t, filepath.Join(typed.Result.Workspace, "failure.json"))
 			if record.Version != 6 || record.Outcome != "failed" || record.Failure == nil || record.Failure.Error == "" || !strings.Contains(stderr.String(), record.Failure.Error) || record.Request.Publish || record.Stages.Publication.Status != "skipped" || record.Stages.Signing.Status != "skipped" {
 				t.Fatalf("failure record=%+v failure=%+v stderr=%s", record, record.Failure, stderr.String())
 			}
@@ -476,11 +477,11 @@ func TestSBOMRejectsNoLoadWithoutStartingBuild(t *testing.T) {
 		{"sbom", "postgresql-17", "--apk-version=17.10-r1", "--no-load=true"},
 	} {
 		var stdout, stderr bytes.Buffer
-		build := func(context.Context, buildRequest) (buildResult, error) {
+		runBuild := func(context.Context, cliRequest) (build.Result, error) {
 			t.Fatal("sbom invalid flags started building")
-			return buildResult{}, nil
+			return build.Result{}, nil
 		}
-		if code := runWithBuild(context.Background(), args, &stdout, &stderr, build); code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "--no-load") {
+		if code := runWithBuild(context.Background(), args, &stdout, &stderr, runBuild); code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "--no-load") {
 			t.Fatalf("args=%q code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
 		}
 	}

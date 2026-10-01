@@ -1,8 +1,10 @@
-package main
+// Package wolfi resolves exact APKs from the signed public Wolfi APKINDEX:
+// trust inputs, public file and key fetch, signature verification, index
+// parsing, exact selection, and discovery ordering. It knows nothing about
+// builds or the CLI.
+package wolfi
 
 import (
-	apkcompare "chainguard.dev/apko/pkg/apk/apk"
-
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
@@ -20,23 +22,34 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	apkcompare "chainguard.dev/apko/pkg/apk/apk"
+)
+
+// PackageNamePattern matches a literal APK name; RequestedNamePattern also
+// allows namespaced provider names such as cmd:curl.
+var (
+	PackageNamePattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+._-]*$`)
+	RequestedNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+._-]*(?::[A-Za-z0-9][A-Za-z0-9+._-]*)*$`)
 )
 
 // Trust inputs for the public Wolfi repository. Package names and versions
 // are resolved from the signed index, not from a source-level allowlist.
 const (
-	wolfiRepository = "https://packages.wolfi.dev/os"
-	wolfiKeyURL     = wolfiRepository + "/wolfi-signing.rsa.pub"
-	wolfiKeySHA256  = "f0031424cf46f7db780ce63a45f0fd6aa6f85f601e6bb3b7a91fe3d4d5b7d2cc"
+	Repository     = "https://packages.wolfi.dev/os"
+	wolfiKeyURL    = Repository + "/wolfi-signing.rsa.pub"
+	wolfiKeySHA256 = "f0031424cf46f7db780ce63a45f0fd6aa6f85f601e6bb3b7a91fe3d4d5b7d2cc"
 )
 
 var upstreamNumbers = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)*)`)
 
-type indexedPackage struct {
-	name, version, arch, checksum, provides string
+// Package is one APKINDEX entry.
+type Package struct {
+	Name, Version, Arch, Checksum, Provides string
 }
 
-func targetArch() (string, error) {
+// TargetArch returns the Wolfi architecture of the host.
+func TargetArch() (string, error) {
 	switch runtime.GOARCH {
 	case "amd64":
 		return "x86_64", nil
@@ -47,7 +60,8 @@ func targetArch() (string, error) {
 	}
 }
 
-func getPublicFile(ctx context.Context, url string, maxBytes int64) ([]byte, error) {
+// GetPublicFile fetches a public URL, refusing bodies over maxBytes.
+func GetPublicFile(ctx context.Context, url string, maxBytes int64) ([]byte, error) {
 	client := &http.Client{Timeout: 90 * time.Second}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -71,12 +85,14 @@ func getPublicFile(ctx context.Context, url string, maxBytes int64) ([]byte, err
 	return data, nil
 }
 
-func getWolfiSigningKey(ctx context.Context) ([]byte, error) {
-	key, err := getPublicFile(ctx, wolfiKeyURL, 16<<10)
+// GetSigningKey fetches the Wolfi signing key and checks its pinned
+// fingerprint.
+func GetSigningKey(ctx context.Context) ([]byte, error) {
+	key, err := GetPublicFile(ctx, wolfiKeyURL, 16<<10)
 	if err != nil {
 		return nil, err
 	}
-	if sha256Hex(key) != wolfiKeySHA256 {
+	if SHA256Hex(key) != wolfiKeySHA256 {
 		return nil, fmt.Errorf("Wolfi signing key fingerprint changed; refusing to use untrusted key")
 	}
 	return key, nil
@@ -85,7 +101,7 @@ func getWolfiSigningKey(ctx context.Context) ([]byte, error) {
 // Wolfi signs the second gzip member (the index tarball) with a signature
 // stored in the first gzip member. Match apko's APKINDEX verification framing
 // before treating an index as a source for "latest" or "unavailable" claims.
-func verifyAPKINDEX(compressed, publicKey []byte) ([]byte, error) {
+func VerifyAPKINDEX(compressed, publicKey []byte) ([]byte, error) {
 	input := bytes.NewReader(compressed)
 	gz, err := gzip.NewReader(input)
 	if err != nil {
@@ -136,7 +152,9 @@ func verifyAPKINDEX(compressed, publicKey []byte) ([]byte, error) {
 	return indexMember, nil
 }
 
-func parseAPKINDEX(compressed []byte, requested string) ([]indexedPackage, error) {
+// ParseAPKINDEX returns the complete entries that match requested by name or
+// by a provider of the entry's own exact version.
+func ParseAPKINDEX(compressed []byte, requested string) ([]Package, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(compressed))
 	if err != nil {
 		return nil, fmt.Errorf("open APKINDEX gzip: %w", err)
@@ -164,14 +182,14 @@ func parseAPKINDEX(compressed []byte, requested string) ([]indexedPackage, error
 		if len(data) > 96<<20 {
 			return nil, fmt.Errorf("APKINDEX member exceeds 96 MiB")
 		}
-		var packages []indexedPackage
-		var current indexedPackage
+		var packages []Package
+		var current Package
 		for _, line := range strings.Split(string(data), "\n") {
 			if line == "" {
-				if matchesRequestedPackage(current, requested) && current.version != "" && current.arch != "" && current.checksum != "" {
+				if matchesRequestedPackage(current, requested) && current.Version != "" && current.Arch != "" && current.Checksum != "" {
 					packages = append(packages, current)
 				}
-				current = indexedPackage{}
+				current = Package{}
 				continue
 			}
 			if len(line) < 3 || line[1] != ':' {
@@ -179,18 +197,18 @@ func parseAPKINDEX(compressed []byte, requested string) ([]indexedPackage, error
 			}
 			switch line[0] {
 			case 'P':
-				current.name = line[2:]
+				current.Name = line[2:]
 			case 'V':
-				current.version = line[2:]
+				current.Version = line[2:]
 			case 'A':
-				current.arch = line[2:]
+				current.Arch = line[2:]
 			case 'C':
-				current.checksum = line[2:]
+				current.Checksum = line[2:]
 			case 'p':
-				current.provides = line[2:]
+				current.Provides = line[2:]
 			}
 		}
-		if matchesRequestedPackage(current, requested) && current.version != "" && current.arch != "" && current.checksum != "" {
+		if matchesRequestedPackage(current, requested) && current.Version != "" && current.Arch != "" && current.Checksum != "" {
 			packages = append(packages, current)
 		}
 		return packages, nil
@@ -199,48 +217,51 @@ func parseAPKINDEX(compressed []byte, requested string) ([]indexedPackage, error
 
 // A provided name is usable only when it advertises the APK's own exact
 // version. This keeps selection tied to the package that apko will lock.
-func matchesRequestedPackage(pkg indexedPackage, requested string) bool {
-	if pkg.name == requested {
+func matchesRequestedPackage(pkg Package, requested string) bool {
+	if pkg.Name == requested {
 		return true
 	}
-	for _, provided := range strings.Fields(pkg.provides) {
-		if provided == requested+"="+pkg.version {
+	for _, provided := range strings.Fields(pkg.Provides) {
+		if provided == requested+"="+pkg.Version {
 			return true
 		}
 	}
 	return false
 }
 
-func selectPackage(packages []indexedPackage, request buildRequest, arch string) (indexedPackage, error) {
-	var best indexedPackage
+// SelectPackage resolves requested (an APK name or version-matched provider)
+// to one exact APK: the exact version when given, otherwise the highest APK
+// version whose upstream numbers match the dotted numeric selector.
+func SelectPackage(packages []Package, requested, selector, version, arch string) (Package, error) {
+	var best Package
 	var bestVersion apkcompare.Version
 	ambiguous := false
 	for _, pkg := range packages {
-		if pkg.arch != arch || !matchesRequestedPackage(pkg, request.packageName) {
+		if pkg.Arch != arch || !matchesRequestedPackage(pkg, requested) {
 			continue
 		}
-		if !packageName.MatchString(pkg.name) {
-			return indexedPackage{}, fmt.Errorf("invalid APKINDEX package name %q", pkg.name)
+		if !PackageNamePattern.MatchString(pkg.Name) {
+			return Package{}, fmt.Errorf("invalid APKINDEX package name %q", pkg.Name)
 		}
-		if request.version != "" {
-			if pkg.version != request.version {
+		if version != "" {
+			if pkg.Version != version {
 				continue
 			}
-			if best.version != "" && (best.name != pkg.name || best.checksum != pkg.checksum) {
-				return indexedPackage{}, fmt.Errorf("ambiguous package providers for %s@%s", request.packageName, pkg.version)
+			if best.Version != "" && (best.Name != pkg.Name || best.Checksum != pkg.Checksum) {
+				return Package{}, fmt.Errorf("ambiguous package providers for %s@%s", requested, pkg.Version)
 			}
 			best = pkg
 			continue
 		}
-		upstream := upstreamNumbers.FindString(pkg.version)
-		if upstream != request.selector && !strings.HasPrefix(upstream, request.selector+".") {
+		upstream := upstreamNumbers.FindString(pkg.Version)
+		if upstream != selector && !strings.HasPrefix(upstream, selector+".") {
 			continue
 		}
-		parsed, err := apkcompare.ParseVersion(pkg.version)
+		parsed, err := apkcompare.ParseVersion(pkg.Version)
 		if err != nil {
-			return indexedPackage{}, fmt.Errorf("cannot order APK version %q for %s: %w", pkg.version, pkg.name, err)
+			return Package{}, fmt.Errorf("cannot order APK version %q for %s: %w", pkg.Version, pkg.Name, err)
 		}
-		if best.version == "" {
+		if best.Version == "" {
 			best, bestVersion = pkg, parsed
 			continue
 		}
@@ -248,24 +269,24 @@ func selectPackage(packages []indexedPackage, request buildRequest, arch string)
 		if comparison > 0 {
 			best, bestVersion = pkg, parsed
 			ambiguous = false
-		} else if comparison == 0 && (best.name != pkg.name || best.version != pkg.version || best.checksum != pkg.checksum) {
+		} else if comparison == 0 && (best.Name != pkg.Name || best.Version != pkg.Version || best.Checksum != pkg.Checksum) {
 			ambiguous = true
 		}
 	}
-	if best.version == "" {
-		selector := request.selector
-		if request.version != "" {
-			selector = request.version
+	if best.Version == "" {
+		if version != "" {
+			selector = version
 		}
-		return indexedPackage{}, fmt.Errorf("unavailable version: %s %s for %s in current Wolfi APKINDEX", request.packageName, selector, arch)
+		return Package{}, fmt.Errorf("unavailable version: %s %s for %s in current Wolfi APKINDEX", requested, selector, arch)
 	}
 	if ambiguous {
-		return indexedPackage{}, fmt.Errorf("ambiguous package providers for %s at %s", request.packageName, best.version)
+		return Package{}, fmt.Errorf("ambiguous package providers for %s at %s", requested, best.Version)
 	}
 	return best, nil
 }
 
-func sha256Hex(data []byte) string {
+// SHA256Hex returns the lower-case hex SHA-256 of data.
+func SHA256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }

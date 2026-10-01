@@ -1,4 +1,4 @@
-package main
+package build
 
 import (
 	"bytes"
@@ -17,15 +17,15 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 )
 
-type localCommand func(context.Context, string, ...string) ([]byte, error)
+type CommandFunc func(context.Context, string, ...string) ([]byte, error)
 
-func executeLocalCommand(ctx context.Context, executable string, args ...string) ([]byte, error) {
+func ExecuteLocalCommand(ctx context.Context, executable string, args ...string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	output := &localCommandOutput{}
 	if liveCommandDiagnostics(executable, args) {
-		output.progress = progressFromContext(ctx)
+		output.progress = ReporterFrom(ctx)
 	}
 	command := exec.CommandContext(ctx, executable, args...)
 	command.Stdout, command.Stderr = output, output
@@ -38,12 +38,14 @@ func executeLocalCommand(ctx context.Context, executable string, args ...string)
 
 type localCommandOutput struct {
 	capture  bytes.Buffer
-	progress *buildProgress
+	progress Reporter
 }
 
 func (w *localCommandOutput) Write(data []byte) (int, error) {
 	n, err := w.capture.Write(data)
-	w.progress.Write(data)
+	if w.progress != nil {
+		w.progress.Write(data)
+	}
 	return n, err
 }
 
@@ -158,7 +160,7 @@ func exportDockerArchive(ctx context.Context, imageDir, archivePath, reference, 
 	return configDigest.String(), nil
 }
 
-func loadDockerImage(ctx context.Context, command localCommand, imageDir, workspace, reference, arch string) (string, error) {
+func loadDockerImage(ctx context.Context, command CommandFunc, imageDir, workspace, reference, arch string) (string, error) {
 	loadStarted := false
 	fail := func(stage string, err error) (string, error) {
 		sideEffect := "Docker load was not started"
@@ -247,7 +249,7 @@ func loadDockerImage(ctx context.Context, command localCommand, imageDir, worksp
 }
 
 // Finalize the mutable readable tag only from the already verified local ID.
-func tagReadableDockerImage(ctx context.Context, command localCommand, imageID, buildReference, reference, arch string) error {
+func tagReadableDockerImage(ctx context.Context, command CommandFunc, imageID, buildReference, reference, arch string) error {
 	fail := func(stage string, err error) error {
 		return fmt.Errorf("%s for %s failed: %w; unique image %s was imported and verified (image ID: %s), but readable tagging was not confirmed and may already have changed local tags; cancellation cannot undo daemon work", stage, reference, err, buildReference, imageID)
 	}

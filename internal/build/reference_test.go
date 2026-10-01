@@ -1,4 +1,4 @@
-package main
+package build
 
 import (
 	"crypto/sha256"
@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	"lupetto/internal/wolfi"
+	"lupetto/internal/wolfi/wolfitest"
 )
 
 func TestReadableImageReferenceLiteralIdentities(t *testing.T) {
@@ -18,7 +20,7 @@ func TestReadableImageReferenceLiteralIdentities(t *testing.T) {
 	} {
 		for _, arch := range []struct{ apk, oci string }{{"x86_64", "amd64"}, {"aarch64", "arm64"}} {
 			t.Run(tc.pkg+"/"+arch.apk, func(t *testing.T) {
-				got, err := readableImageReference(indexedPackage{name: tc.pkg, version: tc.version}, arch.apk)
+				got, err := readableImageReference(wolfi.Package{Name: tc.pkg, Version: tc.version}, arch.apk)
 				want := "lupetto/" + tc.pkg + ":" + tc.version + "-" + arch.oci
 				if err != nil || got != want {
 					t.Fatalf("reference=%q want=%q err=%v", got, want, err)
@@ -26,7 +28,7 @@ func TestReadableImageReferenceLiteralIdentities(t *testing.T) {
 			})
 		}
 	}
-	if _, err := readableImageReference(indexedPackage{name: "busybox-static", version: "1.38.0-r2"}, "unsupported"); err == nil {
+	if _, err := readableImageReference(wolfi.Package{Name: "busybox-static", Version: "1.38.0-r2"}, "unsupported"); err == nil {
 		t.Fatal("unsupported architecture accepted")
 	}
 }
@@ -38,12 +40,12 @@ func TestReadableImageReferenceUsesResolvedProviderIdentity(t *testing.T) {
 		{"cmd:busybox", "busybox-static", "1.38.0-r2"},
 	} {
 		t.Run(tc.provider, func(t *testing.T) {
-			index := makeIndex(t, "P:"+tc.pkg+"\nV:"+tc.version+"\nA:x86_64\nC:Q1checksum\np:"+tc.provider+"="+tc.version+"\n\n")
-			packages, err := parseAPKINDEX(index, tc.provider)
+			index := wolfitest.MakeIndex(t, "P:"+tc.pkg+"\nV:"+tc.version+"\nA:x86_64\nC:Q1checksum\np:"+tc.provider+"="+tc.version+"\n\n")
+			packages, err := wolfi.ParseAPKINDEX(index, tc.provider)
 			if err != nil {
 				t.Fatal(err)
 			}
-			selected, err := selectPackage(packages, buildRequest{packageName: tc.provider, version: tc.version}, "x86_64")
+			selected, err := wolfi.SelectPackage(packages, tc.provider, "", tc.version, "x86_64")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -62,7 +64,7 @@ func referenceTestHash(value string) string {
 
 func TestReadableImageReferenceComponentFallbacks(t *testing.T) {
 	for _, pkg := range []string{"Package", "package+extra", "package..extra", "package___extra", "package.-extra", "package-", "package/extra", "apk-sha256-literal", strings.Repeat("p", 238), strings.Repeat("p", 248)} {
-		got, err := readableImageReference(indexedPackage{name: pkg, version: "1.2.3-r4"}, "x86_64")
+		got, err := readableImageReference(wolfi.Package{Name: pkg, Version: "1.2.3-r4"}, "x86_64")
 		want := "lupetto/apk-sha256-" + referenceTestHash(pkg) + ":1.2.3-r4-amd64"
 		if err != nil || got != want {
 			t.Fatalf("package=%q reference=%q want=%q err=%v", pkg, got, want, err)
@@ -70,7 +72,7 @@ func TestReadableImageReferenceComponentFallbacks(t *testing.T) {
 	}
 	for _, version := range []string{"1.2+extra-r1", "1.2~rc-r1", "1:2-r1", "_apk-sha256-literal-r1", "-1-r1", strings.Repeat("1", 120) + "-r1"} {
 		for _, arch := range []struct{ apk, oci string }{{"x86_64", "amd64"}, {"aarch64", "arm64"}} {
-			got, err := readableImageReference(indexedPackage{name: "package", version: version}, arch.apk)
+			got, err := readableImageReference(wolfi.Package{Name: "package", Version: version}, arch.apk)
 			want := "lupetto/package:_apk-sha256-" + referenceTestHash(version) + "-" + arch.oci
 			if err != nil || got != want {
 				t.Fatalf("version=%q reference=%q want=%q err=%v", version, got, want, err)
@@ -82,20 +84,20 @@ func TestReadableImageReferenceComponentFallbacks(t *testing.T) {
 	}
 	// Exact boundary lengths remain literal rather than being truncated or hashed.
 	pkg, version := strings.Repeat("p", 237), strings.Repeat("1", 119)+"-r1"
-	got, err := readableImageReference(indexedPackage{name: pkg, version: version}, "x86_64")
+	got, err := readableImageReference(wolfi.Package{Name: pkg, Version: version}, "x86_64")
 	if err != nil || got != "lupetto/"+pkg+":"+version+"-amd64" {
 		t.Fatalf("boundary reference=%q err=%v", got, err)
 	}
 }
 
 func TestReadableImageReferenceFallbacksAvoidLossyAndReservedCollisions(t *testing.T) {
-	identities := []indexedPackage{
-		{name: "Package", version: "1+2-r1"},
-		{name: "package", version: "1+2-r1"},
-		{name: "Package", version: "1~2-r1"},
-		{name: "Package", version: "1-2-r1"},
-		{name: "apk-sha256-" + referenceTestHash("Package"), version: "1+2-r1"},
-		{name: "Package", version: "_apk-sha256-" + referenceTestHash("1+2-r1")},
+	identities := []wolfi.Package{
+		{Name: "Package", Version: "1+2-r1"},
+		{Name: "package", Version: "1+2-r1"},
+		{Name: "Package", Version: "1~2-r1"},
+		{Name: "Package", Version: "1-2-r1"},
+		{Name: "apk-sha256-" + referenceTestHash("Package"), Version: "1+2-r1"},
+		{Name: "Package", Version: "_apk-sha256-" + referenceTestHash("1+2-r1")},
 	}
 	seen := make(map[string]bool)
 	for _, identity := range identities {

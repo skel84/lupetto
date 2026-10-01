@@ -1,4 +1,4 @@
-package main
+package build
 
 import (
 	"encoding/json"
@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"lupetto/internal/wolfi"
 )
 
 func TestValidateSPDXCompleteAPKSet(t *testing.T) {
@@ -58,7 +60,7 @@ func TestValidateSPDXCompleteAPKSet(t *testing.T) {
 			}
 			digest, err := validateSPDX(lockPath, spdxPath, "x86_64")
 			if tc.valid {
-				if err != nil || digest != sha256Hex(doc) {
+				if err != nil || digest != wolfi.SHA256Hex(doc) {
 					t.Fatalf("digest=%q err=%v", digest, err)
 				}
 			} else if err == nil || digest != "" || !strings.Contains(err.Error(), tc.message) {

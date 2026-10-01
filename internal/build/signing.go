@@ -1,4 +1,4 @@
-package main
+package build
 
 import (
 	"context"
@@ -11,9 +11,10 @@ import (
 	"strings"
 
 	"github.com/distribution/reference"
+	"lupetto/internal/wolfi"
 )
 
-const cosignSigningVersion = "v3.1.3"
+const CosignVersion = "v3.1.3"
 
 var cosignReleaseVersion = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
 
@@ -60,7 +61,7 @@ func executeSigningCommand(ctx context.Context, executable string, args ...strin
 	return []byte(release.GitVersion), nil
 }
 
-func requireCosignVersion(ctx context.Context, command localCommand) error {
+func requireCosignVersion(ctx context.Context, command CommandFunc) error {
 	if err := ctx.Err(); err != nil {
 		return safeStageError(ctx, "Cosign version preflight", err)
 	}
@@ -71,7 +72,7 @@ func requireCosignVersion(ctx context.Context, command localCommand) error {
 	if err != nil || ctx.Err() != nil {
 		return safeStageError(ctx, "Cosign version preflight", err)
 	}
-	if string(output) != cosignSigningVersion {
+	if string(output) != CosignVersion {
 		return safeStageError(ctx, "Cosign v3.1.3 required", nil)
 	}
 	return nil
@@ -81,13 +82,13 @@ type signingOutcome struct {
 	signing, attestation string
 }
 
-func verifiedSigningReference(result buildResult) bool {
-	p := result.publication
-	if p.status != "published" || !p.verified || !digestPattern.MatchString(p.pushedDigest) {
+func verifiedSigningReference(result Result) bool {
+	p := result.Publication
+	if p.Status != "published" || !p.Verified || !digestPattern.MatchString(p.PushedDigest) {
 		return false
 	}
-	tag, err := reference.ParseNormalizedNamed(p.reference)
-	if err != nil || tag.String() != p.reference {
+	tag, err := reference.ParseNormalizedNamed(p.Reference)
+	if err != nil || tag.String() != p.Reference {
 		return false
 	}
 	named, ok := tag.(reference.NamedTagged)
@@ -97,7 +98,7 @@ func verifiedSigningReference(result buildResult) bool {
 	if _, digested := tag.(reference.Digested); digested {
 		return false
 	}
-	immutable, err := reference.Parse(p.immutableReference)
+	immutable, err := reference.Parse(p.ImmutableReference)
 	if err != nil {
 		return false
 	}
@@ -105,13 +106,13 @@ func verifiedSigningReference(result buildResult) bool {
 	if !ok {
 		return false
 	}
-	return canonical.Name() == named.Name() && canonical.Digest().String() == p.pushedDigest &&
-		p.immutableReference == named.Name()+"@"+p.pushedDigest
+	return canonical.Name() == named.Name() && canonical.Digest().String() == p.PushedDigest &&
+		p.ImmutableReference == named.Name()+"@"+p.PushedDigest
 }
 
-func signAndAttestDigest(ctx context.Context, command localCommand, result buildResult, opts signingOptions) (signingOutcome, error) {
+func signAndAttestDigest(ctx context.Context, command CommandFunc, result Result, opts SigningOptions) (signingOutcome, error) {
 	outcome := signingOutcome{signing: "skipped", attestation: "skipped"}
-	if !opts.enabled() {
+	if !opts.Enabled() {
 		return outcome, nil
 	}
 	outcome.signing, outcome.attestation = "failed", "not-attempted"
@@ -121,13 +122,13 @@ func signAndAttestDigest(ctx context.Context, command localCommand, result build
 	if !verifiedSigningReference(result) {
 		return fail("signing requires verified canonical pushed digest", nil)
 	}
-	target, _ := reference.ParseNormalizedNamed(result.publication.reference)
+	target, _ := reference.ParseNormalizedNamed(result.Publication.Reference)
 	path := reference.Path(target)
 	slash := strings.LastIndexByte(path, '/')
 	if slash <= 0 {
 		return fail("signing target repository", nil)
 	}
-	if err := validateSigningOptions(opts, publicationOptions{registry: reference.Domain(target), repository: path[:slash]}); err != nil {
+	if err := validateSigningOptions(opts, PublicationOptions{Registry: reference.Domain(target), Repository: path[:slash]}); err != nil {
 		return fail("signing configuration", err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -136,16 +137,16 @@ func signAndAttestDigest(ctx context.Context, command localCommand, result build
 	if command == nil {
 		return fail("image signing", nil)
 	}
-	common := []string{"--yes", "--key", opts.key}
-	if opts.config != "" {
-		common = append(common, "--signing-config", opts.config)
+	common := []string{"--yes", "--key", opts.Key}
+	if opts.Config != "" {
+		common = append(common, "--signing-config", opts.Config)
 		buildMessage(ctx, "Cosign uses an operator-supplied custom service configuration")
 	}
-	if opts.allowHTTP {
+	if opts.AllowHTTP {
 		common = append(common, "--allow-http-registry")
 		buildMessage(ctx, "Cosign loopback HTTP access explicitly enabled; local-development exception")
 	}
-	immutable := result.publication.immutableReference
+	immutable := result.Publication.ImmutableReference
 	buildStage(ctx, "Signing verified immutable registry image")
 	if err := ctx.Err(); err != nil {
 		return fail("image signing", err)
@@ -162,18 +163,18 @@ func signAndAttestDigest(ctx context.Context, command localCommand, result build
 	}
 	// Use the already lock-validated architecture document, never the index SPDX
 	// or regenerated evidence. Recheck its bytes immediately before the command.
-	predicate, err := os.ReadFile(result.spdxPath)
+	predicate, err := os.ReadFile(result.SPDXPath)
 	if err != nil {
 		return fail("SPDX attestation predicate read", err)
 	}
-	if len(result.spdxSHA256) != 64 || sha256Hex(predicate) != result.spdxSHA256 {
+	if len(result.SPDXSHA256) != 64 || wolfi.SHA256Hex(predicate) != result.SPDXSHA256 {
 		return fail("SPDX attestation predicate checksum", nil)
 	}
 	if err := ctx.Err(); err != nil {
 		return fail("SPDX attestation", err)
 	}
 	attestArgs := append([]string{"attest"}, common...)
-	attestArgs = append(attestArgs, "--type", "spdxjson", "--predicate", result.spdxPath, immutable)
+	attestArgs = append(attestArgs, "--type", "spdxjson", "--predicate", result.SPDXPath, immutable)
 	if _, err := command(ctx, "cosign", attestArgs...); err != nil || ctx.Err() != nil {
 		return fail("SPDX attestation", err)
 	}
