@@ -2,7 +2,7 @@
 
 Lupetto is a standalone CLI for discovering Wolfi APK versions, selecting an exact package revision, composing an OCI image with apko, and retaining validated SPDX and build evidence. `build` loads the image into Docker by default and can push the validated image directly to a compatible OCI registry. `status` compares tracked published images with the current signed Wolfi index and known security fixes. Optional Cosign signing and SPDX attestation extend that same build pipeline; see the [registry, signing, and verification guide](docs/registry-signing.md).
 
-The CLI does not require Explorer or a database. The optional `lupetto-explorer` backend is implemented; its HTML dashboard and combined container remain separate checkpoints. Persistent SQLite catalog ingestion, historical snapshot queries, and runnable service recipes are deferred, not implemented commands. These images contain packages; installing PostgreSQL or nginx does **not** establish a configured, runnable service.
+The CLI does not require Explorer or a database. The optional `lupetto-explorer` backend, HTML dashboard, and combined non-root container are implemented and verified within the [recorded local scope](docs/verification.md#combined-container-checkpoint-5). Persistent SQLite catalog ingestion, historical snapshot queries, and runnable service recipes are deferred, not implemented commands. These images contain packages; installing PostgreSQL or nginx does **not** establish a configured, runnable service.
 
 This guide describes the current CLI/source contract. The [verification record](docs/verification.md) distinguishes observed interoperability from source behavior and unexercised scenarios. In particular, local HTTP/offline signing is not production HTTPS/transparency-log proof; production commands in the detailed guide are explicitly templates.
 
@@ -302,4 +302,39 @@ Build forms submit `package` and exactly one of `selector` (dotted numeric) or `
 
 Refresh/build/cancel are POST-only, require the per-process hidden form field `csrfToken` (not a query parameter), and check `Origin` or `Sec-Fetch-Site: same-origin`. An Origin must use `http` or `https` and its host and explicit port must exactly equal the request Host; either scheme is accepted to support TLS-terminating ingress forwarding plain HTTP. No `X-Forwarded-*` headers are trusted: an ingress must preserve the external Host and enforce authentication itself. Every request on every listener must also match `--allowed-host`, preventing DNS rebinding even when Explorer listens on `0.0.0.0` behind Docker/Kubernetes loopback port-forwarding. Defaults allow only `localhost`, `127.0.0.1`, and `[::1]` at any port. For ingress, explicitly list its external hostname, for example `--allowed-host explorer.example.invalid --allowed-host localhost`; explicit flags replace the defaults. IPv6 literals must be bracketed. Hostnames are case-insensitive; a configured port must match exactly. Host/CSRF/origin checks are not authentication.
 
-Responses set CSP `default-src 'self'; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, and `Referrer-Policy: same-origin` (under `no-referrer`, browsers send `Origin: null` on form posts, which the same-origin check rejects); embedded `html/template` rendering escapes CLI metadata. Server read/header/write/idle timeouts and request/output limits are set. The dashboard must keep unsigned/fixed-only/Wolfi-only feed limitations and unreachable/unevaluated-fix warnings visible, including on `current` tracks. The server was exercised by curl and the dashboard in headless Chromium, both with real loopback publication/status runs; combined-container execution remains unverified. See [Explorer server evidence](docs/verification.md#explorer-server-checkpoint-3) and [dashboard UI evidence](docs/verification.md#explorer-dashboard-ui-checkpoint-4).
+Responses set CSP `default-src 'self'; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, and `Referrer-Policy: same-origin` (under `no-referrer`, browsers send `Origin: null` on form posts, which the same-origin check rejects); embedded `html/template` rendering escapes CLI metadata. Server read/header/write/idle timeouts and request/output limits are set. The dashboard must keep unsigned/fixed-only/Wolfi-only feed limitations and unreachable/unevaluated-fix warnings visible, including on `current` tracks. The server was exercised by curl and the dashboard in headless Chromium, both with real loopback publication/status runs; the combined container was verified separately with a non-root build/publication and dashboard JSON run. See [Explorer server evidence](docs/verification.md#explorer-server-checkpoint-3), [dashboard UI evidence](docs/verification.md#explorer-dashboard-ui-checkpoint-4), and [container evidence](docs/verification.md#combined-container-checkpoint-5).
+
+### Combined container
+
+Build the verified **linux/amd64** image from this checkout. The multi-stage `Containerfile` uses Go 1.27.1 with CGO disabled, a digest-pinned Wolfi base, exact Wolfi `apko=1.4.5-r0`, upstream Cosign **v3.1.3** checked against a pinned SHA-256, and CA certificates. It embeds the Explorer templates/static assets present at build time; no image is published by this command.
+
+```bash
+docker build --platform linux/amd64 -f Containerfile -t lupetto-explorer:local .
+docker run --rm --name lupetto-explorer \
+  --cap-drop=ALL --security-opt=no-new-privileges \
+  -p 127.0.0.1:8080:8080 \
+  --mount type=volume,src=lupetto-cache,dst=/var/cache/lupetto \
+  --mount "type=bind,src=$PWD/products.yaml,dst=/etc/lupetto/products.yaml,readonly" \
+  --mount "type=bind,src=$HOME/.docker/config.json,dst=/etc/lupetto/docker/config.json,readonly" \
+  -e DOCKER_CONFIG=/etc/lupetto/docker \
+  -e LUPETTO_REGISTRY=registry.example.invalid \
+  -e LUPETTO_REPOSITORY=team/lupetto/images \
+  lupetto-explorer:local
+```
+
+This is an operator template: create a [products file](#compare-published-images-with-wolfi), replace the generic registry/repository with an authorized HTTPS target, and mount only the intended Docker config file. `DOCKER_CONFIG` names its **directory**, not the file. Credential helpers referenced by that file must also exist in the container; this image does not bundle vendor-specific helpers. Mounted files must be readable by UID/GID **65532:65532**. An empty new Docker named volume inherits the image's cache ownership; a pre-existing volume or bind-mounted cache must already be writable by that UID/GID.
+
+The entrypoint is `lupetto-explorer`, with default arguments `--listen 0.0.0.0:8080 --products /etc/lupetto/products.yaml`; **builds remain disabled**. Container arguments replace all default arguments, so to opt in supply all required defaults again:
+
+```bash
+# Append these arguments after the image name in the docker run command above:
+--listen 0.0.0.0:8080 --products /etc/lupetto/products.yaml --enable-builds
+```
+
+The example exposes the port only on host loopback. Binding the server to `0.0.0.0` inside the container is necessary for port forwarding, **not authentication**; protect any other exposure with an operator-controlled network boundary/authenticating ingress. Configure `--allowed-host` for an ingress's external authority as described [above](#explorer-http-security), and preserve that Host through the proxy. Do not expose a build-enabled instance to an untrusted network. `/healthz` reports process liveness, not registry/status health.
+
+No Docker daemon, socket, privileged mode, or extra capabilities are needed: real non-root builds/push/readback succeeded with **all capabilities dropped** and `no-new-privileges`. Explorer always uses `--no-load`. Consequently, `docker run --rm --entrypoint lupetto lupetto-explorer:local doctor` finds apko and Cosign but exits **1** solely because Docker is intentionally absent; that is expected for this image, not proof that image-only builds fail. For CLI use override the entrypoint and pass `--no-load`.
+
+Cache/evidence live below `XDG_CACHE_HOME=/var/cache/lupetto` on the declared volume; `HOME=/var/cache/lupetto/home` is on the same volume. Jobs/history are still in-memory. For optional signing, additionally bind-mount the intended key file read-only (for example at `/etc/lupetto/cosign.key`), set `LUPETTO_COSIGN_KEY=/etc/lupetto/cosign.key`, and provide `COSIGN_PASSWORD` only through the process environment (`-e COSIGN_PASSWORD` passes an already-set host variable). Never put a password in image build arguments, the Containerfile, or command arguments. Signing requires the remaining [signing configuration](docs/registry-signing.md#sign-and-attest-the-verified-digest); the container check used no keys or credentials.
+
+See [combined-container verification](docs/verification.md#combined-container-checkpoint-5) for base digest, image size, actual commands/outcomes, and limits. Exact APK/tool availability is fail-closed, but the live Wolfi index and unpinned APK dependency closure do not guarantee byte-identical historical rebuilds; arm64 is not supported by this recipe.

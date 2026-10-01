@@ -267,7 +267,8 @@ func RequireApkoVersion(ctx context.Context, command CommandFunc) error {
 	if err != nil {
 		return fmt.Errorf("apko %s is required: %w", ApkoVersion, err)
 	}
-	if !strings.Contains(string(output), "GitVersion:    "+ApkoVersion+"\n") {
+	if !strings.Contains(string(output), "GitVersion:    "+ApkoVersion+"\n") &&
+		!strings.Contains(string(output), "GitVersion:    v"+ApkoVersion+"\n") {
 		return fmt.Errorf("apko %s is required for this build path", ApkoVersion)
 	}
 	return nil

@@ -1,0 +1,19 @@
+# Only source inputs needed by the two Go programs enter the build context.
+**
+!Containerfile
+!.dockerignore
+!go.mod
+!go.sum
+!cmd/
+!cmd/**
+!internal/
+!internal/**
+# Keep accidental local auth/key/runtime artifacts out, even below source dirs.
+**/.docker/**
+**/.env*
+**/*.key
+**/*.pem
+**/config.json
+**/products.yaml
+**/result.json
+**/failure.json

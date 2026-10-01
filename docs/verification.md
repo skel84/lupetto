@@ -931,6 +931,50 @@ Review follow-up (four minor findings from frontend review of `7a6b189`), re-ver
 `TestEmbeddedTemplatesDistinguishTrackErrorsFromEmptyResults` covers the error-track wording on the track and overview pages, the attributes that stop discovery polling, and the absence of the banner during a background refresh. `node --check` passed for `app.js`. Gates passed again: `gofmt -l`, `go test ./...` and `go test -race ./...`.
 
 
+### Combined container (checkpoint 5)
+
+Observed 2026-10-01 on Docker Desktop 4.37.2 / Docker client-server 27.4.0, darwin/amd64 host → **linux/amd64** container. `docker build --platform linux/amd64 -f Containerfile -t lupetto-explorer:container-check .` exited 0, building both Go programs with Go **1.27.1**, `CGO_ENABLED=0`, `GOTOOLCHAIN=local`, and the embedded UI available in the checkout. Nothing was pushed outside the owned loopback registry.
+
+Pinned inputs:
+
+| Input | Observed pin / result |
+| --- | --- |
+| Runtime base | `cgr.dev/chainguard/wolfi-base@sha256:d59fd2d1d21e913b12a8d56064e9aaf61f818289bd18b17132a0c4fde2358cea` |
+| Go builder | `golang:1.27.1-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414` |
+| apko | Exact signed Wolfi APK `apko=1.4.5-r0`, downloaded using `apk add --no-cache` from `https://packages.wolfi.dev/os`; version output `GitVersion: v1.4.5`, Go 1.27.1, linux/amd64. The inspected x86_64 index SHA-256 was `e900136fbae4fb62454a3da0e9898571efdaa5a4dab92ce45b23a07d59fee9fd`. |
+| Cosign | No `cosign@3.1.3-rN` entry in that observed Wolfi index. [Upstream `cosign-linux-amd64` v3.1.3 release](https://github.com/sigstore/cosign/releases/tag/v3.1.3), verified at build time and in the final runtime against pinned SHA-256 `4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71` from [upstream checksums](https://github.com/sigstore/cosign/releases/download/v3.1.3/cosign_checksums.txt). Version output `v3.1.3`, Go 1.26.4, linux/amd64. |
+| Final local image | `lupetto-explorer:container-check`, image ID `sha256:31671d925ba24719a3de129dfef849f1f506051402430a045849b5ad689b80c6`; `docker image inspect` reported **92,372,054 bytes** (88.1 MiB). This is Docker's reported image size, not a compressed registry-transfer estimate. |
+
+The first APK-based image exposed an actual compatibility bug: Lupetto accepted only `GitVersion: 1.4.5`, whereas the Wolfi package prints `v1.4.5`. It failed before creating a workspace or publishing. `RequireApkoVersion` now permits those **two exact spellings only**; `go test ./internal/build -run TestRequireApkoVersionExactReleaseSpellings -count=1` passed, including rejection of `1.4.50`, `v1.4.50`, development suffixes, adjacent versions, extra `v`, empty version, and a failed probe even with otherwise-valid output. No tool version requirement was relaxed.
+
+All runtime verification containers used image-default UID/GID **65532:65532**, `--cap-drop=ALL --security-opt=no-new-privileges`. `/proc/self/status` showed `CapEff: 0000000000000000`. There was no privileged mode, added capability, Docker socket, or daemon in the image. `lupetto doctor` found apko and Cosign and exited **1 solely for missing Docker**; doctor checks PATH rather than versions. This is intentional and acceptable: the dashboard always passes `--no-load`, and the following real image-only build succeeded.
+
+The disposable registry used `docker run -d --rm --name lupetto-container-registry-check -p 127.0.0.1:60881:5000 -p 127.0.0.1:60882:8080 registry:3`. Explorer/CLI containers used `--network container:lupetto-container-registry-check`: `127.0.0.1:5000` was therefore registry loopback **inside** the container, preserving Lupetto's plain-HTTP guard. Both host-published ports were loopback-only. Synthetic products tracked `busybox-static` selector `"1"`; an empty `{}` Docker config file and products file were mounted read-only at `/etc/lupetto/docker/config.json` and `/etc/lupetto/products.yaml`, with `DOCKER_CONFIG=/etc/lupetto/docker`. No existing registry credentials, keys, signing configuration, or password were used.
+
+Commands and observed outcomes (each CLI command was `docker run --rm` with the network/security/mount settings above and `--entrypoint lupetto`):
+
+| Command / interaction | Result |
+| --- | --- |
+| `LUPETTO_REGISTRY=127.0.0.1:5000 LUPETTO_REPOSITORY=tests/container/cli lupetto build busybox-static 1 --no-load --json` | Exit 0; `busybox-static@1.38.0-r2`, signed-index SHA-256 `5cf2bd255d67b8b49742a43280cc876535e1275d9f4e759c90e3527ebbdcac27`; version-6 record: build `completed`, load `skipped`, validated SPDX, publication `published`, `verified: true`. Immutable digest `sha256:5c483fc03b8750a406b25485a6e7d34574a1f8da55268e080939430e3f272104`. Signing/attestation skipped. |
+| Same environment, `lupetto status --products /etc/lupetto/products.yaml --json` | Exit 0; track `current`, newest digest exactly the published digest, three installed APK identities. |
+| Image **default entrypoint and CMD**, mounted products/config/cache volume, repository `tests/container/dashboard` | `/healthz`: 200 `ok`; `GET /?format=json`: `buildsEnabled: false`; valid-CSRF same-Origin `POST /builds`: 403. |
+| Same entrypoint with CMD replaced by `--listen 0.0.0.0:8080 --products /etc/lupetto/products.yaml --enable-builds` | Initial overview `not-built`. `curl --silent --show-error --max-time 30` POST with `Origin: http://127.0.0.1:60882`, form `csrfToken` read from JSON, `package=busybox-static`, `selector=1`: 303 to `/jobs/1`. JSON job reached `succeeded`, exit 0, version-6 record: build `completed`, load `skipped`, publication `published`, `verified: true`. |
+| `GET /jobs/1?format=json`, then `GET /?format=json` without manual refresh | BusyBox `1.38.0-r2`; signed-index SHA-256 `47b46fe2ee80cdf214959cb9a5b8304bcb0eec4b541dc57d1fc0410d6a3a572a`; published digest `sha256:25423aaac818f20224fa8e3fc80a788a84d815815e57921a8af31a5b9013219c`. Overview automatically became `current` at `2026-10-01T17:05:35.646856074Z` with the same newest digest. `/healthz`: 200; embedded overview HTML: 200. |
+
+The dashboard mounted a fresh named volume at `/var/cache/lupetto`. Ownership was `65532:65532`, mode 0700; real evidence included `/var/cache/lupetto/lupetto/builds/image-2008221524/result.json`. `HOME=/var/cache/lupetto/home` and `XDG_CACHE_HOME=/var/cache/lupetto` put retained workspaces/cache on the declared volume. A reused/bind-mounted volume must have suitable ownership; the image does not start as root to repair operator mounts.
+
+After the UI review fixes (`12ef02c`) and all-listener Host allowlist (`cde4ff0`) landed, the final image above was rebuilt and the complete smoke repeated, again with zero effective capabilities:
+
+- Exact tool versions/checksum and doctor outcome were unchanged. CLI prefix `tests/container/final-cli`: build exit 0, `busybox-static@1.38.0-r2`, index SHA-256 `441b771c3dd15ee01da85f19d2cd5bd1cd0f17f1d379f0954d8d137ad8ab2cb8`, verified publication digest `sha256:d62b1dc69627d1c953c5dc91324a57b07784161adb2c8b64ad37b5f51ca55114`; CLI status exit 0, `current`.
+- Final default-CMD instance: `/healthz` 200, builds disabled, valid same-Origin/CSRF build POST 403. `GET /?format=json` with `Host: attacker.example` returned **403**, confirming DNS-rebinding protection also covers the container's `0.0.0.0` listener rather than trusting its port mapping.
+- Final enabled instance used fresh prefix `tests/container/final-dashboard`: initial `not-built`; same curl POST received 303; job 1 `succeeded`, exit 0, same BusyBox/index identity above, verified publication digest `sha256:ad95deef3c974342102b6c27f68b96d7a53068abda415fb4cb50da0931d0f0c3`. Automatic overview refresh at `2026-10-01T17:20:50.819749779Z` became `current` with exactly that digest. HTML and `/healthz` were 200. Retained `image-535253055/result.json` was mode **0600**, UID/GID 65532:65532, on the reused cache volume.
+
+Final gates after those checkpoints: `gofmt -w internal/build/build.go internal/build/apko_version_test.go`, sequential `go test ./... && go test -race ./...`, and `git diff --check` all passed. The rebuilt image was then exercised as above, not assumed equivalent to the earlier image. Owned Explorer/default containers and the registry were stopped/removed; `docker container inspect` of every verification name exited 1, and `docker volume rm lupetto-container-cache-check` exited 0. The failed initial builder container was also removed. Only the locally built image is intentionally retained; runtime products/config/JSON/logs were outside the checkout, not committed. No image push to any external registry was performed.
+
+The final image's `--help` exited 0 and included the repeatable `--allowed-host`, builds-disabled default, products path, and background-refresh options. Syntax-only `bash -n` validation passed for all ten README Bash blocks; container guide/verification targets and anchors were checked. These checks did not execute the generic production-registry examples.
+
+Limitations: linux/amd64 only; anonymous loopback HTTP publication, not authenticated production HTTPS/signing/transparency-log proof; no credential-helper or private-key interoperability was claimed. The image includes the upstream Cosign binary but no signing was requested. A successful BusyBox build proves the exercised apko lock/build/publication path works unprivileged, not every package selection or runtime recipe. No extra runtime privileges were required. Container UI proof here is curl/JSON plus HTML 200, not a second browser run. Live Wolfi dependency/index availability can change; exact APK pinning fails closed if removed, and the base-plus-tool recipe is not an archived, byte-reproducible dependency snapshot.
+
 ## Release evidence
 
 Once code exists, run the following in each implemented Go module. A CLI release requires its applicable checks, not a completed Explorer:

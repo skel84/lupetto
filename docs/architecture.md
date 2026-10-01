@@ -4,11 +4,11 @@
 
 This document describes ownership and execution boundaries: what lives where and which way dependencies point. It does not restate operator contracts; those are owned by the [operator guide](../README.md) (build, loading, evidence, records) and the [registry/signing guide](registry-signing.md) (publication, signing, verification), with rationale in [decisions](decisions.md). It records the current rebuild, not recovered historical source structure.
 
-One local Go module contains the standalone CLI and optional Explorer backend. The CLI provides read-only signed-index discovery and registry/security comparison plus one exact-build pipeline with apko composition, SPDX/lock validation, optional Docker loading, direct registry publication, and Cosign signing/attestation. Persistent catalog ingestion, HTML dashboard UI, combined-container verification, and runnable service recipes are deferred.
+One local Go module contains the standalone CLI and optional Explorer backend. The CLI provides read-only signed-index discovery and registry/security comparison plus one exact-build pipeline with apko composition, SPDX/lock validation, optional Docker loading, direct registry publication, and Cosign signing/attestation. The embedded HTML dashboard and combined non-root container are implemented; persistent catalog ingestion and runnable service recipes remain deferred. See [container evidence](verification.md#combined-container-checkpoint-5) for the exercised deployment bounds.
 
 ## Components
 
-`lupetto` and `lupetto-explorer` are separate programs in this repository and Go module, intended to ship together in one future container image. The CLI is independently useful; Explorer is an optional consumer that integrates only through CLI JSON. See the [dashboard decision](decisions.md#registry-comparison-dashboard-user-approved-2026-10-01).
+`lupetto` and `lupetto-explorer` are separate programs in this repository and Go module, shipped together in the root `Containerfile` image with apko 1.4.5, Cosign v3.1.3, and CA certificates. The CLI is independently useful; Explorer is an optional consumer that integrates only through CLI JSON. The image runs as UID/GID 65532 with cache/evidence on `/var/cache/lupetto`, no Docker daemon/socket, and builds disabled by default. See the [dashboard decision](decisions.md#registry-comparison-dashboard-user-approved-2026-10-01) and [operator container guide](../README.md#combined-container).
 
 | Component | Responsibility | Status |
 | --- | --- | --- |
@@ -17,9 +17,9 @@ One local Go module contains the standalone CLI and optional Explorer backend. T
 | CLI | Parse arguments, render progress, print human or `--json` output, `doctor`, `discover`, `status`. | `cmd/lupetto` |
 | Status | Compare products-file tracks with the index, registry images (by annotation), and Wolfi security fixes; read-only. | `internal/status` |
 | Catalog | Import snapshots, retain provenance, query versions, resolve selectors historically. | Deferred |
-| Explorer | CLI-only adapter, cached comparison/discovery, safe HTTP routes and Go rendering seam, single supervised build with bounded live stderr and history. | Backend implemented (`cmd/lupetto-explorer`, `internal/explorer`); templates/assets and container deferred. |
+| Explorer | CLI-only adapter, cached comparison/discovery, safe HTTP routes and Go rendering seam, single supervised build with bounded live stderr and history. | Backend, embedded templates/static assets, and combined linux/amd64 container implemented (`cmd/lupetto-explorer`, `internal/explorer`, root `Containerfile`). |
 
-Explorer uses `net/http`, `html/template`, embedded assets, and in-memory caches/jobs without a database or distributed job service. The optional historical catalog remains separate and deferred. The [UI rendering contract](../internal/explorer/web/CONTRACT.md) defines the seam for the next checkpoint.
+Explorer uses `net/http`, `html/template`, embedded assets, and in-memory caches/jobs without a database or distributed job service. The optional historical catalog remains separate and deferred. The [UI rendering contract](../internal/explorer/web/CONTRACT.md) defines the implemented rendering seam.
 
 ## Source layout and dependency direction
 
@@ -114,7 +114,7 @@ The deferred catalog/Explorer design owns SQLite catalog data and immutable down
 
 Implemented defaults: `127.0.0.1:8080`, builds disabled unless explicitly enabled, no login, no persistence. Non-loopback use requires an operator-controlled authenticating network boundary. A TLS-terminating ingress must preserve the external Host; Explorer accepts either HTTP/HTTPS Origin on that exact authority and does not trust forwarded headers.
 
-POST-only refresh/build/cancel require a per-process CSRF form token and same-origin browser headers. Every listener enforces an explicit Host allowlist against DNS rebinding, including wildcard listeners used by containers/port-forwarding; defaults permit only localhost/127.0.0.1/[::1], while ingress operators list external names with repeatable `--allowed-host`. `html/template` escaping, self-only CSP with frame rejection, nosniff/referrer controls, bounded forms/output, and server timeouts apply. Status refreshes single-flight at startup/interval/manual/after-build, retaining last-good facts separately from errors; cached discovery supports bounded package browsing. JSON read views allow server verification before templates exist. See [server evidence](verification.md#explorer-server-checkpoint-3); the UI and container remain separate unchecked checkpoints.
+POST-only refresh/build/cancel require a per-process CSRF form token and same-origin browser headers. Every listener enforces an explicit Host allowlist against DNS rebinding, including wildcard listeners used by containers/port-forwarding; defaults permit only localhost/127.0.0.1/[::1], while ingress operators list external names with repeatable `--allowed-host`. `html/template` escaping, self-only CSP with frame rejection, nosniff/referrer controls, bounded forms/output, and server timeouts apply. Status refreshes single-flight at startup/interval/manual/after-build, retaining last-good facts separately from errors; cached discovery supports bounded package browsing. JSON read views expose the same models as the implemented templates. See [server evidence](verification.md#explorer-server-checkpoint-3), [dashboard UI evidence](verification.md#explorer-dashboard-ui-checkpoint-4), and [non-root combined-container evidence](verification.md#combined-container-checkpoint-5); none establishes authentication or production registry/signing interoperability.
 
 ## Upstream references
 
