@@ -42,12 +42,15 @@ func (reader RemoteRegistry) Installed(ctx context.Context, repository name.Repo
 		return nil, errors.New("installed manifest digest mismatch")
 	}
 	identified, classification := classifyManifest(descriptor.Manifest, image.Digest)
-	if classification != "image" || identified.Name != image.Name || identified.Version != image.Version || identified.Architecture != image.Architecture {
+	if (image.Name != "" && (classification != "image" || identified.Name != image.Name || identified.Version != image.Version || identified.Architecture != image.Architecture)) || classification == "artifact" {
 		return nil, errors.New("installed image identity mismatch")
 	}
 	var manifest v1.Manifest
 	if err := json.Unmarshal(descriptor.Manifest, &manifest); err != nil {
 		return nil, errors.New("invalid installed manifest")
+	}
+	if manifest.SchemaVersion != 2 {
+		return nil, errors.New("invalid installed manifest schema")
 	}
 	if len(manifest.Layers) > MaxLayers {
 		return nil, errors.New("installed image layer limit exceeded")
@@ -59,6 +62,16 @@ func (reader RemoteRegistry) Installed(ctx context.Context, repository name.Repo
 	var config v1.ConfigFile
 	if json.Unmarshal(configData, &config) != nil {
 		return nil, errors.New("invalid installed image config")
+	}
+	if image.Architecture == "" {
+		switch config.Architecture {
+		case "amd64":
+			image.Architecture = "x86_64"
+		case "arm64":
+			image.Architecture = "aarch64"
+		default:
+			return nil, errors.New("unsupported installed image architecture")
+		}
 	}
 	ociArch := "amd64"
 	if image.Architecture == "aarch64" {
@@ -114,7 +127,7 @@ func (reader RemoteRegistry) Installed(ctx context.Context, repository name.Repo
 			selected = true
 		}
 	}
-	if !selected {
+	if image.Name != "" && !selected {
 		return nil, errors.New("installed top-level APK does not match image annotations")
 	}
 	return packages, nil

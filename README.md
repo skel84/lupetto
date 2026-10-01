@@ -67,6 +67,16 @@ lupetto discover --json
 
 The optional `package` field is the requested name/provider and is omitted for all-packages browsing. `indexSHA256` identifies the signed archive, not its decompressed contents. A successful empty all-packages result has `packages: []`; a missing named package or index/verification failure exits 1 with stderr diagnostics and **no JSON document**. Invalid arguments exit 2 with empty stdout. Discovery documents are separate from unchanged version-6 build/SBOM records.
 
+## Inspect immutable registry packages
+
+```bash
+lupetto inspect --json registry.example.invalid/team/curl@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+```
+
+Replace the example with a digest reference returned by a successful publication. Tags, implicit Docker Hub names, URLs, credentials in references, image indexes, and non-image artifacts are rejected. `inspect` reads only: no Docker daemon, build, signing, index, or security feed is required. It reuses status's Docker-config keychain, loopback-only HTTP guard, bounded digest-verified image reads, layer-overlay handling, and private digest-keyed installed-package cache. A cache hit avoids config/layer downloads; the manifest is still fetched by digest.
+
+The newline-terminated JSON is `kind: "inspect"`, `version: 1`, with `reference`, `digest`, `unidentified`, optional `identity` (`name`, exact APK `version`, `architecture`), optional `created` (UTC RFC 3339), and `packages` (`name`, `version`, `architecture`). Identity is taken only from validated Lupetto annotations, never inferred from tags or installed package names. Older/unannotated images can still report their complete installed set with `unidentified: true`; creation time is omitted if unavailable. Unsupported platforms, missing/malformed APK databases, hash mismatches, bounds violations, and cache failures exit 1 without JSON. Invalid invocation exits 2 without JSON. This is package evidence, not an SPDX document, signature verification, or vulnerability scan.
+
 ## Compare published images with Wolfi
 
 `status` is read-only: it never builds, loads, pushes, signs, or reports signature status. It compares explicitly tracked package/provider selectors against the current verified Wolfi index and the images in the configured registry repositories.

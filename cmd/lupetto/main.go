@@ -45,13 +45,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 func runWithBuild(ctx context.Context, args []string, stdout, stderr io.Writer, runBuild func(context.Context, cliRequest) (build.Result, error)) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, usage+statusUsage+productsUsage+imagesUsage)
+		fmt.Fprintln(stderr, usage+statusUsage+inspectUsage+productsUsage+imagesUsage)
 		return 2
 	}
 
 	switch args[0] {
 	case "help", "-h", "--help":
-		fmt.Fprintln(stdout, usage+statusUsage+productsUsage+imagesUsage)
+		fmt.Fprintln(stdout, usage+statusUsage+inspectUsage+productsUsage+imagesUsage)
 		return 0
 	case "doctor":
 		return runDoctor(stdout, stderr, args[1:])
@@ -59,6 +59,8 @@ func runWithBuild(ctx context.Context, args []string, stdout, stderr io.Writer, 
 		return runDiscover(ctx, args[1:], stdout, stderr)
 	case "status":
 		return runStatus(ctx, args[1:], stdout, stderr)
+	case "inspect":
+		return runInspect(ctx, args[1:], stdout, stderr)
 	case "products":
 		return runProducts(args[1:], stdout, stderr)
 	case "images":

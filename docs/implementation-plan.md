@@ -106,7 +106,7 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 - [ ] Clickable mockup with two visual directions; user picks one.
 - [x] `lupetto products list|add|remove`. Actual create/list/idempotent-add/remove JSON commands succeeded; absent files and read-only files/directories exited 1 with empty stdout. Comment/order/mode/validation/atomic-failure regressions and isolated full/race gates passed; see [products evidence](verification.md#products-management-redesign-round).
 - [x] `lupetto images --json` (build history + local Docker). Real default-load/no-load BusyBox builds appeared as version-6 history; all 15 local Docker image IDs/tags exactly matched `docker image ls`, and unreachable Docker returned unavailable with the same history. Fixture/fake-Docker/schema/bound/SPDX regressions and full/race gates passed; see [inventory evidence](verification.md#local-inventory-redesign-round).
-- [ ] `lupetto inspect --json` for registry image package sets.
+- [x] `lupetto inspect --json` for registry image package sets. Isolated loopback publication of `openssl@3.6.1-r0` followed by immutable inspect returned all 9 packages, exactly equal to status's installed list; identified/unidentified images, digest-only parsing, authenticated reads and cache reuse are covered by focused tests. See [inspect evidence](verification.md#registry-inspect-redesign-checkpoint).
 - [ ] Advisory severity in status document version 2.
 - [ ] Explorer backend for the new information architecture (tabs, compare, tracking edits, persistent build history, SBOM download for local builds).
 - [ ] Rebuilt UI in the chosen direction, verified in a real browser; container updated (writable products directory, optional Docker socket + CLI).
