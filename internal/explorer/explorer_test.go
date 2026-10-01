@@ -36,7 +36,7 @@ type fakeConfig struct {
 	Calls         string
 }
 
-const goodStatus = `{"kind":"status","version":1,"computedAt":"2026-10-01T00:00:00Z","tracks":[{"package":"cmd:curl","selector":"1","state":"current","outdated":[{"name":"dep"}],"missingFixes":[{"reachableByTrack":true},{"reachableByTrack":false}],"unevaluatedFixes":[{"name":"dep","fixedVersion":"invalid"}]}]}`
+const goodStatus = `{"kind":"status","version":2,"computedAt":"2026-10-01T00:00:00Z","security":{"severity":{"idCount":1,"resolvedCount":1,"sourceCounts":{"nvd-cvss-v3.1":1}}},"tracks":[{"package":"cmd:curl","selector":"1","state":"current","outdated":[{"name":"dep"}],"missingFixes":[{"reachableByTrack":true,"maxSeverity":"high","advisories":[{"id":"CVE-2026-1234","severity":"high","severitySource":"nvd-cvss-v3.1"}]},{"reachableByTrack":false}],"unevaluatedFixes":[{"name":"dep","fixedVersion":"invalid"}]}]}`
 const goodDiscover = `{"kind":"discover","version":1,"architecture":"x86_64","indexSHA256":"fixture","packages":[{"name":"busybox-static","version":"1.38.0-r2","description":"synthetic"}]}`
 const goodRecord = `{"version":6,"command":"build","outcome":"succeeded","request":{"package":"busybox-static","selector":"1","load":false,"publish":true},"selection":{"package":"busybox-static","version":"1.38.0-r2","architecture":"x86_64"},"evidence":{"imageDigest":"sha256:fixture"},"stages":{"build":{"status":"completed"},"load":{"status":"skipped"},"publication":{"status":"published","digest":"sha256:fixture","verified":true},"signing":{"status":"skipped"},"attestation":{"status":"skipped"}}}`
 
@@ -207,7 +207,7 @@ func buildForm(server *Server) url.Values {
 
 func TestCompatibilityAndRecordParsing(t *testing.T) {
 	for _, test := range []struct{ name, status, discover string }{
-		{"status-version", `{"kind":"status","version":2}`, goodDiscover},
+		{"status-version", `{"kind":"status","version":1}`, goodDiscover},
 		{"status-kind", `{"kind":"discover","version":1}`, goodDiscover},
 		{"discover-version", goodStatus, `{"kind":"discover","version":2}`},
 		{"discover-kind", goodStatus, `{"kind":"status","version":1}`},
@@ -239,6 +239,22 @@ func TestCompatibilityAndRecordParsing(t *testing.T) {
 	}
 	if record.Selection.Package != "busybox-static" || record.Evidence.ImageDigest != "sha256:fixture" || record.Stages.Publication.Status != "published" || !record.Request.Publish {
 		t.Fatalf("record = %#v", record)
+	}
+}
+
+func TestStatusVersionTwoSeverityDecoding(t *testing.T) {
+	binary, _, _ := fakeCLI(t, goodFake())
+	cli, err := NewCLI(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := cli.Status(context.Background(), "products.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fix := document.Tracks[0].MissingFixes[0]
+	if document.Version != 2 || document.Security.Severity.ResolvedCount != 1 || fix.MaxSeverity != "high" || len(fix.Advisories) != 1 || fix.Advisories[0].SeveritySource != "nvd-cvss-v3.1" {
+		t.Fatalf("severity facts lost: %+v", document)
 	}
 }
 func TestStatusCacheSingleFlightAndLastGood(t *testing.T) {

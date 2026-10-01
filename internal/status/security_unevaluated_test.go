@@ -57,7 +57,7 @@ func TestMalformedSecdbFixedVersionIsReportedWithoutGuessingOrGlobalFailure(t *t
 		return feed, wolfi.SHA256Hex(data), nil
 	}
 	document, err := RunWith(context.Background(), products, Options{Registry: "r.invalid", Repository: "images"}, services)
-	if err != nil || document.Version != 1 || document.Security.SHA256 != wolfi.SHA256Hex(data) || document.Security.UnevaluatedFixCount != 2 || len(document.Security.UnevaluatedFixes) != 2 {
+	if err != nil || document.Version != 2 || document.Security.SHA256 != wolfi.SHA256Hex(data) || document.Security.UnevaluatedFixCount != 2 || len(document.Security.UnevaluatedFixes) != 2 {
 		t.Fatalf("computed document unavailable or missing issues: %+v %v", document, err)
 	}
 	for _, track := range document.Tracks[:2] {

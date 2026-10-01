@@ -95,7 +95,7 @@ func TestRunStatesSelectorsSecurityAndCache(t *testing.T) {
 			products := Products{Version: 1, Products: []Product{{Package: "curl", Selectors: []string{"8", "8.2"}}, {Package: "missing", Selectors: []string{"1"}}, {Package: "ambiguous", Selectors: []string{"1"}}, {Package: "other", Selectors: []string{"2"}}}}
 			services := Services{Architecture: "x86_64", ReadIndex: index, ReadSecurity: security, Registry: registry, Cache: cache, Now: func() time.Time { return now }}
 			document, err := RunWith(context.Background(), products, Options{Registry: "registry.example.invalid", Repository: "team/images"}, services)
-			if err != nil || document.Version != 1 || document.Kind != "status" || len(document.Tracks) != 5 {
+			if err != nil || document.Version != 2 || document.Kind != "status" || len(document.Tracks) != 5 {
 				t.Fatalf("document: %+v, %v", document, err)
 			}
 			track := document.Tracks[0]

@@ -8,22 +8,25 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"lupetto/internal/build"
 	"lupetto/internal/registry"
 	"lupetto/internal/status"
 )
 
-const statusUsage = "\n\nRead-only registry comparison:\n  lupetto status --products <file> [--registry <authority> --repository <prefix>] [--json]\nStatus requires both registry/repository settings, reusing independent flag/LUPETTO_* environment precedence.\nProducts YAML version 1 lists package names/providers and dotted numeric selectors; unknown fields are rejected.\nStatus --json prints a kind=status, version=1 document with index, image, installed-package, and security-fix facts.\nStatus reads only; it never builds, publishes, signs, or loads Docker.\nThe Wolfi security feed is unsigned HTTPS and lists fixed vulnerabilities only, not a vulnerability scan.\nStatus exit 0 means computed (including track errors/updates); invocation errors exit 2, global failures exit 1."
+const statusUsage = "\n\nRead-only registry comparison:\n  lupetto status --products <file> [--registry <authority> --repository <prefix>] [--json] [--severity-budget <duration>]\nStatus requires both registry/repository settings, reusing independent flag/LUPETTO_* environment precedence.\nProducts YAML version 1 lists package names/providers and dotted numeric selectors; unknown fields are rejected.\nStatus --json prints a kind=status, version=2 document with index, image, installed-package, and severity-enriched security-fix facts.\nSeverity fetching defaults to 20s; --severity-budget 0 uses cache only (otherwise use a Go duration, e.g. 10s).\nStatus reads only; it never builds, publishes, signs, or loads Docker.\nThe Wolfi security feed is unsigned HTTPS and lists fixed vulnerabilities only, not a vulnerability scan.\nStatus exit 0 means computed (including track errors/updates); invocation errors exit 2, global failures exit 1."
 
 type statusRequest struct {
 	products         string
 	json             bool
 	publicationFlags registry.PublicationFlags
+	severityBudget   time.Duration
+	severitySet      bool
 }
 
 func parseStatus(args []string) (statusRequest, error) {
-	var request statusRequest
+	request := statusRequest{severityBudget: status.DefaultSeverityBudget}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--json" {
@@ -35,8 +38,8 @@ func parseStatus(args []string) (statusRequest, error) {
 		}
 		flag, value, inline := strings.Cut(arg, "=")
 		switch flag {
-		case "--products", "--registry", "--repository":
-			if (flag == "--products" && request.products != "") || (flag == "--registry" && request.publicationFlags.Registry.Set) || (flag == "--repository" && request.publicationFlags.Repository.Set) {
+		case "--products", "--registry", "--repository", "--severity-budget":
+			if (flag == "--products" && request.products != "") || (flag == "--registry" && request.publicationFlags.Registry.Set) || (flag == "--repository" && request.publicationFlags.Repository.Set) || (flag == "--severity-budget" && request.severitySet) {
 				return statusRequest{}, fmt.Errorf("%s may be specified only once", flag)
 			}
 			if !inline {
@@ -56,9 +59,15 @@ func parseStatus(args []string) (statusRequest, error) {
 				request.publicationFlags.Registry = registry.OptionalString{Value: value, Set: true}
 			case "--repository":
 				request.publicationFlags.Repository = registry.OptionalString{Value: value, Set: true}
+			case "--severity-budget":
+				budget, err := time.ParseDuration(value)
+				if err != nil || budget < 0 || budget > 5*time.Minute {
+					return statusRequest{}, fmt.Errorf("--severity-budget must be a duration from 0 to 5m")
+				}
+				request.severityBudget, request.severitySet = budget, true
 			}
 		default:
-			return statusRequest{}, fmt.Errorf("status accepts only --products, --registry, --repository, and --json")
+			return statusRequest{}, fmt.Errorf("status accepts only --products, --registry, --repository, --severity-budget, and --json")
 		}
 	}
 	if request.products == "" {
@@ -89,7 +98,7 @@ func runStatusWith(ctx context.Context, args []string, stdout, stderr io.Writer,
 		fmt.Fprintf(stderr, "lupetto: %s\n", build.PlainText(err.Error()))
 		return 2
 	}
-	document, err := compute(ctx, products, options)
+	document, err := compute(status.WithSeverityBudget(ctx, request.severityBudget), products, options)
 	if err != nil {
 		fmt.Fprintf(stderr, "lupetto: %s\n", build.PlainText(err.Error()))
 		return 1
@@ -114,7 +123,7 @@ func runStatusWith(ctx context.Context, args []string, stdout, stderr io.Writer,
 
 func writeStatusTable(out io.Writer, document status.Document) error {
 	writer := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(writer, "PACKAGE\tSELECTOR\tSTATE\tINDEX\tBUILT\tOUTDATED\tFIXES\tUNEVALUATED"); err != nil {
+	if _, err := fmt.Fprintln(writer, "PACKAGE\tSELECTOR\tSTATE\tINDEX\tBUILT\tOUTDATED\tFIXES\tUNEVALUATED\tCRITICAL\tHIGH\tMEDIUM\tLOW\tUNKNOWN"); err != nil {
 		return err
 	}
 	for _, track := range document.Tracks {
@@ -125,7 +134,8 @@ func writeStatusTable(out io.Writer, document status.Document) error {
 		if track.Newest != nil {
 			built = track.Newest.Version
 		}
-		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\n", build.PlainText(track.Package), build.PlainText(track.Selector), build.PlainText(track.State), build.PlainText(latest), build.PlainText(built), len(track.Outdated), len(track.MissingFixes), len(track.UnevaluatedFixes)); err != nil {
+		counts := trackSeverityCounts(track)
+		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", build.PlainText(track.Package), build.PlainText(track.Selector), build.PlainText(track.State), build.PlainText(latest), build.PlainText(built), len(track.Outdated), len(track.MissingFixes), len(track.UnevaluatedFixes), counts["critical"], counts["high"], counts["medium"], counts["low"], counts["unknown"]); err != nil {
 			return err
 		}
 	}
@@ -149,6 +159,28 @@ func writeStatusTable(out io.Writer, document status.Document) error {
 			}
 		}
 	}
+	if _, err := fmt.Fprintf(out, "Severity: %d resolved / %d advisory IDs; %d unknown (%d pending); %d fetch failures (non-fatal).\n", document.Security.Severity.ResolvedCount, document.Security.Severity.IDCount, document.Security.Severity.UnknownCount, document.Security.Severity.PendingCount, document.Security.Severity.FetchFailureCount); err != nil {
+		return err
+	}
 	_, err := fmt.Fprintf(out, "Computed: %s; APKINDEX sha256:%s (%s)\nSecurity feed sha256:%s (unsigned HTTPS; fixed Wolfi vulnerabilities only, not a vulnerability scan)\n", document.ComputedAt, document.IndexSHA256, document.Architecture, document.Security.SHA256)
 	return err
+}
+
+func trackSeverityCounts(track status.Track) map[string]int {
+	seen := map[string]string{}
+	for _, fix := range track.MissingFixes {
+		for _, advisory := range fix.Advisories {
+			seen[advisory.ID] = advisory.Severity
+		}
+	}
+	for _, fix := range track.UnevaluatedFixes {
+		for _, advisory := range fix.Advisories {
+			seen[advisory.ID] = advisory.Severity
+		}
+	}
+	counts := map[string]int{}
+	for _, severity := range seen {
+		counts[severity]++
+	}
+	return counts
 }

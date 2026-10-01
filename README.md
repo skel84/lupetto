@@ -120,16 +120,33 @@ Every installed package with a newer same-name/same-architecture indexed version
 
 ### Status JSON contract and exits
 
-`--json` prints one indented, newline-terminated document: `kind: "status"`, `version: 1`, `computedAt` (UTC RFC 3339), `architecture`, `registry`, `repository`, `indexSHA256`, `security`, and `tracks`. `security` has `url`, `sha256`, `unsigned`, `fixedOnly`, `wolfiOnly`, `unevaluatedFixCount`, and `unevaluatedFixes`. Each track has `package`, `selector`, `state`, optional `error`, optional `latest` (`name`, `version`, `architecture`), optional `repository`, `images`, optional `newest`, `installed`, `outdated`, `missingFixes`, `unevaluatedFixes`, `artifactCount`, and `unidentifiedCount`.
+`--json` prints one indented, newline-terminated document: `kind: "status"`, **`version: 2`**, `computedAt` (UTC RFC 3339), `architecture`, `registry`, `repository`, `indexSHA256`, `security`, and `tracks`. `security` has `url`, `sha256`, `unsigned`, `fixedOnly`, `wolfiOnly`, `unevaluatedFixCount`, `unevaluatedFixes`, and `severity` (summary below). Each track has `package`, `selector`, `state`, optional `error`, optional `latest` (`name`, `version`, `architecture`), optional `repository`, `images`, optional `newest`, `installed`, `outdated`, `missingFixes`, `unevaluatedFixes`, `artifactCount`, and `unidentifiedCount`.
 
 - Each image: `digest`, `tags`, `name`, `version`, `architecture`, `created`, `annotations`.
 - Each installed identity: `name`, `version`, `architecture`.
 - Each outdated package: `name`, `architecture`, `installedVersion`, `latestVersion`.
-- Each missing fix: `name`, `architecture`, `installedVersion`, `fixedVersion`, `availableVersion`, `ids`, `reachableByTrack`.
-- Each unevaluated fix: `name`, original `fixedVersion`, `ids`; track entries also include `installedVersion`, `architecture`.
+- Each missing fix: `name`, `architecture`, `installedVersion`, `fixedVersion`, `availableVersion`, `ids`, `reachableByTrack`, `advisories`, `maxSeverity`.
+- Each unevaluated fix: `name`, original `fixedVersion`, `ids`, `advisories`, `maxSeverity`; track entries also include `installedVersion`, `architecture`.
+- `ids` remains a string array for advisory links. `advisories` carries every ID as `{id, severity, severitySource}`; `maxSeverity` is the highest known severity in that fix group, or `unknown`. Valid severities are `critical`, `high`, `medium`, `low`, `unknown`.
+- `security.severity` counts unique IDs across missing and global/track unevaluated fixes: `idCount`, `resolvedCount`, `unknownCount`, `pendingCount`, `fetchFailureCount`, and `sourceCounts` keyed by the exact source label. Pending IDs are a subset of unknown IDs.
 - Empty fact lists are arrays, not `null`; unavailable facts (`latest`/`newest`) are omitted.
 
 Exit **0** means the global comparison completed, even when tracks are outdated or have errors: inspect every track's state. Invalid invocation/configuration/products YAML exits **2**; global failures (including signed-index verification and security-feed fetch/parse failures) exit **1**. Exit 1/2 has stderr diagnostics and no partial JSON document.
+
+### Advisory severity
+
+Severity enrichment is best-effort metadata and **never changes track state, fix reachability, or APK version comparison**. Human output shows unique advisory counts by severity per track (including unevaluated warnings), plus an enrichment summary. `unknown` is not a clean-security result.
+
+CVEs use the [NVD CVE API](https://nvd.nist.gov/developers/vulnerabilities): prefer CVSS v4.0, then v3.1, v3.0, v2, choosing primary before secondary within each version; labels are `nvd-cvss-v4.0`, `nvd-cvss-v3.1`, `nvd-cvss-v3.0`, or `nvd-cvss-v2`. OSV database-provided severity is a fallback (`osv`). GHSA IDs prefer **their own** [OSV](https://google.github.io/osv.dev/api/) database severity (`osv`), then **their own** [GitHub advisory severity](https://docs.github.com/en/rest/security-advisories/global-advisories) (`ghsa`). Only when neither own severity is available may a true CVE alias from that advisory's OSV `aliases` or GitHub `cve_id` supply NVD severity, labelled `osv-alias:CVE-…` or `ghsa-alias:CVE-…`. GO IDs resolve true aliases from their own OSV record, preserving `osv-alias:<ID>` provenance. **IDs co-listed under a secdb fixed version are not aliases; no severity is transferred by fix grouping.** Raw CVSS vectors alone are deliberately skipped rather than assigning guessed scores. Unsupported IDs or complete sources without severity are `unknown` / `none`; unfinished or failed retrievals are `unknown` / `pending`. Upstream sources can disagree; advisory-own severity takes precedence over a CVE alias.
+
+Results are stored by ID in private mode-0600 files under the mode-0700 OS user-cache `lupetto/status/severity/` directory, with fetch timestamps. Known results refresh after seven days; confirmed unknowns refresh after one hour. Pending results are not cached, allowing later runs to fill them. Cache failures only reduce severity coverage and never fail status.
+
+```bash
+lupetto status --products products.yaml --json --severity-budget 20s
+lupetto status --products products.yaml --json --severity-budget 0
+```
+
+These commands inherit the configured registry/repository. The default severity budget is **20s**; `0` disables all severity network requests and uses fresh cached facts only. Other values are Go durations from 0 through 5m. The budget covers all advisory fetches, not the index/feed/registry comparison. Unauthenticated NVD requests are spaced at least 6.1s within the resolver; an optional **`NVD_API_KEY`** environment value reduces spacing to 0.6s and is sent only in the NVD request header, never printed, logged, or cached. Configure the variable through your secret-management mechanism, not a shell argument/example containing a real key. NVD 403/429 responses stop additional NVD requests for that run; GitHub's unauthenticated 60-request/hour allowance means it is used sparingly after OSV. HTTP failures, malformed or oversized responses and rate limits never fail status: remaining IDs stay honestly unknown/pending, with actual failed fetches counted in the summary. Independent CLI processes do not share an API quota lock; rapid repeated runs or other clients can still exhaust upstream limits.
 
 ### Security-data limitations
 
@@ -300,7 +317,7 @@ Every `build` and `sbom` run that passes argument validation produces one **vers
 - Load references are intended names when loading is skipped; `readableReferenceConfirmed: false` with `loaded` means the readable tag could not be confirmed.
 - Publication workflows keep `failure.error` to a sanitized stage message; local-only workflows record the detailed local error (capped at 8 KiB).
 
-The schema changes only with a new `version`; version 3–5 records from earlier releases are not migrated. Explorer accepts only this version-6 build record and kind `status` / `discover`, version-1 documents; incompatible versions are explicit errors.
+The schema changes only with a new `version`; version 3–5 records from earlier releases are not migrated. Explorer accepts only the version-6 build record, kind `status` version-2 documents, and kind `discover` version-1 documents; incompatible versions are explicit errors. Status version 2 preserves the original `ids` links and adds per-ID advisory severity, per-group maximum severity, and the enrichment summary; older Explorer binaries requiring status version 1 must be upgraded with the CLI.
 
 ## Publish, sign, and verify
 

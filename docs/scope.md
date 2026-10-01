@@ -37,7 +37,7 @@ lupetto sbom <package-or-provider> --apk-version <exact-apk-version> [--json]
 
 An exact APK version includes the packaging revision, such as `-rN`. Selecting an upstream version alone does not distinguish its packaging revisions.
 
-`status` compares tracked published images with the signed live index and the unsigned Wolfi security-fix feed; its separate `kind: status`, version-1 JSON document contains per-track facts and errors. It is read-only and not a vulnerability scan. Products-file tracking, exit semantics, and security limitations are defined in the [operator guide](../README.md#compare-published-images-with-wolfi).
+`status` compares tracked published images with the signed live index and the unsigned Wolfi security-fix feed; its separate `kind: status`, version-2 JSON document contains per-track facts and errors plus best-effort advisory severity that never changes state derivation. It is read-only and not a vulnerability scan. `inspect --json <registry-digest-reference>` reports the immutable installed package set through the same registry/cache boundary. Products-file tracking, exit semantics, and security limitations are defined in the [operator guide](../README.md#compare-published-images-with-wolfi).
 
 Where behavior is specified:
 

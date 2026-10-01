@@ -15,12 +15,14 @@ import (
 type Options = registry.PublicationOptions
 
 type Services struct {
-	ReadIndex    func(context.Context, string) ([]wolfi.Package, string, error)
-	ReadSecurity func(context.Context) (SecurityFeed, string, error)
-	Registry     RegistryReader
-	Now          func() time.Time
-	Cache        InstalledCache
-	Architecture string
+	ReadIndex      func(context.Context, string) ([]wolfi.Package, string, error)
+	ReadSecurity   func(context.Context) (SecurityFeed, string, error)
+	Registry       RegistryReader
+	Now            func() time.Time
+	Cache          InstalledCache
+	Architecture   string
+	Severity       *SeverityResolver
+	SeverityBudget time.Duration
 }
 
 func ValidateOptions(options Options) error {
@@ -34,7 +36,11 @@ func ValidateOptions(options Options) error {
 }
 
 func Run(ctx context.Context, products Products, options Options) (Document, error) {
-	return RunWith(ctx, products, options, Services{})
+	budget := DefaultSeverityBudget
+	if configured, ok := ctx.Value(severityBudgetKey{}).(time.Duration); ok {
+		budget = configured
+	}
+	return RunWith(ctx, products, options, Services{SeverityBudget: budget})
 }
 
 // RunWith returns a computed document even when individual tracks fail. Only
@@ -208,6 +214,10 @@ func RunWith(ctx context.Context, products Products, options Options, services S
 			document.Tracks = append(document.Tracks, track)
 		}
 	}
+	if services.Severity == nil {
+		services.Severity = NewSeverityResolver()
+	}
+	enrichSeverity(ctx, &document, services.Severity, services.SeverityBudget)
 	if err := ctx.Err(); err != nil {
 		return Document{}, err
 	}

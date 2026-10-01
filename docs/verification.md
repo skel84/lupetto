@@ -1005,6 +1005,35 @@ Against a disposable products directory, the actual executable's `products add c
 
 Hermetic regressions verify comment round-trips (document, version, package, selectors), preserved product order and mode 0640, selector and whole-package removal, final-product removal/listing, duplicate-argument/existing-track idempotence (byte-identical no-op), separate entries for the same package, malformed names/selectors/YAML, unknown fields/document versions, missing-file consent, read-only file/directory failures, no leftover temporary file, no changed original on failure, and exit-2 empty stdout. Edits use YAML nodes, a same-directory temporary file, fsync and rename. No network or Docker operation was invoked. Concurrent editor serialization, ACL preservation, and retaining comments attached to removed nodes are not claimed.
 
+## Advisory severity redesign checkpoint
+
+The corrected contract never treats secdb co-listing as alias identity. After the host reboot, `go build -o /tmp/lupetto-severity-cli ./cmd/lupetto` built the standalone CLI. A fresh owned `registry:3` used `docker run -d --rm --name lupetto-inspect-severity-postreboot -p 127.0.0.1:55217:5000 registry:3`. `discover --json openssl` observed signed APKINDEX SHA-256 `4953b43e5ff05eeb41ee163974e4de3f4d43f9aa4fd30b1f08724b9ca0d8e53a` and available exact `3.6.1-r0`.
+
+`build openssl --apk-version 3.6.1-r0 --no-load --json --registry 127.0.0.1:55217 --repository verify/severity` exited 0 with an unreachable `DOCKER_HOST` and isolated empty Docker configuration. It retained workspace `image-2322911871` and published verified immutable reference `127.0.0.1:55217/verify/severity/openssl@sha256:1c3c2717ca3d3e49ae99466f082fd8f53a264ae8077662b87e7bb1e188bec129`. Severity observations used a **fresh disposable HOME cache**, with `NVD_API_KEY` absent, and this actual command twice:
+
+```bash
+/tmp/lupetto-severity-cli status --products "$PRODUCTS_FILE" \
+  --registry 127.0.0.1:55217 --repository verify/severity --json
+```
+
+`PRODUCTS_FILE` was the isolated products file tracking `openssl 3.6`. Both runs exited 0 as status **version 2**, retained `update-available`, and listed five missing-fix groups and nine installed packages. The first took 24.78s including index/feed/registry work; the second took 27.59s. The 20s severity budget does not cover other status work. Counts below are **unique advisory IDs across missing fixes and the one global malformed-key warning**, not advisory occurrences: 57 IDs total (54 installed-image IDs plus three global `opa-envoy` warning IDs).
+
+| Observation | GitHub own (`ghsa`) | NVD (`nvd-cvss-v3.1`) | True OSV alias (`osv-alias:CVE-2025-22866`) | Unknown/pending | Failed fetches |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| First status | 28 | 0 | 0 | 29 | 0 |
+| Second status | 28 | 4 | 1 | 24 | 0 |
+| Follow-up `--severity-budget 0` | 28 | 4 | 1 | 24 | 0 |
+
+The first run resolved advisory-owned GitHub facts before NVD rate waits could consume the budget. The second preserved **all 28 prior cache files byte-for-byte**, including original fetch timestamps, and added five entries. The true OSV alias was `GO-2025-3447` → `CVE-2025-22866`; the CVE itself retained its NVD source, while the independently fetched co-listed GHSA retained its own GitHub source. No `osv`, `ghsa-alias`, v4.0, v3.0 or v2 source was needed/resolved in this scoped live run; those fallback/metric cases are covered hermetically. Cache-only coverage was identical, with no severity fetches; files were mode 0600 and the directory mode 0700. `inspect --json <published-digest>` returned packages exactly equal to the second status's installed list. Human cache-only output showed 4 critical / 18 high / 6 medium / 2 low / 24 unknown installed-image advisory IDs, one explained global warning, and the non-fatal enrichment summary.
+
+Manual source checks: [NVD CVE-2026-2673](https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2026-2673) contained v3.1 secondary metric **MEDIUM**, score 6.5, matching `medium` / `nvd-cvss-v3.1`; [NVD CVE-2026-14456](https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2026-14456) contained v3.1 secondary metric **HIGH**, score 7.5, matching `high` / `nvd-cvss-v3.1`. [GitHub GHSA-wj64-gh9j-xm82](https://api.github.com/advisories/GHSA-wj64-gh9j-xm82) identifies CVE-2026-2673 but its own unreviewed severity is **high**; OSV returned 404 for that GHSA. The corrected output therefore reports **high** / `ghsa` for the GHSA and **medium** / `nvd-cvss-v3.1` for the CVE, preserving the independent assessments rather than transferring the CVE's severity.
+
+Corrected focused proof: `go test -race ./internal/status ./cmd/lupetto ./internal/explorer -run 'TestSeverity|TestStatus|TestCompatibilityAndRecordParsing|TestInspect' -count=1 -timeout=180s` passed. Hermetic HTTP fakes cover NVD metric/version/primary precedence and v2 field location, own OSV/GitHub precedence, true OSV/GitHub aliases, independent co-listed advisories, NVD-only CVE-alias traversal, GO alias-only/cycle handling, legacy co-list-cache rejection, skipped vector-only records, advisory-first budget ordering, pending/cancellation, 7d/1h cache expiry, unchanged cached timestamps, private/symlink cache handling, response bounds and 403/429 handling. Integration tests verify maximum severity, every ID including unsupported unevaluated IDs, summary counts, empty arrays, cache-only mode, unchanged states/reachability and Explorer v2 decoding/rejection of v1. Independent read-only review of the corrected source found no actionable in-scope issue.
+
+Final severity checkpoint gates ran sequentially on the exact exported staged tree, excluding concurrently edited Explorer redesign files: `go test ./... -count=1 -timeout=180s` and `go test -race ./... -count=1 -timeout=180s` both passed (all packages). Owned Go files were formatted with `gofmt`; staged whitespace/secret-marker checks passed. Relative documentation links/anchors and all README Bash blocks passed source/syntax validation; this does not execute production examples.
+
+Limitations: severity is cached best-effort metadata, not scanning or state derivation; pending coverage fills on later runs. Vector-only OSV facts are skipped rather than guessed, and upstream assessments can disagree. There is no alias inference from secdb fix grouping. The key-enabled rate was tested with a synthetic header/fake service, not a real NVD key. Production HTTPS registry authentication and signature verification are not established by this anonymous loopback run. `docker rm -f lupetto-inspect-severity-postreboot` succeeded after all observations, removing the owned registry.
+
 ## Local inventory (redesign round)
 
 Observed on darwin/amd64 → linux/amd64 with native apko 1.4.5 and the existing local Docker Unix-socket context. Publication/signing `LUPETTO_*` settings were removed from the smoke subprocess environment, so neither build contacted a registry or invoked Cosign. `go build -o <temporary>/lupetto ./cmd/lupetto` produced the actual binary. Commands and observations:

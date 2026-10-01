@@ -2,7 +2,7 @@ package status
 
 import "time"
 
-const Version = 1
+const Version = 2
 
 const (
 	NotBuilt        = "not-built"
@@ -16,6 +16,21 @@ type Identity struct {
 	Name         string `json:"name"`
 	Version      string `json:"version"`
 	Architecture string `json:"architecture"`
+}
+
+type Advisory struct {
+	ID             string `json:"id"`
+	Severity       string `json:"severity"`
+	SeveritySource string `json:"severitySource"`
+}
+
+type SeveritySummary struct {
+	IDCount           int            `json:"idCount"`
+	ResolvedCount     int            `json:"resolvedCount"`
+	UnknownCount      int            `json:"unknownCount"`
+	PendingCount      int            `json:"pendingCount"`
+	FetchFailureCount int            `json:"fetchFailureCount"`
+	SourceCounts      map[string]int `json:"sourceCounts"`
 }
 
 type Image struct {
@@ -36,23 +51,27 @@ type OutdatedPackage struct {
 }
 
 type MissingFix struct {
-	Name             string   `json:"name"`
-	Architecture     string   `json:"architecture"`
-	InstalledVersion string   `json:"installedVersion"`
-	FixedVersion     string   `json:"fixedVersion"`
-	AvailableVersion string   `json:"availableVersion"`
-	IDs              []string `json:"ids"`
-	ReachableByTrack bool     `json:"reachableByTrack"`
+	Name             string     `json:"name"`
+	Architecture     string     `json:"architecture"`
+	InstalledVersion string     `json:"installedVersion"`
+	FixedVersion     string     `json:"fixedVersion"`
+	AvailableVersion string     `json:"availableVersion"`
+	IDs              []string   `json:"ids"`
+	ReachableByTrack bool       `json:"reachableByTrack"`
+	Advisories       []Advisory `json:"advisories"`
+	MaxSeverity      string     `json:"maxSeverity"`
 }
 
 // UnevaluatedFix retains a secdb entry with an unorderable fixed-version key
 // or no recognised advisory IDs. Installed fields appear only on track issues.
 type UnevaluatedFix struct {
-	Name             string   `json:"name"`
-	FixedVersion     string   `json:"fixedVersion"`
-	IDs              []string `json:"ids"`
-	InstalledVersion string   `json:"installedVersion,omitempty"`
-	Architecture     string   `json:"architecture,omitempty"`
+	Name             string     `json:"name"`
+	FixedVersion     string     `json:"fixedVersion"`
+	IDs              []string   `json:"ids"`
+	InstalledVersion string     `json:"installedVersion,omitempty"`
+	Architecture     string     `json:"architecture,omitempty"`
+	Advisories       []Advisory `json:"advisories"`
+	MaxSeverity      string     `json:"maxSeverity"`
 }
 
 type Track struct {
@@ -80,6 +99,7 @@ type SecuritySource struct {
 	WolfiOnly           bool             `json:"wolfiOnly"`
 	UnevaluatedFixCount int              `json:"unevaluatedFixCount"`
 	UnevaluatedFixes    []UnevaluatedFix `json:"unevaluatedFixes"`
+	Severity            SeveritySummary  `json:"severity"`
 }
 
 type Document struct {

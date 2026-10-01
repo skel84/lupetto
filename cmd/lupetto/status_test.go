@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"lupetto/internal/status"
 )
@@ -61,13 +62,13 @@ func TestStatusConfigurationPrecedenceAndTrackErrorExit(t *testing.T) {
 		if opts.Registry != "127.0.0.1:5000" || opts.Repository != "env/team" || len(products.Products) != 1 {
 			t.Fatalf("opts=%+v products=%+v", opts, products)
 		}
-		return status.Document{Kind: "status", Version: 1, Tracks: []status.Track{{Package: "nginx", Selector: "1.30", State: "error", Error: "selector unavailable"}}}, nil
+		return status.Document{Kind: "status", Version: 2, Tracks: []status.Track{{Package: "nginx", Selector: "1.30", State: "error", Error: "selector unavailable"}}}, nil
 	})
 	if !called || code != 0 || stderr.Len() != 0 {
 		t.Fatalf("called=%v code=%d stdout=%q stderr=%q", called, code, stdout.String(), stderr.String())
 	}
 	var document status.Document
-	if err := json.Unmarshal(stdout.Bytes(), &document); err != nil || document.Kind != "status" || document.Version != 1 || document.Tracks[0].State != "error" {
+	if err := json.Unmarshal(stdout.Bytes(), &document); err != nil || document.Kind != "status" || document.Version != 2 || document.Tracks[0].State != "error" {
 		t.Fatalf("document=%+v error=%v", document, err)
 	}
 }
@@ -131,7 +132,7 @@ func TestStatusDispatchAndHelp(t *testing.T) {
 	if code := run(context.Background(), []string{"--help"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	for _, phrase := range []string{"lupetto status --products <file>", "version=1 document", "unknown fields are rejected", "unsigned HTTPS", "including track errors/updates", "global failures exit 1"} {
+	for _, phrase := range []string{"lupetto status --products <file>", "version=2 document", "--severity-budget", "unknown fields are rejected", "unsigned HTTPS", "including track errors/updates", "global failures exit 1"} {
 		if !strings.Contains(stdout.String(), phrase) {
 			t.Fatalf("help missing %q", phrase)
 		}
@@ -147,7 +148,7 @@ func TestStatusOutputFailure(t *testing.T) {
 		}
 		var stderr bytes.Buffer
 		if code := runStatusWith(context.Background(), testArgs, failingWriter{}, &stderr, func(context.Context, status.Products, status.Options) (status.Document, error) {
-			return status.Document{Kind: "status", Version: 1, Tracks: []status.Track{}}, nil
+			return status.Document{Kind: "status", Version: 2, Tracks: []status.Track{}}, nil
 		}); code != 1 || !strings.Contains(stderr.String(), "could not write") {
 			t.Fatalf("json=%v code=%d stderr=%q", jsonOutput, code, stderr.String())
 		}
@@ -167,5 +168,41 @@ func TestStatusUnevaluatedSecurityWarning(t *testing.T) {
 		if !strings.Contains(stdout.String(), phrase) {
 			t.Fatalf("output missing %q: %s", phrase, stdout.String())
 		}
+	}
+}
+
+func TestStatusSeverityBudgetAndCounts(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want time.Duration
+	}{
+		{[]string{"--products=p"}, 20 * time.Second},
+		{[]string{"--products=p", "--severity-budget", "0"}, 0},
+		{[]string{"--products=p", "--severity-budget=15s"}, 15 * time.Second},
+	} {
+		request, err := parseStatus(test.args)
+		if err != nil || request.severityBudget != test.want {
+			t.Fatalf("%v: %+v %v", test.args, request, err)
+		}
+	}
+	for _, value := range []string{"", "-1s", "later", "6m", "20"} {
+		if _, err := parseStatus([]string{"--products=p", "--severity-budget=" + value}); err == nil {
+			t.Fatalf("accepted %q", value)
+		}
+	}
+	if _, err := parseStatus([]string{"--products=p", "--severity-budget=0", "--severity-budget=1s"}); err == nil {
+		t.Fatal("accepted duplicate budget")
+	}
+	track := status.Track{State: "current", MissingFixes: []status.MissingFix{
+		{Advisories: []status.Advisory{{ID: "a", Severity: "high"}, {ID: "b", Severity: "critical"}}},
+		{Advisories: []status.Advisory{{ID: "a", Severity: "high"}, {ID: "c", Severity: "unknown"}}},
+	}, UnevaluatedFixes: []status.UnevaluatedFix{{Advisories: []status.Advisory{{ID: "d", Severity: "low"}}}}}
+	counts := trackSeverityCounts(track)
+	if counts["high"] != 1 || counts["critical"] != 1 || counts["unknown"] != 1 || counts["low"] != 1 {
+		t.Fatalf("counts %+v", counts)
+	}
+	var out bytes.Buffer
+	if err := writeStatusTable(&out, status.Document{Tracks: []status.Track{track}}); err != nil || !strings.Contains(out.String(), "CRITICAL") || !strings.Contains(out.String(), "non-fatal") {
+		t.Fatalf("human severity output: %v %s", err, &out)
 	}
 }

@@ -25,21 +25,38 @@ type OutdatedPackage struct {
 	InstalledVersion string `json:"installedVersion"`
 	LatestVersion    string `json:"latestVersion"`
 }
+type Advisory struct {
+	ID             string `json:"id"`
+	Severity       string `json:"severity"`
+	SeveritySource string `json:"severitySource"`
+}
+type SeveritySummary struct {
+	IDCount           int            `json:"idCount"`
+	ResolvedCount     int            `json:"resolvedCount"`
+	UnknownCount      int            `json:"unknownCount"`
+	PendingCount      int            `json:"pendingCount"`
+	FetchFailureCount int            `json:"fetchFailureCount"`
+	SourceCounts      map[string]int `json:"sourceCounts"`
+}
 type MissingFix struct {
-	Name             string   `json:"name"`
-	Architecture     string   `json:"architecture"`
-	InstalledVersion string   `json:"installedVersion"`
-	FixedVersion     string   `json:"fixedVersion"`
-	AvailableVersion string   `json:"availableVersion"`
-	IDs              []string `json:"ids"`
-	ReachableByTrack bool     `json:"reachableByTrack"`
+	Name             string     `json:"name"`
+	Architecture     string     `json:"architecture"`
+	InstalledVersion string     `json:"installedVersion"`
+	FixedVersion     string     `json:"fixedVersion"`
+	AvailableVersion string     `json:"availableVersion"`
+	IDs              []string   `json:"ids"`
+	ReachableByTrack bool       `json:"reachableByTrack"`
+	Advisories       []Advisory `json:"advisories,omitempty"`
+	MaxSeverity      string     `json:"maxSeverity,omitempty"`
 }
 type UnevaluatedFix struct {
-	Name             string   `json:"name"`
-	InstalledVersion string   `json:"installedVersion,omitempty"`
-	Architecture     string   `json:"architecture,omitempty"`
-	FixedVersion     string   `json:"fixedVersion"`
-	IDs              []string `json:"ids"`
+	Name             string     `json:"name"`
+	InstalledVersion string     `json:"installedVersion,omitempty"`
+	Architecture     string     `json:"architecture,omitempty"`
+	FixedVersion     string     `json:"fixedVersion"`
+	IDs              []string   `json:"ids"`
+	Advisories       []Advisory `json:"advisories,omitempty"`
+	MaxSeverity      string     `json:"maxSeverity,omitempty"`
 }
 type Track struct {
 	Package           string            `json:"package"`
@@ -65,6 +82,7 @@ type SecuritySource struct {
 	WolfiOnly           bool             `json:"wolfiOnly"`
 	UnevaluatedFixCount int              `json:"unevaluatedFixCount"`
 	UnevaluatedFixes    []UnevaluatedFix `json:"unevaluatedFixes"`
+	Severity            SeveritySummary  `json:"severity,omitempty"`
 }
 type StatusDocument struct {
 	Kind         string         `json:"kind"`

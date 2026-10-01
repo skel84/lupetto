@@ -100,8 +100,8 @@ func (c *CLI) Status(ctx context.Context, products string) (*StatusDocument, err
 	if err := decodeDocument(data, &document); err != nil {
 		return nil, fmt.Errorf("incompatible lupetto CLI: status JSON: %w", err)
 	}
-	if document.Kind != "status" || document.Version != 1 {
-		return nil, incompatible("status", document.Kind, document.Version, 1)
+	if document.Kind != "status" || document.Version != 2 {
+		return nil, incompatible("status", document.Kind, document.Version, 2)
 	}
 	return &document, nil
 }
