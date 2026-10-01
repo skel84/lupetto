@@ -431,6 +431,8 @@ func TestRegistryStageErrorSanitization(t *testing.T) {
 	registryErr := &transport.Error{StatusCode: http.StatusForbidden, Errors: []transport.Diagnostic{
 		{Code: "DENIED", Message: buildtest.PublicationCanary}, {Code: transport.ErrorCode(buildtest.PublicationCanary)},
 		{Code: "DENIED"}, {Code: "TOOMANYREQUESTS", Detail: buildtest.PublicationCanary}, {Code: "lower_case"}, {Code: transport.ErrorCode(strings.Repeat("A", 33))},
+		// Uppercase registry-controlled codes are not trusted merely by shape.
+		{Code: "SECRET_PASSWORD_CANARY"}, {Code: "HUNTER_TWO"},
 	}}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

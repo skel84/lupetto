@@ -18,7 +18,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"syscall"
 
@@ -83,11 +82,23 @@ var (
 	errRegistrySchemeRefused   = errors.New("unsupported registry URL scheme")
 	errRegistryContentMismatch = errors.New("registry content mismatch")
 	errUnsupportedLayer        = errors.New("unsupported layer compression")
-	safeRegistryCode           = regexp.MustCompile(`^[A-Z_]{1,32}$`)
+	// Registry-supplied codes are arbitrary strings; only these known OCI
+	// distribution error constants are ever reported.
+	knownRegistryCodes = map[transport.ErrorCode]bool{
+		transport.BlobUnknownErrorCode: true, transport.BlobUploadInvalidErrorCode: true,
+		transport.BlobUploadUnknownErrorCode: true, transport.DigestInvalidErrorCode: true,
+		transport.ManifestBlobUnknownErrorCode: true, transport.ManifestInvalidErrorCode: true,
+		transport.ManifestUnknownErrorCode: true, transport.ManifestUnverifiedErrorCode: true,
+		transport.NameInvalidErrorCode: true, transport.NameUnknownErrorCode: true,
+		transport.SizeInvalidErrorCode: true, transport.TagInvalidErrorCode: true,
+		transport.UnauthorizedErrorCode: true, transport.DeniedErrorCode: true,
+		transport.UnsupportedErrorCode: true, transport.TooManyRequestsErrorCode: true,
+		transport.UnknownErrorCode: true, transport.UnavailableErrorCode: true,
+	}
 )
 
 // registryStageError reports the stage plus, at most, a fixed classification,
-// an HTTP status, and registry error codes from a closed character set.
+// an HTTP status, and registry error codes from the known OCI constants.
 func registryStageError(ctx context.Context, stage string, err error) error {
 	if cause := stageCancellation(ctx, err); cause != nil {
 		return &publicationStageError{stage: stage, cause: cause}
@@ -118,7 +129,7 @@ func registryErrorDetail(err error) string {
 		seen := make(map[string]bool)
 		for _, diagnostic := range registryErr.Errors {
 			code := string(diagnostic.Code)
-			if !safeRegistryCode.MatchString(code) || seen[code] || len(codes) == 8 {
+			if !knownRegistryCodes[diagnostic.Code] || seen[code] || len(codes) == 8 {
 				continue
 			}
 			seen[code] = true
