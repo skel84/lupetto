@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -116,9 +117,14 @@ func TestHelpDescribesCurrentCapabilities(t *testing.T) {
 	if code := run(context.Background(), []string{"--help"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), "lupetto discover <package-or-provider>") || !strings.Contains(stdout.String(), "lupetto build <package-or-provider>") || !strings.Contains(stdout.String(), "lupetto sbom <package-or-provider>") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	for _, phrase := range []string{"log stages and live tool diagnostics to stderr", "ASCII spinner on interactive terminals", "--registry / LUPETTO_REGISTRY", "--repository / LUPETTO_REPOSITORY", "nested lower-case prefix", "Docker's credential store", "Cosign v3.1.3", "--cosign-key / LUPETTO_COSIGN_KEY", "--cosign-signing-config / LUPETTO_COSIGN_SIGNING_CONFIG", "--cosign-allow-http / LUPETTO_COSIGN_ALLOW_HTTP", "no implicit keyless path", "COSIGN_PASSWORD only from the process environment", "Cosign tool diagnostics are discarded", "literal loopback requires explicit effective HTTP consent", "cosign signing-config create --out <file>", "ignores publication and signing environment inputs"} {
+	for _, phrase := range []string{"log stages and live tool diagnostics to stderr", "ASCII spinner on interactive terminals", "--registry / LUPETTO_REGISTRY", "--repository / LUPETTO_REPOSITORY", "nested lower-case prefix", "Docker's credential store", "Cosign v3.1.3", "--cosign-key / LUPETTO_COSIGN_KEY", "--cosign-signing-config / LUPETTO_COSIGN_SIGNING_CONFIG", "--cosign-allow-http / LUPETTO_COSIGN_ALLOW_HTTP", "no implicit keyless path", "COSIGN_PASSWORD only from the process environment", "Cosign tool diagnostics are discarded", "literal loopback requires explicit effective HTTP consent", "cosign signing-config create --out <file>", "ignores publication and signing environment inputs", "[--json]", "--json prints the version-6 result record", "with or without --no-load", "loopback IP registries"} {
 		if !strings.Contains(stdout.String(), phrase) {
 			t.Fatalf("help missing %q: %s", phrase, stdout.String())
+		}
+	}
+	for _, removed := range []string{"Publication requires loading", "cannot be used with --no-load", "publication, and loading", "docker push", "Docker publication"} {
+		if strings.Contains(stdout.String(), removed) {
+			t.Fatalf("help still contains %q: %s", removed, stdout.String())
 		}
 	}
 }
@@ -185,8 +191,6 @@ func TestRunBuildPublicationConfigurationBeforeCallback(t *testing.T) {
 		{name: "ambiguous authority", flags: []string{"--registry=registry", "--repository=team/images"}},
 		{name: "invalid nested prefix", flags: []string{"--registry=registry.example", "--repository=team//images"}},
 		{name: "overlong prefix", flags: []string{"--registry=registry.example", "--repository=" + strings.Repeat("a", 255)}},
-		{name: "no load with explicit publication", flags: []string{"--no-load", "--registry=registry.example", "--repository=team/images"}},
-		{name: "no load with environment publication", registry: "registry.example", repository: "team/images", flags: []string{"--no-load"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("LUPETTO_REGISTRY", tc.registry)
@@ -338,11 +342,10 @@ func TestRunBuildConsumesTypedWorkflowFailure(t *testing.T) {
 	callback := func(context.Context, buildRequest) (buildResult, error) {
 		failure := &workflowFailure{
 			result: buildResult{
-				workspace: "/synthetic/image-123", dockerLoad: "loaded",
+				workspace: "/synthetic/image-123", build: "completed", dockerLoad: "loaded", readableConfirmed: true, signing: "skipped", attestation: "skipped",
 				publication: publicationOutcome{status: "failed", reference: "registry.example/team/images/pkg:1.0-r0-amd64-build-123", pushedDigest: digest, immutableReference: immutable, verified: false},
 			},
-			build: "completed", load: "loaded", signing: "skipped", attestation: "skipped",
-			stage: "publication", attempted: true, cause: errors.New("publication identity verification failed"), failureRecord: true,
+			stage: "publication", sideEffects: true, cause: errors.New("publication identity verification failed"),
 		}
 		return buildResult{}, errors.Join(errors.New("outer wrapper must not be printed"), failure)
 	}
@@ -411,12 +414,11 @@ func TestRunBuildConsumesTypedSigningPartialFailures(t *testing.T) {
 			callback := func(context.Context, buildRequest) (buildResult, error) {
 				failure := &workflowFailure{
 					result: buildResult{
-						workspace: "/synthetic/image-123", dockerLoad: "loaded",
+						workspace: "/synthetic/image-123", build: "completed", dockerLoad: "loaded", readableConfirmed: true,
 						publication: publicationOutcome{status: "published", pushedDigest: digest, immutableReference: immutable, verified: true},
 						signing:     tc.signing, attestation: tc.attestation,
 					},
-					build: "completed", load: "loaded", signing: tc.signing, attestation: tc.attestation,
-					stage: tc.stage, attempted: true, cause: errors.New("sanitized stage failure"), failureRecord: true,
+					stage: tc.stage, sideEffects: true, cause: errors.New("sanitized stage failure"),
 				}
 				return buildResult{}, errors.Join(errors.New("secret-outer-wrapper-canary"), failure)
 			}
@@ -436,5 +438,112 @@ func TestRunBuildConsumesTypedSigningPartialFailures(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRunBuildAllowsNoLoadWithPublication(t *testing.T) {
+	for _, tc := range []struct {
+		name, registry, repository string
+		flags                      []string
+	}{
+		{name: "explicit publication", flags: []string{"--no-load", "--registry=registry.example", "--repository=team/images"}},
+		{name: "environment publication", registry: "registry.example", repository: "team/images", flags: []string{"--no-load"}},
+		{name: "signing", flags: []string{"--no-load", "--registry=registry.example", "--repository=team/images", "--cosign-key=/synthetic/key"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, name := range []string{"LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP"} {
+				t.Setenv(name, "")
+			}
+			t.Setenv("LUPETTO_REGISTRY", tc.registry)
+			t.Setenv("LUPETTO_REPOSITORY", tc.repository)
+			calls := 0
+			callback := func(_ context.Context, request buildRequest) (buildResult, error) {
+				calls++
+				if !request.noLoad || !request.publication.enabled() {
+					t.Fatalf("request=%+v", request)
+				}
+				return buildResult{}, errors.New("synthetic callback failure")
+			}
+			var stdout, stderr bytes.Buffer
+			args := append([]string{"build", "nginx", "1.30"}, tc.flags...)
+			if code := runWithBuild(context.Background(), args, &stdout, &stderr, callback); code != 1 || calls != 1 {
+				t.Fatalf("code=%d calls=%d stderr=%q", code, calls, stderr.String())
+			}
+		})
+	}
+}
+
+func TestParseBuildJSON(t *testing.T) {
+	for _, args := range [][]string{
+		{"valkey", "9.1", "--json"},
+		{"--json", "valkey", "--apk-version=9.1.2-r1", "--no-load"},
+	} {
+		if request, err := parseBuild(args); err != nil || !request.json {
+			t.Fatalf("args=%q request=%+v err=%v", args, request, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"valkey", "9.1", "--json", "--json"},
+		{"valkey", "9.1", "--json=true"},
+		{"valkey", "9.1", "--json=false"},
+		{"valkey", "--apk-version", "--json"},
+	} {
+		if request, err := parseBuild(args); err == nil {
+			t.Fatalf("args=%q accepted %+v", args, request)
+		}
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("synthetic stdout failure") }
+
+func TestRunJSONOutput(t *testing.T) {
+	for _, name := range []string{"LUPETTO_REGISTRY", "LUPETTO_REPOSITORY", "LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP"} {
+		t.Setenv(name, "")
+	}
+	record := []byte("{\n  \"version\": 6\n}\n")
+	success := func(_ context.Context, request buildRequest) (buildResult, error) {
+		if !request.json {
+			t.Fatal("--json not passed to the build")
+		}
+		return buildResult{record: record}, nil
+	}
+	for _, command := range [][]string{{"build", "pkg", "1", "--json"}, {"sbom", "pkg", "--apk-version=1.0-r0", "--json"}} {
+		var stdout, stderr bytes.Buffer
+		if code := runWithBuild(context.Background(), command, &stdout, &stderr, success); code != 0 || !bytes.Equal(stdout.Bytes(), record) {
+			t.Fatalf("args=%q code=%d stdout=%q stderr=%q", command, code, stdout.String(), stderr.String())
+		}
+	}
+	// A typed failure prints its record on stdout; stderr keeps human output.
+	failure := newWorkflowFailure(initialBuildResult(buildRequest{packageName: "pkg", selector: "1"}), "build", errors.New("synthetic local failure"), false)
+	var stdout, stderr bytes.Buffer
+	code := runWithBuild(context.Background(), []string{"build", "pkg", "1", "--json"}, &stdout, &stderr, func(context.Context, buildRequest) (buildResult, error) {
+		return buildResult{}, failure
+	})
+	var decoded buildRecord
+	if code != 1 || !bytes.Equal(stdout.Bytes(), failure.record) || json.Unmarshal(stdout.Bytes(), &decoded) != nil || decoded.Failure == nil || decoded.Failure.Error != "synthetic local failure" || decoded.Request.Package != "pkg" || decoded.Stages.Build.Status != "not-attempted" || decoded.Stages.Load.Status != "not-attempted" || decoded.Stages.Publication.Status != "skipped" || !strings.Contains(stderr.String(), "synthetic local failure") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	// Untyped failures and invocation errors print nothing on stdout.
+	stdout.Reset()
+	if code := runWithBuild(context.Background(), []string{"build", "pkg", "1", "--json"}, &stdout, &stderr, func(context.Context, buildRequest) (buildResult, error) {
+		return buildResult{}, errors.New("untyped")
+	}); code != 1 || stdout.Len() != 0 {
+		t.Fatalf("code=%d stdout=%q", code, stdout.String())
+	}
+	for _, args := range [][]string{{"build", "pkg", "1", "--json", "--json"}, {"build", "pkg", "--json"}, {"sbom", "pkg", "1", "--json"}, {"build", "pkg", "1", "--json", "--registry=registry.example"}} {
+		stdout.Reset()
+		if code := runWithBuild(context.Background(), args, &stdout, &stderr, func(context.Context, buildRequest) (buildResult, error) {
+			t.Fatal("invalid invocation started a build")
+			return buildResult{}, nil
+		}); code != 2 || stdout.Len() != 0 {
+			t.Fatalf("args=%q code=%d stdout=%q", args, code, stdout.String())
+		}
+	}
+	// A stdout write failure is reported on stderr and fails the command.
+	stderr.Reset()
+	if code := runWithBuild(context.Background(), []string{"build", "pkg", "1", "--json"}, failingWriter{}, &stderr, success); code != 1 || stderr.String() != "lupetto: could not write JSON result\n" {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
 	}
 }

@@ -353,8 +353,8 @@ func TestResultCanceledFinalizationLeavesNoSuccessRecord(t *testing.T) {
 		t.Run(fmt.Sprint(at), func(t *testing.T) {
 			workspace := t.TempDir()
 			ctx := &cancelAfterChecks{Context: context.Background(), at: at}
-			err := retainBuildResult(ctx, buildResult{workspace: workspace, dockerLoad: "skipped"}, "lock.json")
-			if !errors.Is(err, context.Canceled) {
+			record, err := retainBuildResult(ctx, buildResult{workspace: workspace, dockerLoad: "skipped"})
+			if !errors.Is(err, context.Canceled) || record != nil {
 				t.Fatalf("err=%v", err)
 			}
 			if _, err := os.Stat(filepath.Join(workspace, "result.json")); !os.IsNotExist(err) {

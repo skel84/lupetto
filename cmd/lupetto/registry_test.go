@@ -179,3 +179,33 @@ func TestPublicationReferencesFullRepositoryLength(t *testing.T) {
 		t.Fatal("accepted prefix that cannot fit any eventual APK component")
 	}
 }
+
+func TestPublicationReferencesParseUpstreamTagWithoutNormalization(t *testing.T) {
+	selected := indexedPackage{name: "nginx-stable", version: "1.30.2-r0"}
+	for _, tc := range []struct {
+		registry, scheme, registryStr string
+		insecure                      bool
+	}{
+		{"registry.example:5000", "https", "registry.example:5000", false},
+		{"registry.example", "https", "registry.example", false},
+		{"10.0.0.1:5000", "http", "10.0.0.1:5000", false}, // ggcr heuristic only; the guard refuses plain HTTP
+		{"127.0.0.1:5000", "http", "127.0.0.1:5000", true},
+		{"127.0.0.2:5000", "http", "127.0.0.2:5000", true},
+		{"localhost", "http", "localhost", true},
+		{"LOCALHOST:5000", "http", "LOCALHOST:5000", true},
+		{"[::1]:5000", "http", "[::1]:5000", true},
+		{"docker.io", "https", "index.docker.io", false},
+	} {
+		target, err := publicationReferences(selected, "x86_64", "/cache/image-123", publicationOptions{tc.registry, "team/images"})
+		if err != nil {
+			t.Fatalf("registry %q: %v", tc.registry, err)
+		}
+		if target.insecure != tc.insecure || target.tag.Scheme() != tc.scheme || target.tag.RegistryStr() != tc.registryStr || target.tag.RepositoryStr() != "team/images/nginx-stable" || target.tag.TagStr() != "1.30.2-r0-amd64-build-123" {
+			t.Fatalf("registry %q: target=%+v scheme=%s", tc.registry, target, target.tag.Scheme())
+		}
+		// The record keeps the operator's authority, including docker.io.
+		if target.repository != tc.registry+"/team/images/nginx-stable" {
+			t.Fatalf("repository=%q", target.repository)
+		}
+	}
+}

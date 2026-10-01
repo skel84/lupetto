@@ -127,7 +127,7 @@ func signAndAttestDigest(ctx context.Context, command localCommand, result build
 	if slash <= 0 {
 		return fail("signing target repository", nil)
 	}
-	if err := validateSigningOptions(opts, publicationOptions{registry: reference.Domain(target), repository: path[:slash]}, false); err != nil {
+	if err := validateSigningOptions(opts, publicationOptions{registry: reference.Domain(target), repository: path[:slash]}); err != nil {
 		return fail("signing configuration", err)
 	}
 	if err := ctx.Err(); err != nil {

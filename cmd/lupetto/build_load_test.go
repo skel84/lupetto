@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -33,6 +32,9 @@ type pipelineFixture struct {
 	services                                                   buildServices
 	events                                                     []string
 	workspace, imageID, dockerID, reference, readableReference string
+	manifestDigest                                             string
+	registry                                                   *testRegistry
+	afterBuild                                                 []func(imageDir string)
 }
 
 func newPipelineFixture(t *testing.T, failure string, cancel context.CancelFunc) *pipelineFixture {
@@ -102,6 +104,10 @@ func newPipelineFixture(t *testing.T, failure string, cancel context.CancelFunc)
 				}
 				f.imageID, _, _ = makeLoadOCI(t, imageDir, "postgresql-17", version, arch)
 				f.dockerID = f.imageID
+				f.manifestDigest = fixtureManifestDigest(t, imageDir)
+				for _, hook := range f.afterBuild {
+					hook(imageDir)
+				}
 				spdxVersion := "17.10-r1"
 				if failure == "SPDX" {
 					spdxVersion = "17.10-r2"
@@ -292,23 +298,24 @@ func TestBuildLocalLoadAndSkippedStageOrchestration(t *testing.T) {
 			if f.reference != wantRef {
 				t.Fatalf("reference=%q want=%q", f.reference, wantRef)
 			}
-			data, err := os.ReadFile(filepath.Join(f.workspace, "result.json"))
-			if err != nil {
-				t.Fatal(err)
+			data := mustRead(t, filepath.Join(f.workspace, "result.json"))
+			record, raw := readRecord(t, filepath.Join(f.workspace, "result.json"))
+			wantCommand := "build"
+			if command == "sbom" {
+				wantCommand = "sbom"
 			}
-			var record evidenceResult
-			if err := json.Unmarshal(data, &record); err != nil {
-				t.Fatal(err)
-			}
-			if record.Version != 3 || record.ImageReference != wantReadableRef || record.BuildReference != wantRef || record.DockerLoad != status || record.DockerImageID != imageID || !record.SPDXValidated || record.SPDXSHA256 == "" {
+			load := record.Stages.Load
+			if record.Version != 6 || record.Command != wantCommand || record.Outcome != "succeeded" || record.Workspace != f.workspace || load.ImageReference != wantReadableRef || load.BuildReference != wantRef || load.Status != status || load.DockerImageID != imageID || load.ReadableReferenceConfirmed != (status == "loaded") || record.Evidence == nil || !record.Evidence.SPDXValidated || record.Evidence.SPDXSHA256 == "" {
 				t.Fatalf("record=%+v", record)
 			}
-			if record.PackageName != "postgresql-17" || record.PackageVersion != "17.10-r1" || record.IndexSHA256 == "" || record.Architecture == "" || record.ApkoVersion != apkoBuildVersion || record.ImageDirectory == "" || record.LockPath == "" || record.SPDXPath == "" {
-				t.Fatalf("selected APK/artifact evidence lost: %+v", record)
+			if record.Request != (recordRequest{Package: "postgresql-17", APKVersion: "17.10-r1", Load: status == "loaded"}) || record.Stages.Build.Status != "completed" || record.Stages.Publication != (recordPublication{Status: "skipped"}) || record.Stages.Signing.Status != "skipped" || record.Stages.Attestation.Status != "skipped" {
+				t.Fatalf("request/stages=%+v %+v", record.Request, record.Stages)
 			}
-			info, err := os.Stat(filepath.Join(f.workspace, "result.json"))
-			if err != nil || info.Mode().Perm() != 0600 {
-				t.Fatalf("result mode: info=%v err=%v", info, err)
+			if record.Selection == nil || *record.Selection != (recordSelection{Package: "postgresql-17", Version: "17.10-r1", Architecture: record.Selection.Architecture, IndexSHA256: record.Selection.IndexSHA256}) || record.Selection.IndexSHA256 == "" || record.Selection.Architecture == "" || record.Evidence.ApkoVersion != apkoBuildVersion || record.Evidence.ImageDirectory == "" || record.Evidence.ImageDigest != f.manifestDigest || record.Evidence.LockPath == "" || record.Evidence.SPDXPath == "" {
+				t.Fatalf("selected APK/artifact evidence lost: %+v %+v", record.Selection, record.Evidence)
+			}
+			if _, ok := raw["failure"]; ok {
+				t.Fatalf("success record has failure: %s", data)
 			}
 			if !strings.Contains(stdout.String(), "Validated SPDX:") || !strings.Contains(stdout.String(), "Image reference: "+wantReadableRef+"\n") || !strings.Contains(stdout.String(), "Build reference: "+wantRef+"\n") {
 				t.Fatalf("stdout=%q", stdout.String())
@@ -340,8 +347,12 @@ func TestBuildLocalFailedStagesNeverReportSuccess(t *testing.T) {
 				args = append(args, "--no-load")
 			}
 			var stdout, stderr bytes.Buffer
+			var typed *workflowFailure
 			build := func(ctx context.Context, request buildRequest) (buildResult, error) {
 				result, err := buildLocalWith(ctx, request, f.services)
+				if !errors.As(err, &typed) || typed.result.workspace == "" {
+					t.Fatalf("local failure is not a typed workflow failure with a workspace: %v", err)
+				}
 				if strings.HasPrefix(failure, "cancel") && !errors.Is(err, context.Canceled) {
 					t.Fatalf("cancellation lost: %v", err)
 				}
@@ -403,6 +414,39 @@ func TestBuildLocalFailedStagesNeverReportSuccess(t *testing.T) {
 			}
 			if f.workspace != "" && !strings.Contains(stderr.String(), "workspace: "+f.workspace) {
 				t.Fatalf("workspace missing: %s", stderr.String())
+			}
+			// Local-only workflows now also leave a version-6 failure record
+			// with the same detailed message the CLI prints.
+			record, _ := readRecord(t, filepath.Join(typed.result.workspace, "failure.json"))
+			if record.Version != 6 || record.Outcome != "failed" || record.Failure == nil || record.Failure.Error == "" || !strings.Contains(stderr.String(), record.Failure.Error) || record.Request.Publish || record.Stages.Publication.Status != "skipped" || record.Stages.Signing.Status != "skipped" {
+				t.Fatalf("failure record=%+v failure=%+v stderr=%s", record, record.Failure, stderr.String())
+			}
+			wantStage := map[string]string{"lock substitution": "build", "image package": "build", "SPDX": "build", "cancel index": "build", "cancel lock": "build",
+				"archive": "load", "load": "load", "inspect": "load", "bad saved config": "load", "save": "load",
+				"tag": "readable-tag", "readable ID mismatch": "readable-tag", "cancel readable inspect after response": "readable-tag",
+				"result recording": "record", "cancel finalization": "record", "skipped result recording": "record", "cancel skipped finalization": "record"}[failure]
+			if wantStage != "" && record.Failure.Stage != wantStage {
+				t.Fatalf("failure stage=%q want %q", record.Failure.Stage, wantStage)
+			}
+			switch record.Failure.Stage {
+			case "build":
+				if record.Stages.Build.Status != "failed" || record.Evidence != nil || record.Stages.Load.Status == "loaded" || record.Failure.SideEffectsPossible {
+					t.Fatalf("build failure stages=%+v", record.Stages)
+				}
+			case "load":
+				if record.Stages.Build.Status != "completed" || record.Stages.Load.Status != "failed" || record.Evidence == nil || !record.Failure.SideEffectsPossible {
+					t.Fatalf("load failure stages=%+v", record.Stages)
+				}
+			case "readable-tag":
+				if record.Stages.Load.Status != "loaded" || record.Stages.Load.ReadableReferenceConfirmed || record.Stages.Load.DockerImageID != f.dockerID {
+					t.Fatalf("readable failure stages=%+v", record.Stages)
+				}
+			case "record":
+				if record.Stages.Build.Status != "completed" || record.Failure.SideEffectsPossible != (record.Stages.Load.Status == "loaded") {
+					t.Fatalf("record failure stages=%+v", record.Stages)
+				}
+			default:
+				t.Fatalf("unexpected failure stage %q", record.Failure.Stage)
 			}
 			if failure == "result recording" || failure == "cancel finalization" {
 				if !strings.Contains(stderr.String(), "Docker loading confirmed") || !strings.Contains(stderr.String(), "result recording failed") || !strings.Contains(stderr.String(), f.reference) || !strings.Contains(stderr.String(), f.readableReference) || !strings.Contains(stderr.String(), f.dockerID) {

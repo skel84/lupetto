@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,7 +12,7 @@ import (
 	"syscall"
 )
 
-const usage = "Usage:\n  lupetto doctor\n  lupetto discover <package-or-provider>\n  lupetto build <package-or-provider> <major[.minor[.patch]]> [--no-load] [--registry <authority> --repository <prefix>] [--cosign-key <key> [--cosign-signing-config <file>] [--cosign-allow-http[=true|false]]]\n  lupetto build <package-or-provider> --apk-version <exact-version> [--no-load] [--registry <authority> --repository <prefix>] [--cosign-key <key> [--cosign-signing-config <file>] [--cosign-allow-http[=true|false]]]\n  lupetto sbom <package-or-provider> --apk-version <exact-version>\n\nDiscover lists exact versions from the current signed Wolfi APKINDEX for the host architecture.\nListed versions are not guaranteed buildable; builds validate apko dependencies and installed packages.\nA numeric selector chooses the highest matching APK version/revision; an exact version includes -rN.\nThe package name must match an APK name or a version-matched provider; ambiguous build matches fail.\nBuild and sbom compose a local OCI layout and validate apko SPDX against the lock.\nBuild and sbom log stages and live tool diagnostics to stderr, with an ASCII spinner on interactive terminals.\nBuild loads Docker by default; --no-load skips loading. SBOM always skips loading.\nBuild optionally publishes with --registry / LUPETTO_REGISTRY and --repository / LUPETTO_REPOSITORY.\nEach explicit flag independently overrides its environment input; both publication settings are required, and empty string flags are invalid.\nRegistry is an authority (not a URL); repository is a nested lower-case prefix such as team/lupetto/images.\nPublication requires loading, uses Docker's credential store, and verifies the pushed immutable digest.\nBuild optionally signs and attests the validated architecture SPDX to that same immutable digest using Cosign v3.1.3.\nSigning requires --cosign-key / LUPETTO_COSIGN_KEY, publication, and loading; there is no implicit keyless path.\nAn optional --cosign-signing-config / LUPETTO_COSIGN_SIGNING_CONFIG selects an upstream config file, not a Lupetto key store.\n--cosign-allow-http / LUPETTO_COSIGN_ALLOW_HTTP accepts only true or false; a valueless flag means true.\nExplicit false overrides environment true. HTTP allowance is restricted to literal localhost or loopback IP registries.\nSigning on literal loopback requires explicit effective HTTP consent, including when HTTPS might be available.\nProduction defaults preserve upstream HTTPS/TUF/transparency-log services; custom signing configs can change services.\nFor a local/offline exception, generate a no-service config with cosign signing-config create --out <file> (without --with-default-services).\nInherit COSIGN_PASSWORD only from the process environment; never pass or retain passwords, key/config contents, or Cosign diagnostics.\nPublication and Cosign tool diagnostics are discarded. Publication, image signing, and SPDX attestation are reported separately.\nSBOM rejects publication and signing flags (including false/empty forms) and ignores publication and signing environment inputs."
+const usage = "Usage:\n  lupetto doctor\n  lupetto discover <package-or-provider>\n  lupetto build <package-or-provider> <major[.minor[.patch]]> [--no-load] [--json] [--registry <authority> --repository <prefix>] [--cosign-key <key> [--cosign-signing-config <file>] [--cosign-allow-http[=true|false]]]\n  lupetto build <package-or-provider> --apk-version <exact-version> [--no-load] [--json] [--registry <authority> --repository <prefix>] [--cosign-key <key> [--cosign-signing-config <file>] [--cosign-allow-http[=true|false]]]\n  lupetto sbom <package-or-provider> --apk-version <exact-version> [--json]\n\nDiscover lists exact versions from the current signed Wolfi APKINDEX for the host architecture.\nListed versions are not guaranteed buildable; builds validate apko dependencies and installed packages.\nA numeric selector chooses the highest matching APK version/revision; an exact version includes -rN.\nThe package name must match an APK name or a version-matched provider; ambiguous build matches fail.\nBuild and sbom compose a local OCI layout and validate apko SPDX against the lock.\nBuild and sbom log stages and live tool diagnostics to stderr, with an ASCII spinner on interactive terminals.\n--json prints the version-6 result record (also retained as result.json or failure.json) to stdout instead of the summary.\nBuild loads Docker by default; --no-load skips loading. SBOM always skips loading.\nBuild optionally publishes with --registry / LUPETTO_REGISTRY and --repository / LUPETTO_REPOSITORY.\nEach explicit flag independently overrides its environment input; both publication settings are required, and empty string flags are invalid.\nRegistry is an authority (not a URL); repository is a nested lower-case prefix such as team/lupetto/images.\nPublication pushes the validated OCI layout directly to the registry (with or without --no-load), using Docker's credential store/configuration (DOCKER_CONFIG or ~/.docker/config.json).\nThe pushed manifest, tag, config, and layers are read back by digest and verified before the immutable digest is reported.\nPlain HTTP registry access is used only for literal localhost or loopback IP registries.\nBuild optionally signs and attests the validated architecture SPDX to that same immutable digest using Cosign v3.1.3.\nSigning requires --cosign-key / LUPETTO_COSIGN_KEY and publication; there is no implicit keyless path.\nAn optional --cosign-signing-config / LUPETTO_COSIGN_SIGNING_CONFIG selects an upstream config file, not a Lupetto key store.\n--cosign-allow-http / LUPETTO_COSIGN_ALLOW_HTTP accepts only true or false; a valueless flag means true.\nExplicit false overrides environment true. HTTP allowance is restricted to literal localhost or loopback IP registries.\nSigning on literal loopback requires explicit effective HTTP consent, including when HTTPS might be available.\nProduction defaults preserve upstream HTTPS/TUF/transparency-log services; custom signing configs can change services.\nFor a local/offline exception, generate a no-service config with cosign signing-config create --out <file> (without --with-default-services).\nInherit COSIGN_PASSWORD only from the process environment; never pass or retain passwords, key/config contents, or Cosign diagnostics.\nRegistry error bodies and Cosign tool diagnostics are discarded. Publication, image signing, and SPDX attestation are reported separately.\nSBOM rejects publication and signing flags (including false/empty forms) and ignores publication and signing environment inputs."
 
 var (
 	packageName     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+._-]*$`)
@@ -21,6 +22,8 @@ var (
 )
 
 type buildRequest struct {
+	command          string
+	json             bool
 	packageName      string
 	selector         string
 	version          string
@@ -71,17 +74,15 @@ func runWithBuild(ctx context.Context, args []string, stdout, stderr io.Writer, 
 		}
 		if err == nil && args[0] == "build" {
 			request.publication, err = resolvePublication(request.publicationFlags, os.LookupEnv)
-			if err == nil && request.noLoad && request.publication.enabled() {
-				err = fmt.Errorf("publication cannot be used with --no-load")
-			}
 			if err == nil {
-				request.signing, err = resolveSigning(request.signingFlags, request.publication, request.noLoad, os.LookupEnv)
+				request.signing, err = resolveSigning(request.signingFlags, request.publication, os.LookupEnv)
 			}
 		}
 		if err != nil {
 			fmt.Fprintf(stderr, "lupetto: %v\n", err)
 			return 2
 		}
+		request.command = args[0]
 		if args[0] == "sbom" {
 			request.noLoad = true
 		}
@@ -94,7 +95,26 @@ func runWithBuild(ctx context.Context, args []string, stdout, stderr io.Writer, 
 			if !reportWorkflowFailure(stderr, err) {
 				fmt.Fprintf(stderr, "lupetto: %s\n", plainProgressText(err.Error()))
 			}
+			var failure *workflowFailure
+			if request.json && errors.As(err, &failure) && len(failure.record) != 0 {
+				writeJSONRecord(stdout, stderr, failure.record)
+			}
 			return 1
+		}
+		if request.json {
+			record := result.record
+			if len(record) == 0 {
+				// Only injected callbacks reach this; the pipeline always
+				// returns the exact document it wrote to result.json.
+				if record, err = encodeRecord(result.recordDocument(nil)); err != nil {
+					fmt.Fprintln(stderr, "lupetto: could not write JSON result")
+					return 1
+				}
+			}
+			if !writeJSONRecord(stdout, stderr, record) {
+				return 1
+			}
+			return 0
 		}
 		fmt.Fprintln(stdout, "Build completed")
 		fmt.Fprintf(stdout, "Selected %s@%s (APKINDEX sha256:%s)\nOCI image: %s\nValidated SPDX: %s (sha256:%s)\nBuild evidence: %s\n", result.packageName, result.version, result.indexSHA256, result.imageDir, result.spdxPath, result.spdxSHA256, result.workspace)
@@ -126,6 +146,14 @@ func runWithBuild(ctx context.Context, args []string, stdout, stderr io.Writer, 
 	}
 }
 
+func writeJSONRecord(stdout, stderr io.Writer, record []byte) bool {
+	if n, err := stdout.Write(record); err != nil || n != len(record) {
+		fmt.Fprintln(stderr, "lupetto: could not write JSON result")
+		return false
+	}
+	return true
+}
+
 func parseBuild(args []string) (buildRequest, error) {
 	var request buildRequest
 	var positional []string
@@ -138,6 +166,11 @@ func parseBuild(args []string) (buildRequest, error) {
 				return buildRequest{}, fmt.Errorf("--no-load may be specified only once")
 			}
 			request.noLoad = true
+		case arg == "--json":
+			if request.json {
+				return buildRequest{}, fmt.Errorf("--json may be specified only once")
+			}
+			request.json = true
 		case arg == "--apk-version" || strings.HasPrefix(arg, "--apk-version="):
 			if seenVersion {
 				return buildRequest{}, fmt.Errorf("--apk-version may be specified only once")

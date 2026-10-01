@@ -3,10 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -14,8 +14,8 @@ import (
 const fixtureCosignKey = "/synthetic/" + signingCanary + "/key"
 const fixtureCosignConfig = "/synthetic/" + signingCanary + "/config"
 
-func signingCLIArgs(config bool) []string {
-	args := append(publicationCLIArgs(), "--cosign-key", fixtureCosignKey, "--cosign-allow-http")
+func signingCLIArgs(registry string, config bool) []string {
+	args := append(publicationCLIArgs(registry), "--cosign-key", fixtureCosignKey, "--cosign-allow-http")
 	if config {
 		args = append(args, "--cosign-signing-config", fixtureCosignConfig)
 	}
@@ -52,7 +52,7 @@ func addSigningFixture(t *testing.T, f *pipelineFixture, failure string, cancel 
 			}
 			return []byte(cosignSigningVersion), nil
 		}
-		immutable := "localhost:5000/team/images/postgresql-17@" + fixturePushDigest
+		immutable := f.registry.host + "/team/images/postgresql-17@" + f.manifestDigest
 		if args[len(args)-1] != immutable {
 			t.Fatalf("wrong signing identity: %q", args)
 		}
@@ -80,18 +80,18 @@ func addSigningFixture(t *testing.T, f *pipelineFixture, failure string, cancel 
 	}
 }
 
-func TestBuildSigningSingleCompositionAndV5Evidence(t *testing.T) {
+func TestBuildSigningSingleCompositionAndV6Record(t *testing.T) {
 	clearSigningFixtureEnvironment(t)
 	for _, configured := range []bool{false, true} {
 		t.Run(map[bool]string{false: "defaults", true: "custom config"}[configured], func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			f := newPipelineFixture(t, "", cancel)
-			addPublicationFixture(t, f, "", cancel)
+			registry := addRegistryFixture(t, f, "", cancel)
 			addSigningFixture(t, f, "", cancel)
 			var stdout, stderr bytes.Buffer
 			var result buildResult
-			code := runWithBuild(ctx, signingCLIArgs(configured), &stdout, &stderr, func(ctx context.Context, request buildRequest) (buildResult, error) {
+			code := runWithBuild(ctx, signingCLIArgs(registry.host, configured), &stdout, &stderr, func(ctx context.Context, request buildRequest) (buildResult, error) {
 				var err error
 				result, err = buildLocalWith(ctx, request, f.services)
 				return result, err
@@ -122,21 +122,15 @@ func TestBuildSigningSingleCompositionAndV5Evidence(t *testing.T) {
 			if !strings.Contains(stderr.String(), "loopback HTTP") || configured && !strings.Contains(stderr.String(), "custom service configuration") {
 				t.Fatalf("missing explicit exception warning: %q", stderr.String())
 			}
-			data, err := os.ReadFile(filepath.Join(f.workspace, "result.json"))
-			if err != nil || bytes.Contains(data, []byte(signingCanary)) {
-				t.Fatalf("record=%q err=%v", data, err)
+			data := mustRead(t, filepath.Join(f.workspace, "result.json"))
+			if bytes.Contains(data, []byte(signingCanary)) {
+				t.Fatalf("record=%q", data)
 			}
-			var record evidenceResult
-			if err := json.Unmarshal(data, &record); err != nil {
-				t.Fatal(err)
-			}
-			if record.Version != 5 || record.Build != "completed" || record.Signing != "signed" || record.Attestation != "attested" || record.Publication == nil || !record.Publication.Verified || record.Publication.ImmutableReference != result.publication.immutableReference || record.SPDXSHA256 != result.spdxSHA256 {
+			record, raw := readRecord(t, filepath.Join(f.workspace, "result.json"))
+			if record.Version != 6 || record.Stages.Build.Status != "completed" || record.Stages.Signing.Status != "signed" || record.Stages.Attestation.Status != "attested" || !record.Stages.Publication.Verified || record.Stages.Publication.ImmutableReference != result.publication.immutableReference || record.Evidence == nil || record.Evidence.SPDXSHA256 != result.spdxSHA256 || !record.Request.Sign || !record.Request.Publish || !record.Request.Load {
 				t.Fatalf("record=%+v", record)
 			}
-			info, err := os.Stat(filepath.Join(f.workspace, "result.json"))
-			if err != nil || info.Mode().Perm() != 0600 {
-				t.Fatalf("record permissions err=%v", err)
-			}
+			assertRecordShape(t, raw)
 			if _, err := os.Stat(filepath.Join(f.workspace, "failure.json")); !os.IsNotExist(err) {
 				t.Fatalf("unexpected failure record: %v", err)
 			}
@@ -144,18 +138,18 @@ func TestBuildSigningSingleCompositionAndV5Evidence(t *testing.T) {
 	}
 }
 
-func TestBuildSigningTypedPartialFailuresAndV5FailureOnly(t *testing.T) {
+func TestBuildSigningTypedPartialFailuresAndV6FailureOnly(t *testing.T) {
 	clearSigningFixtureEnvironment(t)
 	for _, tc := range []struct {
 		name, local, remote, cosign, cancelStage, stage, build, load, publication, signing, attestation string
 		verified                                                                                        bool
 	}{
-		{"composition", "build", "", "", "", "build", "failed", "not-attempted", "skipped", "not-attempted", "not-attempted", false},
-		{"load", "load", "", "", "", "load", "completed", "failed", "skipped", "not-attempted", "not-attempted", false},
-		{"readable tag", "readable ID mismatch", "", "", "", "readable-tag", "completed", "loaded; readable tag unconfirmed", "skipped", "not-attempted", "not-attempted", false},
-		{"push", "", "push", "", "", "publication", "completed", "loaded", "failed", "not-attempted", "not-attempted", false},
+		{"composition", "build", "", "", "", "build", "failed", "not-attempted", "not-attempted", "not-attempted", "not-attempted", false},
+		{"load", "load", "", "", "", "load", "completed", "failed", "not-attempted", "not-attempted", "not-attempted", false},
+		{"readable tag", "readable ID mismatch", "", "", "", "readable-tag", "completed", "loaded; readable tag unconfirmed", "not-attempted", "not-attempted", "not-attempted", false},
+		{"push", "", "reject manifest", "", "", "publication", "completed", "loaded", "failed", "not-attempted", "not-attempted", false},
 		{"content", "", "layer", "", "", "publication", "completed", "loaded", "failed", "not-attempted", "not-attempted", false},
-		{"publication cancel", "", "cancel pull", "", "", "publication", "completed", "loaded", "failed", "not-attempted", "not-attempted", false},
+		{"publication cancel", "", "cancel readback", "", "", "publication", "completed", "loaded", "failed", "not-attempted", "not-attempted", false},
 		{"sign", "", "", "sign", "", "signing", "completed", "loaded", "published", "failed", "not-attempted", true},
 		{"sign cancel", "", "", "cancel sign", "", "signing", "completed", "loaded", "published", "failed", "not-attempted", true},
 		{"before sign cancel", "", "", "", "Signing verified immutable registry image", "signing", "completed", "loaded", "published", "failed", "not-attempted", true},
@@ -171,12 +165,12 @@ func TestBuildSigningTypedPartialFailuresAndV5FailureOnly(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			f := newPipelineFixture(t, tc.local, cancel)
-			addPublicationFixture(t, f, tc.remote, cancel)
+			registry := addRegistryFixture(t, f, tc.remote, cancel)
 			addSigningFixture(t, f, tc.cosign, cancel)
 			var stdout, stderr bytes.Buffer
 			var caught error
 			stderrWriter := cancelOnSigningStageWriter{output: &stderr, cancel: cancel, stage: tc.cancelStage}
-			code := runWithBuild(ctx, signingCLIArgs(true), &stdout, stderrWriter, func(ctx context.Context, request buildRequest) (buildResult, error) {
+			code := runWithBuild(ctx, signingCLIArgs(registry.host, true), &stdout, stderrWriter, func(ctx context.Context, request buildRequest) (buildResult, error) {
 				result, err := buildLocalWith(ctx, request, f.services)
 				caught = err
 				return result, err
@@ -185,11 +179,16 @@ func TestBuildSigningTypedPartialFailuresAndV5FailureOnly(t *testing.T) {
 			if code == 0 || stdout.Len() != 0 || !errors.As(caught, &wf) {
 				t.Fatalf("code=%d stdout=%q error=%v", code, stdout.String(), caught)
 			}
-			if wf.stage != tc.stage || wf.build != tc.build || wf.load != tc.load || wf.result.publication.status != tc.publication || wf.result.publication.verified != tc.verified || wf.signing != tc.signing || wf.attestation != tc.attestation || wf.result.signing != tc.signing || wf.result.attestation != tc.attestation {
-				t.Fatalf("workflow=%+v result=%+v", wf, wf.result)
+			r := wf.result
+			load := r.dockerLoad
+			if load == "loaded" && !r.readableConfirmed {
+				load = "loaded; readable tag unconfirmed"
 			}
-			if tc.verified && wf.result.publication.immutableReference != "localhost:5000/team/images/postgresql-17@"+fixturePushDigest {
-				t.Fatalf("lost confirmed publication identity: %+v", wf.result.publication)
+			if wf.stage != tc.stage || r.build != tc.build || load != tc.load || r.publication.status != tc.publication || r.publication.verified != tc.verified || r.signing != tc.signing || r.attestation != tc.attestation {
+				t.Fatalf("workflow=%+v result=%+v", wf, r)
+			}
+			if tc.verified && r.publication.immutableReference != registry.host+"/team/images/postgresql-17@"+f.manifestDigest {
+				t.Fatalf("lost confirmed publication identity: %+v", r.publication)
 			}
 			if strings.Contains(caught.Error(), signingCanary) || strings.Contains(stderr.String(), signingCanary) || strings.Contains(stderr.String(), publicationCanary) {
 				t.Fatalf("unsafe error=%v stderr=%q", caught, stderr.String())
@@ -199,7 +198,7 @@ func TestBuildSigningTypedPartialFailuresAndV5FailureOnly(t *testing.T) {
 					t.Fatalf("missing %q: %q", stage, stderr.String())
 				}
 			}
-			if wf.attempted && !strings.Contains(stderr.String(), "no rollback attempted") {
+			if wf.sideEffects && !strings.Contains(stderr.String(), "no rollback attempted") {
 				t.Fatalf("missing uncertainty warning: %q", stderr.String())
 			}
 			if strings.Contains(tc.name, "cancel") && !errors.Is(caught, context.Canceled) {
@@ -219,26 +218,88 @@ func TestBuildSigningTypedPartialFailuresAndV5FailureOnly(t *testing.T) {
 				t.Fatalf("attested changed/unreadable/canceled predicate: %q", f.events)
 			}
 			assertNoSuccessRecord(t, f.workspace)
-			data, err := os.ReadFile(filepath.Join(f.workspace, "failure.json"))
-			if err != nil || bytes.Contains(data, []byte(signingCanary)) || bytes.Contains(data, []byte(publicationCanary)) {
-				t.Fatalf("record=%q err=%v", data, err)
+			data := mustRead(t, filepath.Join(f.workspace, "failure.json"))
+			if bytes.Contains(data, []byte(signingCanary)) || bytes.Contains(data, []byte(publicationCanary)) {
+				t.Fatalf("record=%q", data)
 			}
-			var record struct {
-				Version                                  int
-				Stage, Build, Load, Signing, Attestation string
-				Publication                              publicationEvidence
-			}
-			if err := json.Unmarshal(data, &record); err != nil {
-				t.Fatal(err)
-			}
-			if record.Version != 5 || record.Stage != tc.stage || record.Build != tc.build || record.Load != tc.load || record.Signing != tc.signing || record.Attestation != tc.attestation || record.Publication.Status != tc.publication || record.Publication.Verified != tc.verified {
+			record, _ := readRecord(t, filepath.Join(f.workspace, "failure.json"))
+			wantLoad := strings.TrimSuffix(tc.load, "; readable tag unconfirmed")
+			if record.Version != 6 || record.Failure == nil || record.Failure.Stage != tc.stage || record.Stages.Build.Status != tc.build || record.Stages.Load.Status != wantLoad || record.Stages.Load.ReadableReferenceConfirmed != (tc.load == "loaded") || record.Stages.Signing.Status != tc.signing || record.Stages.Attestation.Status != tc.attestation || record.Stages.Publication.Status != tc.publication || record.Stages.Publication.Verified != tc.verified {
 				t.Fatalf("record=%+v", record)
 			}
-			info, err := os.Stat(filepath.Join(f.workspace, "failure.json"))
-			if err != nil || info.Mode().Perm() != 0600 {
-				t.Fatalf("failure permissions err=%v", err)
-			}
 		})
+	}
+}
+
+func TestBuildNoLoadPublicationAndSigningOrchestration(t *testing.T) {
+	clearSigningFixtureEnvironment(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f := newPipelineFixture(t, "", cancel)
+	registry := addRegistryFixture(t, f, "", cancel)
+	addSigningFixture(t, f, "", cancel)
+	var stdout, stderr bytes.Buffer
+	var result buildResult
+	args := append(signingCLIArgs(registry.host, false), "--no-load", "--json")
+	code := runWithBuild(ctx, args, &stdout, &stderr, func(ctx context.Context, request buildRequest) (buildResult, error) {
+		var err error
+		result, err = buildLocalWith(ctx, request, f.services)
+		return result, err
+	})
+	if code != 0 || result.dockerLoad != "skipped" || result.publication.status != "published" || !result.publication.verified || result.signing != "signed" || result.attestation != "attested" {
+		t.Fatalf("code=%d result=%+v stderr=%q", code, result, stderr.String())
+	}
+	want := []string{"cosign version", "apko version", "index", "apko lock", "apko build", "cosign sign", "cosign attest"}
+	if strings.Join(f.events, ",") != strings.Join(want, ",") {
+		t.Fatalf("events=%q want=%q", f.events, want)
+	}
+	if !bytes.Equal(stdout.Bytes(), mustRead(t, filepath.Join(f.workspace, "result.json"))) {
+		t.Fatalf("--json stdout differs from result.json: %s", stdout.String())
+	}
+	record, _ := readRecord(t, filepath.Join(f.workspace, "result.json"))
+	if record.Stages.Load.Status != "skipped" || record.Stages.Load.DockerImageID != "" || record.Stages.Load.ImageReference == "" || record.Stages.Signing.Status != "signed" || record.Request.Load {
+		t.Fatalf("record=%+v", record)
+	}
+}
+
+// assertRecordShape checks literal JSON names of a complete success record.
+func assertRecordShape(t *testing.T, raw map[string]any) {
+	t.Helper()
+	keys := func(value any) string {
+		object, _ := value.(map[string]any)
+		var names []string
+		for key := range object {
+			names = append(names, key)
+		}
+		sort.Strings(names)
+		return strings.Join(names, ",")
+	}
+	stages, _ := raw["stages"].(map[string]any)
+	for path, want := range map[string]string{
+		"":                   "command,evidence,outcome,request,selection,stages,version,workspace",
+		"request":            "apkVersion,load,package,publish,selector,sign",
+		"selection":          "architecture,indexSHA256,package,version",
+		"evidence":           "apkoVersion,imageDigest,imageDirectory,lockPath,spdxPath,spdxSHA256,spdxValidated",
+		"stages":             "attestation,build,load,publication,signing",
+		"stages.load":        "buildReference,dockerImageID,imageReference,readableReferenceConfirmed,status",
+		"stages.publication": "digest,immutableReference,reference,status,verified",
+		"stages.signing":     "status",
+	} {
+		var value any = raw
+		if path != "" {
+			parts := strings.Split(path, ".")
+			if len(parts) == 2 {
+				value = stages[parts[1]]
+			} else {
+				value = raw[path]
+			}
+		}
+		if got := keys(value); got != want {
+			t.Fatalf("%s keys=%q want %q", path, got, want)
+		}
+	}
+	if raw["version"] != float64(6) || raw["outcome"] != "succeeded" {
+		t.Fatalf("record=%v", raw)
 	}
 }
 
@@ -272,13 +333,13 @@ func TestBuildSigningVersionPreflightBeforeWorkspaceNetworkAndBuild(t *testing.T
 			}
 			var stdout, stderr bytes.Buffer
 			var caught error
-			code := runWithBuild(ctx, signingCLIArgs(true), &stdout, &stderr, func(ctx context.Context, request buildRequest) (buildResult, error) {
+			code := runWithBuild(ctx, signingCLIArgs("localhost:5000", true), &stdout, &stderr, func(ctx context.Context, request buildRequest) (buildResult, error) {
 				result, err := buildLocalWith(ctx, request, services)
 				caught = err
 				return result, err
 			})
 			var wf *workflowFailure
-			if code != 1 || stdout.Len() != 0 || !errors.As(caught, &wf) || wf.stage != "cosign-version" || wf.result.workspace != "" || wf.build != "not-attempted" || wf.load != "not-attempted" || wf.signing != "not-attempted" || wf.attestation != "not-attempted" || wf.attempted {
+			if code != 1 || stdout.Len() != 0 || !errors.As(caught, &wf) || wf.stage != "cosign-version" || wf.result.workspace != "" || wf.result.build != "not-attempted" || wf.result.dockerLoad != "not-attempted" || wf.result.publication.status != "not-attempted" || wf.result.signing != "not-attempted" || wf.result.attestation != "not-attempted" || wf.sideEffects || len(wf.record) == 0 {
 				t.Fatalf("code=%d workflow=%+v error=%v stdout=%q", code, wf, caught, stdout.String())
 			}
 			if strings.Contains(stderr.String(), signingCanary) || strings.Contains(caught.Error(), signingCanary) {
@@ -303,7 +364,7 @@ func TestBuildSigningEarlierApkoFailureKeepsRequestedNotAttempted(t *testing.T) 
 	}
 	result, err := buildLocalWith(context.Background(), request, services)
 	var wf *workflowFailure
-	if !errors.As(err, &wf) || wf.stage != "build" || wf.build != "failed" || result.signing != "not-attempted" || result.attestation != "not-attempted" || wf.signing != "not-attempted" || wf.attestation != "not-attempted" || strings.Contains(err.Error(), signingCanary) {
+	if !errors.As(err, &wf) || wf.stage != "build" || wf.result.build != "failed" || result.signing != "not-attempted" || result.attestation != "not-attempted" || wf.result.signing != "not-attempted" || wf.result.attestation != "not-attempted" || strings.Contains(err.Error(), signingCanary) {
 		t.Fatalf("result=%+v workflow=%+v err=%v", result, wf, err)
 	}
 }
@@ -321,8 +382,8 @@ func TestBuildSigningDisabledLocalPublicationNoLoadAndSBOMNeverInvokeCosign(t *t
 			}
 			args := []string{"build", "postgresql-17", "--apk-version", "17.10-r1"}
 			if mode == "publication" {
-				args = publicationCLIArgs()
-				addPublicationFixture(t, f, "", cancel)
+				registry := addRegistryFixture(t, f, "", cancel)
+				args = publicationCLIArgs(registry.host)
 			}
 			if mode == "no-load" {
 				args = append(args, "--no-load")
@@ -348,20 +409,13 @@ func TestBuildSigningDisabledLocalPublicationNoLoadAndSBOMNeverInvokeCosign(t *t
 			if code != 0 || result.signing != "skipped" || result.attestation != "skipped" {
 				t.Fatalf("code=%d result=%+v stderr=%q", code, result, stderr.String())
 			}
-			data, err := os.ReadFile(filepath.Join(f.workspace, "result.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			var record evidenceResult
-			if err := json.Unmarshal(data, &record); err != nil {
-				t.Fatal(err)
-			}
-			wantVersion := 3
+			record, _ := readRecord(t, filepath.Join(f.workspace, "result.json"))
+			wantPublication := "skipped"
 			if mode == "publication" {
-				wantVersion = 4
+				wantPublication = "published"
 			}
-			if record.Version != wantVersion {
-				t.Fatalf("unexpected schema=%+v", record)
+			if record.Version != 6 || record.Request.Sign || record.Stages.Signing.Status != "skipped" || record.Stages.Attestation.Status != "skipped" || record.Stages.Publication.Status != wantPublication {
+				t.Fatalf("unexpected record=%+v", record)
 			}
 		})
 	}
@@ -372,7 +426,7 @@ func TestBuildSigningInvalidOptionsRejectedBeforeExternalBoundaries(t *testing.T
 		{signing: signingOptions{key: fixtureCosignKey}},
 		{publication: publicationOptions{registry: "localhost:5000", repository: "team/images"}, signing: signingOptions{key: fixtureCosignKey}},
 		{publication: publicationOptions{registry: "registry.example.invalid", repository: "team/images"}, signing: signingOptions{key: fixtureCosignKey, allowHTTP: true}},
-		{noLoad: true, publication: publicationOptions{registry: "localhost:5000", repository: "team/images"}, signing: signingOptions{key: fixtureCosignKey, allowHTTP: true}},
+		{noLoad: true, signing: signingOptions{key: fixtureCosignKey, allowHTTP: true}},
 	} {
 		services := buildServices{
 			command: func(context.Context, string, ...string) ([]byte, error) {

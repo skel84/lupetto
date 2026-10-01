@@ -9,11 +9,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/google/go-containerregistry/pkg/authn"
 )
 
 const apkoBuildVersion = "1.4.5"
@@ -21,235 +24,202 @@ const apkoBuildVersion = "1.4.5"
 var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 type buildResult struct {
-	packageName, version, arch, indexSHA256, workspace, imageDir, spdxPath, spdxSHA256 string
-	imageReference, buildReference, dockerLoad, dockerImageID                          string
-	signing, attestation                                                               string
-	publication                                                                        publicationOutcome
-}
-
-type evidenceResult struct {
-	Version        int                  `json:"version"`
-	PackageName    string               `json:"packageName"`
-	PackageVersion string               `json:"packageVersion"`
-	Architecture   string               `json:"architecture"`
-	IndexSHA256    string               `json:"indexSHA256"`
-	ApkoVersion    string               `json:"apkoVersion"`
-	ImageDirectory string               `json:"imageDirectory"`
-	LockPath       string               `json:"lockPath"`
-	SPDXPath       string               `json:"spdxPath"`
-	SPDXSHA256     string               `json:"spdxSHA256"`
-	SPDXValidated  bool                 `json:"spdxValidated"`
-	ImageReference string               `json:"imageReference"`
-	BuildReference string               `json:"buildReference"`
-	DockerLoad     string               `json:"dockerLoad"`
-	DockerImageID  string               `json:"dockerImageID,omitempty"`
-	Publication    *publicationEvidence `json:"publication,omitempty"`
-	Build          string               `json:"build,omitempty"`
-	Signing        string               `json:"signing,omitempty"`
-	Attestation    string               `json:"attestation,omitempty"`
+	command                                                          string
+	request                                                          recordRequest
+	packageName, version, arch, indexSHA256                          string
+	workspace, imageDir, imageDigest, lockPath, spdxPath, spdxSHA256 string
+	selected, validated                                              bool
+	imageReference, buildReference                                   string
+	build, dockerLoad, dockerImageID                                 string
+	readableConfirmed                                                bool
+	signing, attestation                                             string
+	publication                                                      publicationOutcome
+	// record holds the exact version-6 document written to result.json.
+	record []byte
 }
 
 func buildLocal(ctx context.Context, request buildRequest) (buildResult, error) {
 	return buildLocalWith(ctx, request, buildServices{
 		command: executeLocalCommand, cacheDir: os.UserCacheDir,
 		publicFile: getPublicFile, signingKey: getWolfiSigningKey,
-		publicationCommand: executePublicationCommand,
-		signingCommand:     executeSigningCommand,
+		signingCommand: executeSigningCommand,
 	})
 }
 
 // Only external boundaries are replaceable; selection and artifact validation
 // always use the same implementation.
 type buildServices struct {
-	command            localCommand
-	publicationCommand localCommand
-	signingCommand     localCommand
-	cacheDir           func() (string, error)
-	publicFile         func(context.Context, string, int64) ([]byte, error)
-	signingKey         func(context.Context) ([]byte, error)
+	command        localCommand
+	signingCommand localCommand
+	cacheDir       func() (string, error)
+	publicFile     func(context.Context, string, int64) ([]byte, error)
+	signingKey     func(context.Context) ([]byte, error)
+	// registryTransport nil means remote.DefaultTransport. Either way it is
+	// wrapped by the loopback-only plain-HTTP guard.
+	registryTransport http.RoundTripper
+	// registryKeychain nil means Docker's client configuration only.
+	registryKeychain authn.Keychain
 }
 
 func buildLocalWith(ctx context.Context, request buildRequest, services buildServices) (buildResult, error) {
-	signingStatus := "skipped"
-	if request.signing.enabled() {
-		signingStatus = "not-attempted"
-	}
-	initial := buildResult{dockerLoad: "skipped", publication: publicationOutcome{status: "skipped"},
-		signing: signingStatus, attestation: signingStatus}
-	earlyFail := func(err error) (buildResult, error) {
-		if request.publication.enabled() {
-			return initial, newWorkflowFailure(initial, "build", err, false)
-		}
-		return buildResult{}, err
-	}
-	if err := ctx.Err(); err != nil {
-		return earlyFail(err)
-	}
 	if err := validatePublicationOptions(request.publication); err != nil {
 		return buildResult{}, err
 	}
-	if request.publication.enabled() && request.noLoad {
-		return buildResult{}, fmt.Errorf("publication requires Docker loading; --no-load is incompatible")
-	}
-	if err := validateSigningOptions(request.signing, request.publication, request.noLoad); err != nil {
+	if err := validateSigningOptions(request.signing, request.publication); err != nil {
 		return buildResult{}, err
+	}
+	result := initialBuildResult(request)
+	// Publication workflows keep their sanitized stage-only failure messages.
+	sanitize := request.publication.enabled()
+	fail := func(stage string, err error) (buildResult, error) {
+		return result, newWorkflowFailure(result, stage, err, sanitize)
+	}
+	buildFail := func(err error) (buildResult, error) {
+		result.build = "failed"
+		return fail("build", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return buildFail(err)
 	}
 	if request.signing.enabled() {
 		buildStage(ctx, "Checking Cosign v3.1.3 compatibility")
 		if err := requireCosignVersion(ctx, services.signingCommand); err != nil {
-			return initial, newWorkflowFailure(initial, "cosign-version", err, false)
+			return fail("cosign-version", err)
 		}
 	}
 	buildStage(ctx, "Checking build tools")
 	arch, err := targetArch()
 	if err != nil {
-		return earlyFail(err)
+		return buildFail(err)
 	}
 	if err := requireApkoVersion(ctx, services.command); err != nil {
-		return earlyFail(err)
+		return buildFail(err)
 	}
 	buildStage(ctx, "Creating build workspace")
 	cacheDir, err := services.cacheDir()
 	if err != nil {
-		return earlyFail(fmt.Errorf("find user cache: %w", err))
+		return buildFail(fmt.Errorf("find user cache: %w", err))
 	}
 	root := filepath.Join(cacheDir, "lupetto", "builds")
 	if err := os.MkdirAll(root, 0700); err != nil {
-		return earlyFail(fmt.Errorf("create build directory: %w", err))
+		return buildFail(fmt.Errorf("create build directory: %w", err))
 	}
 	workspace, err := os.MkdirTemp(root, "image-")
 	if err != nil {
-		return earlyFail(fmt.Errorf("create build workspace: %w", err))
+		return buildFail(fmt.Errorf("create build workspace: %w", err))
 	}
 	buildReference := "lupetto/local:build-" + strings.TrimPrefix(filepath.Base(workspace), "image-")
-	result := initial
-	result.workspace = workspace
-	fail := func(err error) (buildResult, error) {
-		if request.publication.enabled() {
-			return result, newWorkflowFailure(result, "build", err, false)
-		}
-		return buildResult{}, fmt.Errorf("%w (workspace: %s)", err, workspace)
-	}
+	result.workspace, result.buildReference = workspace, buildReference
 
 	buildStage(ctx, "Fetching signed APKINDEX")
 	indexURL := fmt.Sprintf("%s/%s/APKINDEX.tar.gz", wolfiRepository, arch)
 	index, err := services.publicFile(ctx, indexURL, 32<<20)
 	if err != nil {
-		return fail(err)
+		return buildFail(err)
 	}
 	indexDigest := sha256Hex(index)
 	if err := os.WriteFile(filepath.Join(workspace, "APKINDEX.tar.gz"), index, 0600); err != nil {
-		return fail(fmt.Errorf("retain APKINDEX: %w", err))
+		return buildFail(fmt.Errorf("retain APKINDEX: %w", err))
 	}
 	if err := os.WriteFile(filepath.Join(workspace, "APKINDEX.sha256"), []byte(indexDigest+"\n"), 0600); err != nil {
-		return fail(fmt.Errorf("retain APKINDEX checksum: %w", err))
+		return buildFail(fmt.Errorf("retain APKINDEX checksum: %w", err))
 	}
 	buildStage(ctx, "Fetching Wolfi signing key")
 	key, err := services.signingKey(ctx)
 	if err != nil {
-		return fail(err)
+		return buildFail(err)
 	}
 	keyPath := filepath.Join(workspace, "wolfi-signing.rsa.pub")
 	if err := os.WriteFile(keyPath, key, 0600); err != nil {
-		return fail(fmt.Errorf("retain Wolfi key: %w", err))
+		return buildFail(fmt.Errorf("retain Wolfi key: %w", err))
 	}
 	buildStage(ctx, "Verifying APKINDEX signature")
 	verifiedIndex, err := verifyAPKINDEX(index, key)
 	if err != nil {
-		return fail(err)
+		return buildFail(err)
 	}
 	buildStage(ctx, "Selecting exact APK")
 	packages, err := parseAPKINDEX(verifiedIndex, request.packageName)
 	if err != nil {
-		return fail(err)
+		return buildFail(err)
 	}
 	selected, err := selectPackage(packages, request, arch)
 	if err != nil {
-		return fail(err)
+		return buildFail(err)
 	}
+	result.packageName, result.version, result.arch, result.indexSHA256, result.selected = selected.name, selected.version, arch, indexDigest, true
 	imageReference, err := readableImageReference(selected, arch)
 	if err != nil {
-		return fail(err)
+		return buildFail(err)
 	}
+	result.imageReference = imageReference
 	if request.publication.enabled() {
 		// The selected component is now known; reject a full-reference bound
-		// failure before composition/loading, without resolving another APK.
+		// or normalization failure before composition/loading, without
+		// resolving another APK.
 		if _, err := publicationReferences(selected, arch, workspace, request.publication); err != nil {
-			return fail(err)
+			return buildFail(err)
 		}
 	}
 	buildMessage(ctx, "Selected %s@%s; local reference %s; build reference %s", selected.name, selected.version, imageReference, buildReference)
 	configPath := filepath.Join(workspace, "apko.yaml")
 	config := fmt.Sprintf("contents:\n  keyring:\n    - %s\n  repositories:\n    - %s\n  packages:\n    - %s\narchs:\n  - %s\n", strconv.Quote(keyPath), wolfiRepository, strconv.Quote(selected.name+"="+selected.version), arch)
 	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
-		return fail(fmt.Errorf("retain apko config: %w", err))
+		return buildFail(fmt.Errorf("retain apko config: %w", err))
 	}
 	lockPath := filepath.Join(workspace, "lock.json")
 	buildStage(ctx, "Locking apko dependencies")
 	if err := runApko(ctx, services.command, "lock", "--arch", arch, "--output", lockPath, configPath); err != nil {
-		return fail(err)
+		return buildFail(err)
 	}
 	if err := checkSelectedLock(lockPath, selected); err != nil {
-		return fail(err)
+		return buildFail(err)
 	}
 
 	sbomDir := filepath.Join(workspace, "sbom")
 	if err := os.Mkdir(sbomDir, 0700); err != nil {
-		return fail(fmt.Errorf("create SPDX directory: %w", err))
+		return buildFail(fmt.Errorf("create SPDX directory: %w", err))
 	}
 	imageDir := filepath.Join(workspace, "image")
 	if err := os.Mkdir(imageDir, 0700); err != nil {
-		return fail(fmt.Errorf("create OCI layout directory: %w", err))
+		return buildFail(fmt.Errorf("create OCI layout directory: %w", err))
 	}
 	buildStage(ctx, "Composing OCI image with apko")
 	if err := runApko(ctx, services.command, "build", "--arch", arch, "--sbom-path", sbomDir, "--sbom-formats", "spdx", "--vcs=false", "--lockfile", lockPath, configPath, buildReference, imageDir+string(os.PathSeparator)); err != nil {
-		return fail(err)
+		return buildFail(err)
 	}
 	buildStage(ctx, "Checking installed APK")
-	if err := checkImagePackage(imageDir, selected); err != nil {
-		return fail(err)
+	imageDigest, err := checkImagePackage(imageDir, selected)
+	if err != nil {
+		return buildFail(err)
 	}
 	buildStage(ctx, "Validating SPDX against apko lock")
 	spdxPath := filepath.Join(sbomDir, "sbom-"+arch+".spdx.json")
 	spdxSHA256, err := validateSPDX(lockPath, spdxPath, arch)
 	if err != nil {
-		return fail(fmt.Errorf("validate SPDX against apko lock: %w", err))
+		return buildFail(fmt.Errorf("validate SPDX against apko lock: %w", err))
 	}
-	result = buildResult{
-		packageName: selected.name, version: selected.version, arch: arch,
-		indexSHA256: indexDigest, workspace: workspace, imageDir: imageDir,
-		spdxPath: spdxPath, spdxSHA256: spdxSHA256, imageReference: imageReference,
-		buildReference: buildReference, dockerLoad: "skipped", publication: publicationOutcome{status: "skipped"},
-		signing: signingStatus, attestation: signingStatus,
-	}
+	result.build, result.validated = "completed", true
+	result.imageDir, result.imageDigest, result.lockPath, result.spdxPath, result.spdxSHA256 = imageDir, imageDigest, lockPath, spdxPath, spdxSHA256
+
 	if !request.noLoad {
 		imageID, err := loadDockerImage(ctx, services.command, imageDir, workspace, buildReference, arch)
 		if err != nil {
-			if request.publication.enabled() {
-				result.dockerLoad = "failed"
-				return result, newWorkflowFailure(result, "load", err, true)
-			}
-			return fail(err)
+			result.dockerLoad = "failed"
+			return fail("load", err)
 		}
 		result.dockerLoad, result.dockerImageID = "loaded", imageID
 		if err := tagReadableDockerImage(ctx, services.command, imageID, buildReference, imageReference, arch); err != nil {
-			if request.publication.enabled() {
-				return result, newWorkflowFailure(result, "readable-tag", err, true)
-			}
-			return fail(err)
+			return fail("readable-tag", err)
 		}
-	}
-	if request.noLoad {
+		result.readableConfirmed = true
+	} else {
 		buildMessage(ctx, "Docker loading skipped")
 	}
 	if request.publication.enabled() {
-		command := services.publicationCommand
-		if command == nil {
-			command = services.command // Injected fixtures; production always supplies the safe adapter.
-		}
-		result.publication, err = publishDockerImage(ctx, command, result, request.publication)
+		result.publication, err = publishOCIImage(ctx, services, result, request.publication)
 		if err != nil {
-			return result, newWorkflowFailure(result, "publication", err, true)
+			return fail("publication", err)
 		}
 	}
 	if request.signing.enabled() {
@@ -260,19 +230,18 @@ func buildLocalWith(ctx context.Context, request buildRequest, services buildSer
 			if outcome.signing == "signed" {
 				stage = "attestation"
 			}
-			return result, newWorkflowFailure(result, stage, signingErr, true)
+			return fail(stage, signingErr)
 		}
 	}
 	buildStage(ctx, "Recording build result")
-	if err := retainBuildResult(ctx, result, lockPath); err != nil {
-		if request.publication.enabled() {
-			return result, newWorkflowFailure(result, "record", err, true)
+	record, err := retainBuildResult(ctx, result)
+	if err != nil {
+		if !sanitize && result.dockerLoad == "loaded" {
+			err = fmt.Errorf("Docker loading confirmed for %s and %s (image ID: %s), but result recording failed; imported image/tags remain: %w", imageReference, buildReference, result.dockerImageID, err)
 		}
-		if result.dockerLoad == "loaded" {
-			return fail(fmt.Errorf("Docker loading confirmed for %s and %s (image ID: %s), but result recording failed; imported image/tags remain: %w", imageReference, buildReference, result.dockerImageID, err))
-		}
-		return fail(err)
+		return fail("record", err)
 	}
+	result.record = record
 	return result, nil
 }
 
@@ -350,13 +319,14 @@ func readOCIBlob(dir, digest string, maxBytes int64) ([]byte, error) {
 	return data, nil
 }
 
-func checkImagePackage(dir string, selected indexedPackage) error {
+// checkImagePackage returns the validated local OCI manifest digest.
+func checkImagePackage(dir string, selected indexedPackage) (string, error) {
 	if _, err := os.Stat(filepath.Join(dir, "oci-layout")); err != nil {
-		return fmt.Errorf("OCI layout missing: %w", err)
+		return "", fmt.Errorf("OCI layout missing: %w", err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "index.json"))
 	if err != nil {
-		return fmt.Errorf("read OCI index: %w", err)
+		return "", fmt.Errorf("read OCI index: %w", err)
 	}
 	var index struct {
 		Manifests []struct {
@@ -365,72 +335,72 @@ func checkImagePackage(dir string, selected indexedPackage) error {
 		}
 	}
 	if err := json.Unmarshal(data, &index); err != nil || len(index.Manifests) != 1 {
-		return fmt.Errorf("expected one OCI image manifest: %v", err)
+		return "", fmt.Errorf("expected one OCI image manifest: %v", err)
 	}
 	platform := index.Manifests[0].Platform
 	if platform.OS != "linux" || (selected.arch == "x86_64" && platform.Architecture != "amd64") || (selected.arch == "aarch64" && platform.Architecture != "arm64") {
-		return fmt.Errorf("OCI image platform does not match %s", selected.arch)
+		return "", fmt.Errorf("OCI image platform does not match %s", selected.arch)
 	}
 	data, err = readOCIBlob(dir, index.Manifests[0].Digest, 4<<20)
 	if err != nil {
-		return fmt.Errorf("read OCI manifest: %w", err)
+		return "", fmt.Errorf("read OCI manifest: %w", err)
 	}
 	var manifest struct{ Layers []struct{ Digest string } }
 	if err := json.Unmarshal(data, &manifest); err != nil || len(manifest.Layers) != 1 {
-		return fmt.Errorf("expected one OCI image layer: %v", err)
+		return "", fmt.Errorf("expected one OCI image layer: %v", err)
 	}
 	layerDigest := manifest.Layers[0].Digest
 	if !digestPattern.MatchString(layerDigest) {
-		return fmt.Errorf("invalid OCI layer digest %q", layerDigest)
+		return "", fmt.Errorf("invalid OCI layer digest %q", layerDigest)
 	}
 	layerPath := filepath.Join(dir, "blobs", "sha256", strings.TrimPrefix(layerDigest, "sha256:"))
 	layer, err := os.Open(layerPath)
 	if err != nil {
-		return fmt.Errorf("open OCI layer: %w", err)
+		return "", fmt.Errorf("open OCI layer: %w", err)
 	}
 	defer layer.Close()
 	layerHash := sha256.New()
 	if _, err := io.Copy(layerHash, layer); err != nil {
-		return fmt.Errorf("hash OCI layer: %w", err)
+		return "", fmt.Errorf("hash OCI layer: %w", err)
 	}
 	if hex.EncodeToString(layerHash.Sum(nil)) != strings.TrimPrefix(layerDigest, "sha256:") {
-		return fmt.Errorf("OCI layer checksum mismatch")
+		return "", fmt.Errorf("OCI layer checksum mismatch")
 	}
 	if _, err := layer.Seek(0, io.SeekStart); err != nil {
-		return fmt.Errorf("rewind OCI layer: %w", err)
+		return "", fmt.Errorf("rewind OCI layer: %w", err)
 	}
 	gz, err := gzip.NewReader(layer)
 	if err != nil {
-		return fmt.Errorf("open OCI layer gzip: %w", err)
+		return "", fmt.Errorf("open OCI layer gzip: %w", err)
 	}
 	defer gz.Close()
 	archive := tar.NewReader(gz)
 	for {
 		header, err := archive.Next()
 		if err == io.EOF {
-			return fmt.Errorf("installed APK database missing from OCI image")
+			return "", fmt.Errorf("installed APK database missing from OCI image")
 		}
 		if err != nil {
-			return fmt.Errorf("read OCI layer tar: %w", err)
+			return "", fmt.Errorf("read OCI layer tar: %w", err)
 		}
 		if header.Name != "usr/lib/apk/db/installed" {
 			continue
 		}
 		if header.Size > 8<<20 {
-			return fmt.Errorf("installed APK database exceeds 8 MiB")
+			return "", fmt.Errorf("installed APK database exceeds 8 MiB")
 		}
 		installed, err := io.ReadAll(io.LimitReader(archive, (8<<20)+1))
 		if err != nil {
-			return fmt.Errorf("read installed APK database: %w", err)
+			return "", fmt.Errorf("read installed APK database: %w", err)
 		}
 		for _, record := range strings.Split(string(installed), "\n\n") {
 			if strings.Contains("\n"+record+"\n", "\nP:"+selected.name+"\n") {
 				if strings.Contains("\n"+record+"\n", "\nV:"+selected.version+"\n") && strings.Contains("\n"+record+"\n", "\nA:"+selected.arch+"\n") {
-					return nil
+					return index.Manifests[0].Digest, nil
 				}
-				return fmt.Errorf("OCI image contains a different version or architecture of %s", selected.name)
+				return "", fmt.Errorf("OCI image contains a different version or architecture of %s", selected.name)
 			}
 		}
-		return fmt.Errorf("OCI image does not contain selected %s@%s", selected.name, selected.version)
+		return "", fmt.Errorf("OCI image does not contain selected %s@%s", selected.name, selected.version)
 	}
 }

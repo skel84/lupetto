@@ -40,14 +40,14 @@ func TestResolveSigningIndependentPrecedence(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			lookup := func(name string) (string, bool) { value, ok := tc.env[name]; return value, ok }
-			opts, err := resolveSigning(tc.raw, tc.pub, false, lookup)
+			opts, err := resolveSigning(tc.raw, tc.pub, lookup)
 			if (err != nil) != tc.wantError || (!tc.wantError && opts != tc.want) {
 				t.Fatalf("opts=%+v err=%v want=%+v error=%v", opts, err, tc.want, tc.wantError)
 			}
 		})
 	}
 	for _, lookup := range []func(string) (string, bool){nil, func(string) (string, bool) { return "ignored", false }} {
-		if opts, err := resolveSigning(signingFlags{}, publicationOptions{}, false, lookup); err != nil || opts != (signingOptions{}) {
+		if opts, err := resolveSigning(signingFlags{}, publicationOptions{}, lookup); err != nil || opts != (signingOptions{}) {
 			t.Fatalf("absent lookup: opts=%+v err=%v", opts, err)
 		}
 	}
@@ -56,7 +56,7 @@ func TestResolveSigningIndependentPrecedence(t *testing.T) {
 func TestResolveSigningStrictEnvironmentBoolean(t *testing.T) {
 	for _, value := range []string{"TRUE", "False", "1", "0", "yes", " true", "false ", "\ntrue", "secret-canary"} {
 		lookup := func(name string) (string, bool) { return value, name == "LUPETTO_COSIGN_ALLOW_HTTP" }
-		if _, err := resolveSigning(signingFlags{}, publicationOptions{}, false, lookup); err == nil || err.Error() != "LUPETTO_COSIGN_ALLOW_HTTP must be true or false" {
+		if _, err := resolveSigning(signingFlags{}, publicationOptions{}, lookup); err == nil || err.Error() != "LUPETTO_COSIGN_ALLOW_HTTP must be true or false" {
 			t.Fatalf("value=%q err=%v; want exact sanitized strict-bool error", value, err)
 		}
 	}
@@ -72,7 +72,7 @@ func TestResolveSigningDoesNotInspectSecretsOrOverriddenEnvironment(t *testing.T
 		config:    optionalString{value: "config", set: true},
 		allowHTTP: optionalBool{set: true},
 	}
-	if opts, err := resolveSigning(raw, publicationOptions{registry: "registry.example", repository: "team/images"}, false, lookup); err != nil || opts != (signingOptions{key: "key", config: "config"}) {
+	if opts, err := resolveSigning(raw, publicationOptions{registry: "registry.example", repository: "team/images"}, lookup); err != nil || opts != (signingOptions{key: "key", config: "config"}) {
 		t.Fatalf("explicit resolution: opts=%+v err=%v", opts, err)
 	}
 	var lookedUp []string
@@ -83,7 +83,7 @@ func TestResolveSigningDoesNotInspectSecretsOrOverriddenEnvironment(t *testing.T
 		}
 		return "", false
 	}
-	if _, err := resolveSigning(signingFlags{}, publicationOptions{}, false, lookup); err != nil {
+	if _, err := resolveSigning(signingFlags{}, publicationOptions{}, lookup); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(lookedUp, ",") != "LUPETTO_COSIGN_KEY,LUPETTO_COSIGN_SIGNING_CONFIG,LUPETTO_COSIGN_ALLOW_HTTP" {
@@ -94,38 +94,39 @@ func TestResolveSigningDoesNotInspectSecretsOrOverriddenEnvironment(t *testing.T
 func TestValidateSigningLiteralLoopbackPolicy(t *testing.T) {
 	for _, registry := range []string{"localhost", "localhost:5000", "LOCALHOST:5000", "127.0.0.1", "127.12.34.56:5000", "[::1]", "[::1]:5000", "[::ffff:7f00:1]:5000"} {
 		pub := publicationOptions{registry: registry, repository: "team/images"}
-		if err := validateSigningOptions(signingOptions{key: "key", allowHTTP: true}, pub, false); err != nil {
+		if err := validateSigningOptions(signingOptions{key: "key", allowHTTP: true}, pub); err != nil {
 			t.Fatalf("loopback %q rejected: %v", registry, err)
 		}
-		if err := validateSigningOptions(signingOptions{key: "key"}, pub, false); err == nil {
+		if err := validateSigningOptions(signingOptions{key: "key"}, pub); err == nil {
 			t.Fatalf("loopback %q accepted without HTTP consent", registry)
 		}
-		if err := validateSigningOptions(signingOptions{}, pub, false); err != nil {
+		if err := validateSigningOptions(signingOptions{}, pub); err != nil {
 			t.Fatalf("unsigned publication %q required signing consent: %v", registry, err)
 		}
 	}
 	for _, registry := range []string{"registry.example", "registry.example:443", "localhost.example", "loopback.example:5000", "registry:5000", "192.0.2.1:5000", "[2001:db8::1]:5000", "[::ffff:c000:201]:5000"} {
 		pub := publicationOptions{registry: registry, repository: "team/images"}
-		if err := validateSigningOptions(signingOptions{key: "key"}, pub, false); err != nil {
+		if err := validateSigningOptions(signingOptions{key: "key"}, pub); err != nil {
 			t.Fatalf("production default %q rejected: %v", registry, err)
 		}
-		if err := validateSigningOptions(signingOptions{key: "key", allowHTTP: true}, pub, false); err == nil {
+		if err := validateSigningOptions(signingOptions{key: "key", allowHTTP: true}, pub); err == nil {
 			t.Fatalf("nonloopback %q accepted HTTP allowance", registry)
 		}
 	}
 }
 
-func TestValidateSigningRequiresCompletePublicationAndLoad(t *testing.T) {
+func TestValidateSigningRequiresCompletePublication(t *testing.T) {
 	for _, pub := range []publicationOptions{{}, {registry: "registry.example"}, {repository: "team/images"}, {registry: "https://registry.example", repository: "team/images"}, {registry: "registry.example", repository: "INVALID"}} {
-		if err := validateSigningOptions(signingOptions{key: "key"}, pub, false); err == nil {
+		if err := validateSigningOptions(signingOptions{key: "key"}, pub); err == nil {
 			t.Fatalf("incomplete/invalid publication accepted: %+v", pub)
 		}
 	}
-	if err := validateSigningOptions(signingOptions{key: "key"}, publicationOptions{registry: "registry.example", repository: "team/images"}, true); err == nil {
-		t.Fatal("signing accepted --no-load")
+	// Loading is independent of signing: complete publication suffices.
+	if err := validateSigningOptions(signingOptions{key: "key"}, publicationOptions{registry: "registry.example", repository: "team/images"}); err != nil {
+		t.Fatalf("complete publication rejected: %v", err)
 	}
-	if err := validateSigningOptions(signingOptions{}, publicationOptions{}, true); err != nil {
-		t.Fatalf("unsigned local --no-load rejected: %v", err)
+	if err := validateSigningOptions(signingOptions{}, publicationOptions{}); err != nil {
+		t.Fatalf("unsigned local build rejected: %v", err)
 	}
 }
 
@@ -179,7 +180,6 @@ func TestRunBuildSigningConfigurationBeforeCallback(t *testing.T) {
 		{name: "key and partial publication", flags: []string{"--cosign-key=secret-key-canary", "--registry=registry.example"}},
 		{name: "config without key", flags: []string{"--cosign-signing-config=secret-config-canary"}},
 		{name: "HTTP without key", flags: []string{"--cosign-allow-http"}},
-		{name: "no load", flags: []string{"--cosign-key=secret-key-canary", "--no-load", "--registry=registry.example", "--repository=team/images"}},
 		{name: "nonloopback HTTP", flags: []string{"--cosign-key=secret-key-canary", "--cosign-allow-http", "--registry=registry.example", "--repository=team/images"}},
 		{name: "loopback without consent", flags: []string{"--cosign-key=secret-key-canary", "--registry=localhost:5000", "--repository=team/images"}},
 		{name: "empty key overrides env", flags: []string{"--cosign-key="}, env: map[string]string{"LUPETTO_COSIGN_KEY": "secret-key-canary", "LUPETTO_REGISTRY": "registry.example", "LUPETTO_REPOSITORY": "team/images"}},

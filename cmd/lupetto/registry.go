@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/distribution/reference"
+	"github.com/google/go-containerregistry/pkg/name"
 )
 
 type optionalString struct {
@@ -35,7 +36,7 @@ func (opts signingOptions) enabled() bool {
 	return opts.key != ""
 }
 
-func resolveSigning(raw signingFlags, pub publicationOptions, noLoad bool, lookupEnv func(string) (string, bool)) (signingOptions, error) {
+func resolveSigning(raw signingFlags, pub publicationOptions, lookupEnv func(string) (string, bool)) (signingOptions, error) {
 	resolveString := func(flag optionalString, envName, flagName string) (string, error) {
 		if flag.set {
 			if flag.value == "" {
@@ -72,13 +73,13 @@ func resolveSigning(raw signingFlags, pub publicationOptions, noLoad bool, looku
 		}
 	}
 	opts := signingOptions{key: key, config: config, allowHTTP: allowHTTP}
-	if err := validateSigningOptions(opts, pub, noLoad); err != nil {
+	if err := validateSigningOptions(opts, pub); err != nil {
 		return signingOptions{}, err
 	}
 	return opts, nil
 }
 
-func validateSigningOptions(opts signingOptions, pub publicationOptions, noLoad bool) error {
+func validateSigningOptions(opts signingOptions, pub publicationOptions) error {
 	if err := validatePublicationOptions(pub); err != nil {
 		return err
 	}
@@ -88,20 +89,10 @@ func validateSigningOptions(opts signingOptions, pub publicationOptions, noLoad 
 		}
 		return nil
 	}
-	if noLoad {
-		return fmt.Errorf("signing cannot be used with --no-load")
-	}
 	if !pub.enabled() {
 		return fmt.Errorf("signing requires publication with both registry and repository settings")
 	}
-	host := pub.registry
-	if strings.HasPrefix(host, "[") {
-		host = host[1:strings.IndexByte(host, ']')]
-	} else if before, _, hasPort := strings.Cut(host, ":"); hasPort {
-		host = before
-	}
-	ip := net.ParseIP(host)
-	loopback := strings.EqualFold(host, "localhost") || (ip != nil && ip.IsLoopback())
+	loopback := registryAuthorityIsLoopback(pub.registry)
 	if opts.allowHTTP && !loopback {
 		return fmt.Errorf("--cosign-allow-http is restricted to literal-loopback registries")
 	}
@@ -109,6 +100,28 @@ func validateSigningOptions(opts signingOptions, pub publicationOptions, noLoad 
 		return fmt.Errorf("signing against a literal-loopback registry requires --cosign-allow-http=true")
 	}
 	return nil
+}
+
+// The authority is validated before this check, so only bracket/port syntax
+// needs removal. The same literal-loopback rule governs Cosign HTTP consent,
+// ggcr's HTTP fallback, and the registry transport guard.
+func registryAuthorityIsLoopback(authority string) bool {
+	host := authority
+	if strings.HasPrefix(host, "[") {
+		end := strings.IndexByte(host, ']')
+		if end < 0 {
+			return false
+		}
+		host = host[1:end]
+	} else if before, _, hasPort := strings.Cut(host, ":"); hasPort {
+		host = before
+	}
+	return loopbackHost(host)
+}
+
+func loopbackHost(host string) bool {
+	ip := net.ParseIP(host)
+	return strings.EqualFold(host, "localhost") || (ip != nil && ip.IsLoopback())
 }
 
 type publicationFlags struct {
@@ -251,6 +264,17 @@ func validatePublicationReference(registry, path, tag string) error {
 
 type publicationTarget struct {
 	repository, reference string
+	// tag is the parsed upstream reference used for the push and tag readback;
+	// insecure records whether ggcr may attempt its loopback HTTP fallback.
+	tag      name.Tag
+	insecure bool
+}
+
+func (t publicationTarget) nameOptions() []name.Option {
+	if t.insecure {
+		return []name.Option{name.StrictValidation, name.Insecure}
+	}
+	return []name.Option{name.StrictValidation}
 }
 
 func publicationReferences(selected indexedPackage, arch, workspace string, opts publicationOptions) (publicationTarget, error) {
@@ -282,5 +306,18 @@ func publicationReferences(selected indexedPackage, arch, workspace string, opts
 		return publicationTarget{}, err
 	}
 	repository := opts.registry + "/" + path
-	return publicationTarget{repository: repository, reference: repository + ":" + tag}, nil
+	target := publicationTarget{repository: repository, reference: repository + ":" + tag, insecure: registryAuthorityIsLoopback(opts.registry)}
+	// Parse once with the client that pushes, before any build side effect, and
+	// reject any registry, repository, or tag normalization. Only Docker Hub's
+	// documented docker.io -> index.docker.io authority alias is accepted.
+	parsed, err := name.NewTag(target.reference, target.nameOptions()...)
+	if err != nil {
+		return publicationTarget{}, fmt.Errorf("invalid publication image reference")
+	}
+	registryMatches := parsed.RegistryStr() == opts.registry || (opts.registry == "docker.io" && parsed.RegistryStr() == name.DefaultRegistry)
+	if !registryMatches || parsed.RepositoryStr() != path || parsed.TagStr() != tag {
+		return publicationTarget{}, fmt.Errorf("publication image reference normalizes to a different registry, repository, or tag")
+	}
+	target.tag = parsed
+	return target, nil
 }

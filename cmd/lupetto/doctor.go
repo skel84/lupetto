@@ -15,7 +15,7 @@ type requiredTool struct {
 
 var tools = []requiredTool{
 	{name: "apko", purpose: "image composition"},
-	{name: "docker", purpose: "default image loading and publication"},
+	{name: "docker", purpose: "default image loading"},
 	{name: "cosign", purpose: "signing and attestation", optional: true},
 }
 

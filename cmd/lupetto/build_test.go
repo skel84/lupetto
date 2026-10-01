@@ -90,11 +90,12 @@ func makeOCI(t *testing.T, version string) (string, string) {
 func TestCheckImagePackageRequiresExactInstalledVersionAndLayerDigest(t *testing.T) {
 	dir, layerDigest := makeOCI(t, "9.1.2-r1")
 	selected := indexedPackage{name: "valkey-9.1", version: "9.1.2-r1", arch: "x86_64"}
-	if err := checkImagePackage(dir, selected); err != nil {
-		t.Fatalf("valid OCI image rejected: %v", err)
+	digest, err := checkImagePackage(dir, selected)
+	if err != nil || !digestPattern.MatchString(digest) {
+		t.Fatalf("valid OCI image rejected: digest=%q err=%v", digest, err)
 	}
 	selected.version = "9.1.2-r0"
-	if err := checkImagePackage(dir, selected); err == nil {
+	if _, err := checkImagePackage(dir, selected); err == nil {
 		t.Fatal("image with wrong selected package version accepted")
 	}
 	selected.version = "9.1.2-r1"
@@ -102,7 +103,7 @@ func TestCheckImagePackageRequiresExactInstalledVersionAndLayerDigest(t *testing
 	if err := os.WriteFile(layerPath, []byte("tampered"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkImagePackage(dir, selected); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+	if _, err := checkImagePackage(dir, selected); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Fatalf("tampered layer accepted: %v", err)
 	}
 }
