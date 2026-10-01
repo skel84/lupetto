@@ -296,6 +296,8 @@ func compareInstalled(installed []wolfi.InstalledPackage, latest map[string]wolf
 				}
 			}
 			if len(ids) == 0 {
+				// Source/track unevaluatedFixes retain these entries explicitly;
+				// no recognised advisory ID means no evaluated vulnerability claim.
 				continue
 			}
 			sort.Strings(ids)

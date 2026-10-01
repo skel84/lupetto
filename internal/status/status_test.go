@@ -112,7 +112,7 @@ func TestRunStatesSelectorsSecurityAndCache(t *testing.T) {
 				if registry.installedCalls != 1 {
 					t.Fatalf("cache failed; reads=%d", registry.installedCalls)
 				}
-				if scenario.dependency == "1.1.0-r0" && (len(track.MissingFixes) != 1 || len(track.MissingFixes[0].IDs) != 2) {
+				if scenario.dependency == "1.1.0-r0" && (len(track.MissingFixes) != 1 || len(track.MissingFixes[0].IDs) != 3) {
 					t.Fatalf("missing fixes: %+v", track.MissingFixes)
 				}
 				if _, err := RunWith(context.Background(), products, Options{Registry: "registry.example.invalid", Repository: "team/images"}, services); err != nil || registry.installedCalls != 1 {

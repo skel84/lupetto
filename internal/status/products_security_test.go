@@ -43,7 +43,7 @@ func TestProductsStrictContract(t *testing.T) {
 func TestSecurityFeedFixedOnlyAndHTTPS(t *testing.T) {
 	data := `{"packages":[{"pkg":{"name":"curl","secfixes":{"0":["CVE-2024-0001"],"8.2.0-r1":["CVE-2024-0002","GHSA-aaaa-bbbb-cccc","GO-1234-1234","secretcanary"]}}}]}`
 	feed, err := ParseSecurity([]byte(data))
-	if err != nil || len(feed["curl"]) != 1 || len(feed["curl"]["8.2.0-r1"]) != 2 {
+	if err != nil || len(feed["curl"]) != 1 || len(feed["curl"]["8.2.0-r1"]) != 3 {
 		t.Fatalf("parsed security: %+v, %v", feed, err)
 	}
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, data) }))

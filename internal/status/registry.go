@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
-	"strings"
 	"time"
 
 	apkcompare "chainguard.dev/apko/pkg/apk/apk"
@@ -56,6 +55,8 @@ func (reader RemoteRegistry) options(ctx context.Context) []remote.Option {
 
 type metadataTransport struct{ base http.RoundTripper }
 
+var blobEndpointPattern = regexp.MustCompile(`/blobs/sha256:[0-9a-f]+$`)
+
 func (transport metadataTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	response, err := transport.base.RoundTrip(request)
 	if err != nil {
@@ -65,7 +66,7 @@ func (transport metadataTransport) RoundTrip(request *http.Request) (*http.Respo
 	for redirects := 0; original.Response != nil && original.Response.Request != nil && redirects < 10; redirects++ {
 		original = original.Response.Request
 	}
-	if !strings.Contains(original.URL.Path, "/blobs/") {
+	if !blobEndpointPattern.MatchString(original.URL.Path) {
 		response.Body = &boundedBody{ReadCloser: response.Body, remaining: registry.MaxMetadataBytes}
 	}
 	return response, nil

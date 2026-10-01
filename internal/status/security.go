@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -25,7 +26,7 @@ const (
 // SecurityFeed maps exact APK names to fixed APK versions and advisory IDs.
 type SecurityFeed map[string]map[string][]string
 
-var advisoryPattern = regexp.MustCompile(`^(?:CVE-[0-9]{4}-[0-9]+|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4})$`)
+var advisoryPattern = regexp.MustCompile(`^(?:CVE-[0-9]{4}-[0-9]+|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}|GO-[0-9]{4}-[0-9]+)$`)
 
 func ReadSecurity(ctx context.Context) (SecurityFeed, string, error) {
 	client := &http.Client{Timeout: 90 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -105,9 +106,14 @@ func ParseSecurity(data []byte) (SecurityFeed, error) {
 			if version == "0" {
 				continue
 			}
-			// Preserve even unparseable fixed-version keys for explicit warning
-			// evidence; comparison skips them rather than guessing a version.
-			feed[pkg.Name][version] = securityIDs(ids)
+			// Preserve unparseable versions and unrecognised-only advisory
+			// entries for explicit unevaluated evidence, never silent omission.
+			recognised := securityIDs(ids)
+			if len(recognised) == 0 {
+				feed[pkg.Name][version] = append([]string{}, ids...)
+			} else {
+				feed[pkg.Name][version] = recognised
+			}
 		}
 	}
 	return feed, nil
@@ -133,8 +139,14 @@ func unevaluatedSecurity(feed SecurityFeed) []UnevaluatedFix {
 			if version == "0" {
 				continue
 			}
-			if _, err := apkcompare.ParseVersion(version); err != nil {
-				issues = append(issues, UnevaluatedFix{Name: name, FixedVersion: version, IDs: securityIDs(ids)})
+			recognised := securityIDs(ids)
+			if _, err := apkcompare.ParseVersion(version); err != nil || len(recognised) == 0 {
+				if len(recognised) == 0 {
+					recognised = append([]string{}, ids...)
+					sort.Strings(recognised)
+					recognised = slices.Compact(recognised)
+				}
+				issues = append(issues, UnevaluatedFix{Name: name, FixedVersion: version, IDs: recognised})
 			}
 		}
 	}

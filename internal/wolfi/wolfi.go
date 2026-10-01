@@ -187,7 +187,7 @@ func ParseAPKINDEX(compressed []byte, requested string) ([]Package, error) {
 		var current Package
 		for _, line := range strings.Split(string(data), "\n") {
 			if line == "" {
-				if (requested == "" && current.Name != "" || matchesRequestedPackage(current, requested)) && current.Version != "" && current.Arch != "" && current.Checksum != "" {
+				if (requested == "" && current.Name != "" || requested != "" && matchesRequestedPackage(current, requested)) && current.Version != "" && current.Arch != "" && current.Checksum != "" {
 					packages = append(packages, current)
 				}
 				current = Package{}
@@ -211,7 +211,7 @@ func ParseAPKINDEX(compressed []byte, requested string) ([]Package, error) {
 				current.Description = line[2:]
 			}
 		}
-		if (requested == "" && current.Name != "" || matchesRequestedPackage(current, requested)) && current.Version != "" && current.Arch != "" && current.Checksum != "" {
+		if (requested == "" && current.Name != "" || requested != "" && matchesRequestedPackage(current, requested)) && current.Version != "" && current.Arch != "" && current.Checksum != "" {
 			packages = append(packages, current)
 		}
 		return packages, nil

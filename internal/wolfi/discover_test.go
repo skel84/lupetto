@@ -67,6 +67,7 @@ func TestDiscoverAllPackagesLatestDescriptions(t *testing.T) {
 		"P:alpha\nV:2-r0\nA:x86_64\nC:four\n\n" +
 		"P:zeta\nV:99-r0\nA:aarch64\nC:five\nT:other architecture\n\n" +
 		"P:incomplete\nV:1-r0\nA:x86_64\n\n" +
+		"V:1-r0\nA:x86_64\nC:nameless\nT:no package name\n\n" +
 		"P:last\nV:3-r0\nA:x86_64\nC:six\nT:last without separator"
 	packages, err := ParseAPKINDEX(wolfitest.MakeIndex(t, fixture), "")
 	if err != nil || len(packages) != 6 {
@@ -81,5 +82,9 @@ func TestDiscoverAllPackagesLatestDescriptions(t *testing.T) {
 	}
 	if packages[1].Description != "new description: with colon" {
 		t.Fatalf("description parsing=%q", packages[1].Description)
+	}
+	packages, err = ParseAPKINDEX(wolfitest.MakeIndex(t, fixture+"\n\nV:1-r0\nA:x86_64\nC:nameless-at-eof"), "")
+	if err != nil || len(packages) != 6 {
+		t.Fatalf("nameless final record included: %+v, %v", packages, err)
 	}
 }

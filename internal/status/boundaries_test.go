@@ -29,7 +29,7 @@ func TestMetadataLimitsFollowOriginalRequestAcrossRedirects(t *testing.T) {
 	for _, test := range []struct {
 		path    string
 		limited bool
-	}{{"/v2/repo/blobs/sha256:abc", false}, {"/v2/repo/manifests/tag", true}, {"/v2/repo/tags/list", true}} {
+	}{{"/v2/repo/blobs/sha256:abc", false}, {"/v2/repo/manifests/tag", true}, {"/v2/repo/tags/list", true}, {"/v2/x/blobs/y/manifests/tag", true}, {"/v2/x/blobs/y/tags/list", true}, {"/v2/x/blobs/y/blobs/sha256:abc", false}} {
 		response, err := client.Get(server.URL + test.path)
 		if err != nil {
 			t.Fatal(err)

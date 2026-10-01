@@ -25,7 +25,7 @@ func TestMalformedSecdbFixedVersionIsReportedWithoutGuessingOrGlobalFailure(t *t
 		t.Fatal("malformed fixed-version entry without supported IDs disappeared")
 	}
 	issues := unevaluatedSecurity(feed)
-	if len(issues) != 2 || issues[0].Name != "opa-envoy" || issues[0].FixedVersion != "1.1.0-r1-r0" || strings.Join(issues[0].IDs, ",") != "CVE-2025-0001,GHSA-aaaa-bbbb-cccc" || len(issues[1].IDs) != 0 {
+	if len(issues) != 2 || issues[0].Name != "opa-envoy" || issues[0].FixedVersion != "1.1.0-r1-r0" || strings.Join(issues[0].IDs, ",") != "CVE-2025-0001,GHSA-aaaa-bbbb-cccc,GO-2025-1234" || len(issues[1].IDs) != 0 {
 		t.Fatalf("unevaluated feed evidence: %+v", issues)
 	}
 
@@ -65,7 +65,7 @@ func TestMalformedSecdbFixedVersionIsReportedWithoutGuessingOrGlobalFailure(t *t
 			t.Fatalf("malformed key guessed into fix/state, or omitted from installed track: %+v", track)
 		}
 		issue := track.UnevaluatedFixes[0]
-		if issue.Name != "opa-envoy" || issue.FixedVersion != "1.1.0-r1-r0" || issue.InstalledVersion != opa.Version || issue.Architecture != "x86_64" || len(issue.IDs) != 2 {
+		if issue.Name != "opa-envoy" || issue.FixedVersion != "1.1.0-r1-r0" || issue.InstalledVersion != opa.Version || issue.Architecture != "x86_64" || len(issue.IDs) != 3 {
 			t.Fatalf("installed issue identity: %+v", issue)
 		}
 	}
@@ -100,5 +100,60 @@ func TestMalformedFixedKeyDoesNotSuppressValidFixComparison(t *testing.T) {
 	issues := unevaluatedSecurity(feed)
 	if len(issues) != 1 || issues[0].FixedVersion != "1.1.0-r1-r0" {
 		t.Fatalf("malformed evidence disappeared: %+v", issues)
+	}
+}
+
+func TestGOOnlyAndUnrecognisedOnlySecurityEntries(t *testing.T) {
+	for _, scenario := range []struct {
+		name, advisory, wantState string
+		missing, unevaluated      int
+	}{
+		{"Go advisory", "GO-2026-1234", FixesAvailable, 1, 0},
+		{"unsupported advisory", "OSV-UNKNOWN-1234", Current, 0, 1},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			data, err := json.Marshal(map[string]any{"packages": []any{map[string]any{"pkg": map[string]any{
+				"name": "cni-plugins", "secfixes": map[string][]string{"1.9.1-r11": {scenario.advisory, scenario.advisory}},
+			}}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			feed, err := ParseSecurity(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			image := testImage("8.1-r0", "a", time.Now().UTC())
+			reader := &testRegistry{
+				listings: map[string]RegistryListing{"images/curl": {Images: []Image{image}}},
+				installed: map[string][]wolfi.InstalledPackage{image.Digest: {
+					{Name: "curl", Version: image.Version, Arch: "x86_64"},
+					{Name: "cni-plugins", Version: "1.9.1-r10", Arch: "x86_64"},
+				}},
+			}
+			packages := []wolfi.Package{
+				{Name: "curl", Version: image.Version, Arch: "x86_64", Checksum: "Q1a"},
+				{Name: "cni-plugins", Version: "1.9.1-r11", Arch: "x86_64", Checksum: "Q1b"},
+			}
+			services := simpleServices(reader, &testCache{sets: map[string][]wolfi.InstalledPackage{}}, packages, feed)
+			document, err := RunWith(context.Background(), Products{Version: 1, Products: []Product{{Package: "curl", Selectors: []string{"8"}}}}, Options{Registry: "r.invalid", Repository: "images"}, services)
+			if err != nil {
+				t.Fatal(err)
+			}
+			track := document.Tracks[0]
+			if track.State != scenario.wantState || len(track.MissingFixes) != scenario.missing || len(track.UnevaluatedFixes) != scenario.unevaluated || document.Security.UnevaluatedFixCount != scenario.unevaluated {
+				t.Fatalf("GO-only fix/unevaluated entry lost: %+v source=%+v", track, document.Security)
+			}
+			if scenario.missing != 0 {
+				fix := track.MissingFixes[0]
+				if strings.Join(fix.IDs, ",") != scenario.advisory || fix.FixedVersion != "1.9.1-r11" || !fix.ReachableByTrack {
+					t.Fatalf("incorrect evaluated fix: %+v", fix)
+				}
+			} else {
+				issue := track.UnevaluatedFixes[0]
+				if strings.Join(issue.IDs, ",") != scenario.advisory || issue.Name != "cni-plugins" || issue.FixedVersion != "1.9.1-r11" || issue.InstalledVersion != "1.9.1-r10" || issue.Architecture != "x86_64" {
+					t.Fatalf("unsupported-only evidence silently discarded: %+v", issue)
+				}
+			}
+		})
 	}
 }

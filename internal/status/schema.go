@@ -45,8 +45,8 @@ type MissingFix struct {
 	ReachableByTrack bool     `json:"reachableByTrack"`
 }
 
-// UnevaluatedFix retains a secdb entry whose fixed-version key cannot be
-// ordered as an APK version. Installed fields are present only on track issues.
+// UnevaluatedFix retains a secdb entry with an unorderable fixed-version key
+// or no recognised advisory IDs. Installed fields appear only on track issues.
 type UnevaluatedFix struct {
 	Name             string   `json:"name"`
 	FixedVersion     string   `json:"fixedVersion"`
