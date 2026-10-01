@@ -436,6 +436,11 @@ func publishOCIImage(ctx context.Context, services Services, result Result, opts
 	if err != nil {
 		return fail("publication source", err)
 	}
+	// Push only the manifest validated against the selected APK; a layout
+	// changed after validation must not be published as verified.
+	if source.manifestDigest != result.ImageDigest {
+		return fail("publication source", errRegistryContentMismatch)
+	}
 	keychain := services.RegistryKeychain
 	if keychain == nil {
 		keychain = dockerConfigKeychain{}

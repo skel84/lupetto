@@ -30,8 +30,9 @@ func publicationTestResult(t *testing.T, arch string) (Result, string) {
 	workspace := filepath.Join(t.TempDir(), "image-test123")
 	imageDir := filepath.Join(workspace, "image")
 	buildtest.MakeLoadOCI(t, imageDir, "fixture", "1-r0", arch)
-	return Result{PackageName: "fixture", Version: "1-r0", Arch: arch, Workspace: workspace, ImageDir: imageDir,
-		ImageReference: "lupetto/fixture:1-r0-amd64", BuildReference: "lupetto/local:build-test123"}, buildtest.ManifestDigest(t, imageDir)
+	digest := buildtest.ManifestDigest(t, imageDir)
+	return Result{PackageName: "fixture", Version: "1-r0", Arch: arch, Workspace: workspace, ImageDir: imageDir, ImageDigest: digest,
+		ImageReference: "lupetto/fixture:1-r0-amd64", BuildReference: "lupetto/local:build-test123"}, digest
 }
 
 func TestPublishOCIImagePushesLayoutAndVerifiesReadback(t *testing.T) {
@@ -367,6 +368,28 @@ func TestPublishOCIImageRejectsInvalidSourceBeforeNetwork(t *testing.T) {
 	}
 	if outcome, err := publishOCIImage(context.Background(), Services{RegistryTransport: base}, result, PublicationOptions{}); err != nil || outcome.Status != "skipped" || len(base.hosts) != 0 {
 		t.Fatalf("disabled publication outcome=%+v err=%v", outcome, err)
+	}
+}
+
+func TestPublishOCIImageRejectsLayoutChangedAfterValidation(t *testing.T) {
+	buildtest.IsolateRegistryAuth(t)
+	base := &recordingTransport{}
+	result, validated := publicationTestResult(t, "x86_64")
+	// A different, internally consistent layout replaces the validated one.
+	other := filepath.Join(t.TempDir(), "other")
+	buildtest.MakeLoadOCI(t, other, "fixture", "2-r0", "x86_64")
+	if buildtest.ManifestDigest(t, other) == validated {
+		t.Fatal("fixture layouts must differ")
+	}
+	if err := os.RemoveAll(result.ImageDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(other, result.ImageDir); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := publishOCIImage(context.Background(), Services{RegistryTransport: base}, result, PublicationOptions{Registry: "registry.example", Repository: "team/images"})
+	if err == nil || err.Error() != "publication source failed (content mismatch)" || len(base.hosts) != 0 || outcome.Status != "failed" || outcome.PushedDigest != "" || outcome.Verified {
+		t.Fatalf("outcome=%+v err=%v calls=%q", outcome, err, base.hosts)
 	}
 }
 
