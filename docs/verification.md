@@ -1059,6 +1059,8 @@ The backend retains the CLI-only boundary and requires exact JSON kinds/versions
 
 After the backend and rebuilt UI sources were final, the serial whole-tree gates `go test ./... -count=1 -timeout=180s` and `go test -race ./... -count=1 -timeout=180s` both passed, including the CLI/Explorer dependency-boundary tests. No other full suite or Docker build ran concurrently.
 
+A final SPDX safety review additionally covered a regular document being replaced by a FIFO after inventory: the confined open is nonblocking and checks the actual opened object's regular-file type, so a special file cannot indefinitely hold an HTTP worker. The focused race command `go test -race ./internal/explorer -run '^TestDashboard(RoutesAndEvidence|SPDXPathSafety|SiblingCompareAndRootSymlink|SPDXRejectsFIFO)$' -count=1 -timeout=60s` passed; both whole-tree gates above passed again with the fix.
+
 Real smoke used separately built binaries (`go build -o <temporary>/ ./cmd/lupetto ./cmd/lupetto-explorer`), isolated HOME/cache and empty Docker configuration, native apko 1.4.5, Docker 27.4.0, and an owned `registry:2` started with `docker run --detach --rm --name lupetto-explorer-backend-registry --publish 127.0.0.1:0:5000 registry:2` (assigned `127.0.0.1:55000`). Explorer listened on `127.0.0.1:8114`, enabled builds, and inherited that registry plus repository `backend-smoke/images`; Docker used the existing local Unix socket. No external registry, credential, signing key or remote infrastructure was used.
 
 | Scenario | Observed result |

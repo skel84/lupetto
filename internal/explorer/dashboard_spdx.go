@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 )
 
 // Paths originate only in a CLI inventory record, never an HTTP parameter.
@@ -70,8 +71,13 @@ func readValidatedSPDX(build InventoryBuild) ([]byte, error) {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return nil, errors.New("SPDX path must not contain symlinks")
 		}
+		if current == relative && !info.Mode().IsRegular() {
+			return nil, errors.New("SPDX must be a regular file")
+		}
 	}
-	f, err := root.Open(relative)
+	// A file replaced by a FIFO between Lstat and open must not hold an
+	// HTTP worker indefinitely. Stat below checks the actual opened object.
+	f, err := root.OpenFile(relative, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}

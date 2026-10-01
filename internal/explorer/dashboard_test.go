@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -428,5 +429,19 @@ func TestDashboardErrorsAreNotRegistryAbsence(t *testing.T) {
 	server.status.finish(nil, context.DeadlineExceeded)
 	if server.shell().RegistryState != "error" {
 		t.Fatal("last error claimed successful comparison")
+	}
+}
+
+func TestDashboardSPDXRejectsFIFO(t *testing.T) {
+	isolatedCache(t)
+	_, build := fixtureInventory(t)
+	fifo := filepath.Join(build.Workspace, "fifo.spdx.json")
+	if err := syscall.Mkfifo(fifo, 0600); err != nil {
+		t.Fatal(err)
+	}
+	build.SPDX.Path = fifo
+	build.Record.Evidence.SPDXPath = fifo
+	if _, err := readValidatedSPDX(build); err == nil || !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("FIFO must be rejected without opening or reading it: %v", err)
 	}
 }
