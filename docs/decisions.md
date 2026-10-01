@@ -208,7 +208,7 @@ Advisory-ID handling (review correction): evaluate `CVE-YYYY-NNNN`, `GHSA-xxxx-x
 
 The user rejected the first dashboard UI as basic and organized around the CLI's data rather than operator tasks. They approved: Chainguard-console-like functionality with a **distinct visual identity**; showing **local images** (images in local Docker **and** Lupetto's own build history); managing tracked products from the UI; and **severity** for security advisories. This amends the [registry-comparison dashboard](#registry-comparison-dashboard-user-approved-2026-10-01); its CLI-only boundary, HTTP safety, and single-build rules still apply.
 
-**Process.** A clickable static mockup of the main screens, using realistic data, is reviewed by the user before the UI is rebuilt. The mockup offers two distinct visual directions; the user picks one.
+**Process and approved direction.** The clickable mockup was reviewed and the user selected **B · Pista**: graphite/teal, a left side rail, dense ledger, square corners, monospace versions, and four-segment severity meters with text in light and dark themes. Direction A is dropped. The implementation retains Go `html/template` server rendering with small progressive-enhancement JavaScript, no SPA or Node toolchain, and CSP `default-src 'self'`.
 
 **Information architecture** (task-oriented, Chainguard-console-like):
 

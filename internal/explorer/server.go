@@ -43,6 +43,7 @@ type Server struct {
 	status        statusCache
 	discovery     discoveryCache
 	discoverSlots chan struct{}
+	dashboard     dashboardState
 	jobs          jobRunner
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -134,8 +135,15 @@ func (s *Server) refreshStatusLocked() bool {
 		defer s.wg.Done()
 		ctx, cancel := context.WithTimeout(s.ctx, 5*time.Minute)
 		defer cancel()
-		document, err := s.cli.Status(ctx, s.config.Products)
-		s.status.finish(document, err)
+		products, productsErr := s.cli.Products(ctx, s.config.Products, "list", "", nil)
+		if productsErr == nil && len(products.Products) == 0 {
+			s.status.mu.Lock()
+			s.status.view = StatusView{Empty: true}
+			s.status.mu.Unlock()
+		} else {
+			document, err := s.cli.Status(ctx, s.config.Products)
+			s.status.finish(document, err)
+		}
 		s.mu.Lock()
 		if s.statusPending {
 			s.statusPending = false
@@ -146,6 +154,7 @@ func (s *Server) refreshStatusLocked() bool {
 	return true
 }
 func (s *Server) refreshAfterBuild() {
+	s.invalidateInventory()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.refreshStatusLocked() && !s.closing {
@@ -217,12 +226,23 @@ func (s *Server) Run(ctx context.Context) error {
 }
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", s.overview)
-	mux.HandleFunc("GET /tracks/{package}/{selector}", s.track)
+	mux.HandleFunc("GET /{$}", s.images)
+	mux.HandleFunc("GET /images", s.images)
+	mux.HandleFunc("GET /images/{package}/{selector}", s.image)
+	mux.HandleFunc("GET /catalog", s.packages)
+	mux.HandleFunc("GET /catalog/{name}", s.packageDetail)
+	mux.HandleFunc("GET /builds", s.builds)
+	mux.HandleFunc("GET /builds/{id}", s.buildDetail)
+	mux.HandleFunc("GET /builds/{id}/logs", s.jobLogs)
+	mux.HandleFunc("GET /builds/{id}/sbom", s.downloadSPDX)
+	mux.HandleFunc("POST /builds/{id}/cancel", s.cancelJob)
+	mux.HandleFunc("GET /products/track", s.tracking)
+	mux.HandleFunc("POST /products/{action}", s.editProducts)
+	mux.HandleFunc("GET /tracks/{package}/{selector}", s.image)
 	mux.HandleFunc("GET /packages", s.packages)
 	mux.HandleFunc("GET /packages/{name}", s.packageDetail)
-	mux.HandleFunc("GET /jobs", s.jobList)
-	mux.HandleFunc("GET /jobs/{id}", s.jobDetail)
+	mux.HandleFunc("GET /jobs", s.builds)
+	mux.HandleFunc("GET /jobs/{id}", s.buildDetail)
 	mux.HandleFunc("GET /jobs/{id}/logs", s.jobLogs)
 	mux.HandleFunc("POST /status/refresh", s.refresh)
 	mux.HandleFunc("POST /builds", s.build)
@@ -235,7 +255,7 @@ func (s *Server) routes() http.Handler {
 	return mux
 }
 func (s *Server) base() BaseView {
-	return BaseView{CSRFToken: s.token, BuildsEnabled: s.config.EnableBuilds}
+	return BaseView{CSRFToken: s.token, BuildsEnabled: s.config.EnableBuilds, Shell: s.shell()}
 }
 func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, model any) {
 	if r.URL.Query().Get("format") == "json" {
@@ -292,6 +312,15 @@ func (s *Server) packages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view := PackagesView{BaseView: s.base(), Query: query, Packages: []PackageItem{}, Limit: PackageResultLimit, LastError: lastError, Refreshing: refreshing}
+	tracked := map[string]bool{}
+	if status := s.status.snapshot(); status.Document != nil {
+		for _, track := range status.Document.Tracks {
+			tracked[track.Package] = true
+			if track.Latest != nil {
+				tracked[track.Latest.Name] = true
+			}
+		}
+	}
 	if document != nil {
 		// Metadata only: do not expose the unbounded full all-packages array.
 		metadata := *document
@@ -303,7 +332,7 @@ func (s *Server) packages(w http.ResponseWriter, r *http.Request) {
 			}
 			view.TotalMatches++
 			if len(view.Packages) < PackageResultLimit {
-				view.Packages = append(view.Packages, PackageItem{DiscoveredPackage: pkg, DetailURL: "/packages/" + url.PathEscape(pkg.Name)})
+				view.Packages = append(view.Packages, PackageItem{DiscoveredPackage: pkg, DetailURL: "/catalog/" + url.PathEscape(pkg.Name), Tracked: tracked[pkg.Name]})
 			}
 		}
 	}
@@ -380,7 +409,10 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	if !s.authorize(w, r) {
 		return
 	}
-	job, err := s.jobs.start(BuildRequest{Package: oneField(r, "package"), Selector: oneField(r, "selector"), APKVersion: oneField(r, "apkVersion")})
+	if !uniqueFields(w, r, "package", "selector", "apkVersion", "mode") {
+		return
+	}
+	job, err := s.jobs.start(BuildRequest{Package: oneField(r, "package"), Selector: oneField(r, "selector"), APKVersion: oneField(r, "apkVersion"), Mode: oneField(r, "mode")})
 	if err != nil {
 		code := http.StatusBadRequest
 		if errors.Is(err, ErrBuildsDisabled) {
@@ -395,7 +427,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), code)
 		return
 	}
-	http.Redirect(w, r, "/jobs/"+job.ID, http.StatusSeeOther)
+	http.Redirect(w, r, "/builds/"+job.ID, http.StatusSeeOther)
 }
 func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 	if !s.authorize(w, r) {
@@ -410,7 +442,7 @@ func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	http.Redirect(w, r, "/jobs/"+r.PathValue("id"), http.StatusSeeOther)
+	http.Redirect(w, r, "/builds/"+r.PathValue("id"), http.StatusSeeOther)
 }
 func (s *Server) safe(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

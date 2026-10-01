@@ -1,0 +1,41 @@
+{{/* Catalog list. Root: PackagesView. */}}
+{{define "packages"}}{{template "head" .}}<title>Catalog · Lupetto</title>
+{{template "rail-catalog" .}}
+{{with .LastError}}<div class="banner error" role="alert">{{template "icon-lg" "error"}}<div class="body"><p><strong>The Wolfi index couldn’t be loaded.</strong></p><pre class="errtext">{{.}}</pre></div></div>{{end}}
+<div class="page-head"><div class="titles"><h1>Catalog</h1><p class="lede">{{with .Document}}Every package in the signed Wolfi index ({{.Architecture}}, index {{template "short-hash" .IndexSHA256}}). {{end}}Track a product to watch it, or build any version once.</p></div></div>
+<form class="toolbar" method="get" action="/catalog" role="search">
+  <label class="search">{{template "icon" "search"}}<span class="sr-only">Search the catalog</span><input type="search" name="q" value="{{.Query}}" maxlength="256" placeholder="Search Wolfi packages by name or description"></label>
+  <button class="btn small" type="submit">Search</button>
+</form>
+{{if .Document}}
+{{if .Packages}}<div class="card"><table class="data stackable"><thead><tr><th scope="col">Package</th><th scope="col">Newest</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+<tbody>{{range .Packages}}<tr>
+<td class="lead" data-label="Package"><a href="{{.DetailURL}}"><strong class="mono">{{.Name}}</strong></a>{{if .Tracked}} <span class="chip accent">Tracked</span>{{end}}{{with .Description}}<span class="verdict-sub">{{.}}</span>{{end}}</td>
+<td data-label="Newest"><span class="ver">{{.Version}}</span></td>
+<td class="actions-cell" data-label=""><span class="btnrow">{{if .Tracked}}<a class="btn small" href="/?q={{.Name}}">Open</a>{{else}}<a class="btn small" href="/products/track?package={{.Name}}" data-opens="track-dialog" data-package="{{.Name}}">{{template "icon" "track"}}Track</a>{{end}}<a class="btn small quiet" href="{{.DetailURL}}">{{template "icon" "builds"}}Versions…</a></span></td></tr>{{end}}</tbody></table></div>
+<div class="pager"><span>{{if gt .TotalMatches .Limit}}Showing the first {{.Limit}} of {{.TotalMatches}} matches — refine the search to see more.{{else}}{{.TotalMatches}} match{{if ne .TotalMatches 1}}es{{end}}.{{end}}</span>{{if .Query}}<a class="btn small" href="/catalog">Show all packages</a>{{end}}</div>
+{{else}}<div class="empty small-empty"><h2>No packages match “{{.Query}}”</h2><p>Search matches package names and descriptions in the current index.</p><div class="actions"><a class="btn" href="/catalog">Clear search</a></div></div>{{end}}
+{{else if .Refreshing}}<div class="empty" role="status"><span class="art">{{template "icon-xl" "running"}}</span><h2>Loading the Wolfi index…</h2><p>Lupetto is reading and verifying the signed package index.</p><p class="small" data-poll-url="/catalog?format=json" data-poll-field="refreshing">This page reloads when it’s ready; without JavaScript, reload it yourself.</p></div>
+{{else if not .LastError}}<div class="empty"><span class="art">{{template "icon-xl" "catalog"}}</span><h2>The index hasn’t been loaded yet</h2><p>Reload the page to load it.</p></div>{{end}}
+{{template "page-end" .}}
+{{template "track-dialog" .CSRFToken}}
+{{template "doc-end"}}{{end}}
+
+{{/* Catalog package: every exact version of one package or provider. Root: PackageView. */}}
+{{define "package"}}{{template "head" .}}<title>{{.Name}} · Catalog · Lupetto</title>
+{{template "rail-catalog" .}}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/catalog">Catalog</a><span aria-hidden="true">/</span><span aria-current="page">{{.Name}}</span></nav>
+{{with .Error}}<div class="banner error" role="alert">{{template "icon-lg" "error"}}<div class="body"><p><strong>Versions couldn’t be listed.</strong></p><pre class="errtext">{{.}}</pre></div></div>{{end}}
+<div class="page-head"><div class="titles"><div class="title-row"><span class="pmark" aria-hidden="true">{{printf "%.2s" .Name}}</span><h1 class="mono">{{.Name}}</h1></div>
+<p class="lede">{{with .Document}}{{len .Packages}} release{{if ne (len .Packages) 1}}s{{end}} in the signed Wolfi index ({{.Architecture}}, index {{template "short-hash" .IndexSHA256}}), newest first.{{end}}</p></div>
+<div class="actions"><a class="btn primary" href="/products/track?package={{.Name}}" data-opens="track-dialog" data-package="{{.Name}}">{{template "icon" "track"}}Track versions</a></div></div>
+{{if not .BuildsEnabled}}<div class="banner info">{{template "icon-lg" "lock"}}<div class="body"><p><strong>Builds are disabled on this server.</strong> You can still track versions.</p></div></div>{{else if .Shell.RunningBuild}}<div class="banner info" role="status">{{template "icon-lg" "running"}}<div class="body"><p><strong>A build is running.</strong> One build runs at a time; you can start another when it finishes.</p><div class="actions"><a class="btn small" href="{{.Shell.RunningBuild.DetailURL}}">View progress</a></div></div></div>{{end}}
+{{with .Document}}{{if .Packages}}<div class="card"><table class="data stackable"><thead><tr><th scope="col">Package</th><th scope="col">Version</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+<tbody>{{range .Packages}}<tr><td class="lead" data-label="Package"><strong class="mono">{{.Name}}</strong>{{with .Description}}<span class="verdict-sub">{{.}}</span>{{end}}</td>
+<td data-label="Version"><span class="ver">{{.Version}}</span></td>
+<td class="actions-cell" data-label=""><span class="btnrow">{{if and $.BuildsEnabled (not $.Shell.RunningBuild)}}<form class="inline" method="post" action="/builds" data-build-form><input type="hidden" name="csrfToken" value="{{$.CSRFToken}}"><input type="hidden" name="package" value="{{$.Name}}"><input type="hidden" name="apkVersion" value="{{.Version}}"><input type="hidden" name="mode" value="publish"><button class="btn small" type="submit">{{template "icon" "upload"}}Build &amp; publish</button></form><form class="inline" method="post" action="/builds" data-build-form><input type="hidden" name="csrfToken" value="{{$.CSRFToken}}"><input type="hidden" name="package" value="{{$.Name}}"><input type="hidden" name="apkVersion" value="{{.Version}}"><input type="hidden" name="mode" value="local"><button class="btn small quiet" type="submit">{{template "icon" "local"}}Build locally</button></form>{{else}}<button class="btn small" type="button" disabled>{{template "icon" "upload"}}Build &amp; publish</button><button class="btn small quiet" type="button" disabled>{{template "icon" "local"}}Build locally</button>{{end}}</span></td></tr>{{end}}</tbody></table></div>
+<p class="muted small">These build this exact version once, without tracking it. <strong>Build &amp; publish</strong> pushes to the configured registry (and signs when a key is configured) without loading into Docker; <strong>Build locally</strong> loads the image into local Docker and never publishes or signs.</p>
+{{else}}<div class="empty small-empty"><p>No releases of <span class="mono">{{$.Name}}</span> in the current index.</p></div>{{end}}{{end}}
+{{template "page-end" .}}
+{{template "track-dialog" .CSRFToken}}
+{{template "doc-end"}}{{end}}

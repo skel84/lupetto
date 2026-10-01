@@ -1,0 +1,38 @@
+{{/* Track a product (plain page; also the no-JS fallback for the dialog). Root: TrackingView. */}}
+{{define "tracking"}}{{template "head" .}}<title>Track a product · Lupetto</title>
+{{template "rail-images" .}}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">Images</a><span aria-hidden="true">/</span><span aria-current="page">Track a product</span></nav>
+{{with .Error}}<div class="banner error" role="alert">{{template "icon-lg" "error"}}<div class="body"><p><strong>Tracked products couldn’t be changed.</strong></p><pre class="errtext">{{.}}</pre></div></div>{{end}}
+{{with .Message}}<div class="banner ok" role="status">{{template "icon-lg" "ok"}}<div class="body"><p>{{.}}</p></div></div>{{end}}
+<div class="stack">
+<div class="sheet" role="region" aria-labelledby="track-title">
+  <form method="post" action="/products/add">
+  <input type="hidden" name="csrfToken" value="{{.CSRFToken}}">
+  <div class="sheet-head">
+    <div><h2 id="track-title">Track a product</h2><p class="muted small">Lupetto will watch these versions and tell you when to build, update, or rebuild.</p></div>
+    <a class="iconbtn" href="/" aria-label="Close">{{template "icon" "close"}}</a>
+  </div>
+  <div class="sheet-body">
+    <div class="field">
+      <label for="track-package">Wolfi package</label>
+      <input class="input mono" id="track-package" name="package" value="{{.Package}}" required maxlength="256" autocomplete="off" placeholder="e.g. postgresql">
+      <span class="help">A package name or a provider, as listed in the <a href="/catalog">catalog</a>.</span>
+    </div>
+    <div class="field">
+      <label for="track-selector">Versions to track</label>
+      <input class="input mono" id="track-selector" name="selector" value="{{.Selector}}" required maxlength="256" autocomplete="off" placeholder="e.g. 17 16" inputmode="decimal">
+      <span class="help">One or more versions separated by spaces. Lupetto always builds the newest release matching each: “17” follows every 17.x, “17.10” stays on 17.10.x.</span>
+    </div>
+  </div>
+  <div class="sheet-foot">
+    <span class="left">Saved to the products file on the server.</span>
+    <a class="btn" href="/">Cancel</a>
+    <button class="btn primary" type="submit">{{template "icon" "track"}}Track</button>
+  </div>
+  </form>
+</div>
+<section class="sheet" aria-labelledby="tracked-title"><div class="sheet-head"><div><h2 id="tracked-title">Currently tracked</h2><p class="muted small">Stopping tracking doesn’t delete images or build records.</p></div></div>
+<div class="sheet-body">{{with .Products}}{{if .Products}}<ul class="tracked-list">{{range $prod := .Products}}{{range $sel := $prod.Selectors}}<li><span><strong class="mono">{{$prod.Package}}</strong> <span class="ver">{{$sel}}</span></span><form class="inline" method="post" action="/products/remove"><input type="hidden" name="csrfToken" value="{{$.CSRFToken}}"><input type="hidden" name="package" value="{{$prod.Package}}"><input type="hidden" name="selector" value="{{$sel}}"><button class="btn small danger" type="submit" aria-label="Stop tracking {{$prod.Package}} {{$sel}}">{{template "icon" "close"}}Stop tracking</button></form></li>{{end}}{{end}}</ul>{{else}}<p class="muted">Nothing is tracked yet.</p>{{end}}{{else}}<p class="muted">{{if .Error}}The products file couldn’t be read.{{else}}Nothing is tracked yet.{{end}}</p>{{end}}</div></section>
+</div>
+{{template "page-end" .}}
+{{template "doc-end"}}{{end}}

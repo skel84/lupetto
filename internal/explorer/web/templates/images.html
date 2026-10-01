@@ -1,0 +1,73 @@
+{{/* Images (home). Root: ImagesView. */}}
+{{define "images"}}{{template "head" .}}<title>Images · Lupetto</title>
+{{template "rail-images" .}}
+{{- $unfiltered := and (not .Query) (or (eq .Filter "") (eq .Filter "all")) -}}
+{{template "images-banners" .}}
+<div class="page-head">
+  <div class="titles"><h1>Images</h1><p class="lede">{{if .Groups}}{{len .Groups}} product{{if ne (len .Groups) 1}}s{{end}} · {{.Summary.All}} tracked version{{if ne .Summary.All 1}}s{{end}}{{if .Shell.Registry}} · comparing <span class="mono">{{.Shell.Registry}}</span> with the Wolfi index{{end}}{{else if or .Empty (and $unfiltered .Status.Document)}}Nothing tracked yet.{{else}}Tracked Wolfi products, their registry and local images, and missing fixes.{{end}}</p></div>
+  <div class="actions"><a class="btn primary" href="/products/track" data-opens="track-dialog">{{template "icon" "plus"}}Track a product</a></div>
+</div>
+{{if or .Empty .Status.Document}}
+{{if or .Empty (and (eq .Summary.All 0) $unfiltered)}}<div class="empty">
+  <span class="art">{{template "icon-xl" "images"}}</span>
+  <h2>No products tracked yet</h2>
+  <p>Track a Wolfi package and the versions you care about. Lupetto then shows what’s in your registry and local Docker, and tells you when to build, update, or rebuild for security fixes.</p>
+  <div class="actions"><a class="btn primary" href="/products/track" data-opens="track-dialog">{{template "icon" "plus"}}Track a product</a><a class="btn" href="/catalog">{{template "icon" "catalog"}}Browse the catalog</a></div>
+</div>
+{{else}}
+<div class="summary-strip">
+  <a href="/?filter=needs-action"{{if or (eq .Filter "needs-action") (eq .Filter "action")}} aria-current="true"{{end}}><span class="ico v-update">{{template "icon" "update"}}</span><span><span class="n">{{.Summary.NeedsAction}}</span><br><span class="t">need action</span></span></a>
+  <a href="/?filter=current"{{if eq .Filter "current"}} aria-current="true"{{end}}><span class="ico v-ok">{{template "icon" "ok"}}</span><span><span class="n">{{.Summary.Current}}</span><br><span class="t">up to date</span></span></a>
+  <a href="/?filter=not-in-registry"{{if or (eq .Filter "not-in-registry") (eq .Filter "notbuilt")}} aria-current="true"{{end}}><span class="ico v-notbuilt">{{template "icon" "notbuilt"}}</span><span><span class="n">{{.Summary.NotInRegistry}}</span><br><span class="t">not in registry</span></span></a>
+  <a href="/?filter=critical"{{if eq .Filter "critical"}} aria-current="true"{{end}}><span class="ico sev-critical"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{{template "icon-paths" "sev-critical"}}</svg></span><span><span class="n">{{.Summary.MissingCritical}}</span><br><span class="t">images missing critical fixes</span></span></a>
+</div>
+<form class="toolbar" method="get" action="/" role="search">
+  <label class="search">{{template "icon" "search"}}<span class="sr-only">Search images</span><input type="search" name="q" value="{{.Query}}" maxlength="256" placeholder="Search images or packages"></label>
+  <fieldset class="segmented"><legend class="sr-only">Show</legend>
+    <label><input type="radio" name="filter" value="all"{{if or (eq .Filter "") (eq .Filter "all")}} checked{{end}}>All <span class="n">{{.Summary.All}}</span></label>
+    <label><input type="radio" name="filter" value="needs-action"{{if or (eq .Filter "needs-action") (eq .Filter "action")}} checked{{end}}>Needs action <span class="n">{{.Summary.NeedsAction}}</span></label>
+    <label><input type="radio" name="filter" value="current"{{if eq .Filter "current"}} checked{{end}}>Up to date <span class="n">{{.Summary.Current}}</span></label>
+    <label><input type="radio" name="filter" value="not-in-registry"{{if or (eq .Filter "not-in-registry") (eq .Filter "notbuilt")}} checked{{end}}>Not in registry <span class="n">{{.Summary.NotInRegistry}}</span></label>
+    {{if eq .Filter "critical"}}<label><input type="radio" name="filter" value="critical" checked>Missing critical fixes</label>{{end}}
+  </fieldset>
+  <button class="btn small" type="submit">Apply</button>
+</form>
+{{if .Groups}}<ul class="products">{{range $g := .Groups}}<li class="product">
+  <div class="product-head">
+    <span class="pmark" aria-hidden="true">{{printf "%.2s" $g.Package}}</span>
+    <div><h2><a href="{{$g.DetailURL}}">{{$g.Package}}</a></h2></div>
+    <span class="meta">{{len $g.Rows}} tracked version{{if ne (len $g.Rows) 1}}s{{end}} · <a href="/products/track?package={{$g.Package}}">Edit tracking</a></span>
+  </div>
+  <table class="tracks stackable">
+    <thead><tr><th scope="col">Version</th><th scope="col">Registry</th><th scope="col">Local</th><th scope="col">Latest in Wolfi</th><th scope="col">Missing fixes</th><th scope="col">Verdict</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead>
+    <tbody>{{range $r := $g.Rows}}<tr>
+  <td class="lead" data-label="Version"><a class="sel" href="{{$r.DetailURL}}">{{$r.Selector}}</a><span class="sel-sub">{{with $r.Track.Latest}}{{.Name}}{{else}}—{{end}}</span></td>
+  <td data-label="Registry">{{template "where-registry" $r.Track}}</td>
+  <td data-label="Local">{{if eq $.Shell.DockerState "unavailable"}}<span class="where-line">{{template "icon" "plug"}}<span class="none">Docker unavailable</span></span>{{end}}{{template "where-local" $r}}</td>
+  <td data-label="Latest in Wolfi">{{with $r.Track.Latest}}<span class="ver">{{.Version}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="wide" data-label="Missing fixes"><span class="sevset">{{if eq $r.Track.State "error"}}<span class="none">Unknown (track error)</span>{{else if $r.Track.Newest}}{{template "sev-counts" $r.Severity}}{{if $r.UnreachableCount}}<span class="extra">{{template "icon" "error"}}{{$r.UnreachableCount}} need another version</span>{{end}}{{else}}<span class="none">No registry image</span>{{end}}</span></td>
+  <td class="wide" data-label="Verdict">{{template "verdict" $r}}</td>
+  <td class="action" data-label="">{{if eq $r.Action.Kind "build"}}{{if and $.BuildsEnabled (not $.Shell.RunningBuild)}}<form class="inline" method="post" action="/builds" data-build-form><input type="hidden" name="csrfToken" value="{{$.CSRFToken}}"><input type="hidden" name="package" value="{{$r.Action.Package}}"><input type="hidden" name="selector" value="{{$r.Action.Selector}}"><input type="hidden" name="mode" value="{{$r.Action.Mode}}"><button class="btn primary" type="submit">{{template "action-icon" $r.VerdictKind}}{{$r.Action.Label}}</button></form>{{else}}<button class="btn primary" type="button" disabled>{{template "action-icon" $r.VerdictKind}}{{$r.Action.Label}}</button><span class="btn-note">{{if not $.BuildsEnabled}}Builds are disabled on this server{{else}}Another build is running{{end}}</span>{{end}}{{else if eq $r.Action.Kind "tracking"}}<a class="btn" href="{{if $r.Action.URL}}{{$r.Action.URL}}{{else}}/products/track?package={{$r.Package}}{{end}}">{{template "icon" "edit"}}{{if $r.Action.Label}}{{$r.Action.Label}}{{else}}Edit tracking{{end}}</a>{{else}}<a class="btn quiet" href="{{$r.DetailURL}}">Details</a>{{end}}</td>
+</tr>{{end}}</tbody>
+  </table>
+</li>{{end}}</ul>{{else}}<div class="empty small-empty"><h2>No images match</h2><p>{{if .Query}}Nothing matches “{{.Query}}”{{else}}Nothing matches this filter{{end}}. Try a different search or filter.</p><div class="actions"><a class="btn" href="/">Clear filters</a></div></div>{{end}}
+{{end}}
+{{with .Status.Document}}<div class="stack after-list" id="about">{{template "data-note" .Security}}</div>{{end}}
+{{else if .Status.Refreshing}}<div class="empty" role="status"><span class="art">{{template "icon-xl" "running"}}</span><h2>Checking your images…</h2><p>Lupetto is comparing the registry with the signed Wolfi index and the security feed.</p><p class="small" data-poll-url="/?format=json" data-poll-field="status.refreshing">This page reloads when the check finishes; without JavaScript, reload it yourself.</p></div>
+{{else if not .Status.LastError}}<div class="empty"><span class="art">{{template "icon-xl" "clock"}}</span><h2>No status yet</h2><p>The first comparison hasn’t run yet.</p></div>{{end}}
+{{template "page-end" .}}
+{{template "track-dialog" .CSRFToken}}
+{{template "doc-end"}}{{end}}
+
+{{/* Root: ImagesView. Notices, errors and server-mode banners above the page head. */}}
+{{define "images-banners"}}
+{{- with .Notice}}{{if .Tracked}}<div class="banner ok" role="status">{{template "icon-lg" "ok"}}<div class="body"><p><strong>Now tracking <span class="mono">{{.Tracked}}</span>.</strong> Its status appears after the next check.</p></div></div>{{end}}{{if .Untracked}}<div class="banner ok" role="status">{{template "icon-lg" "ok"}}<div class="body"><p><strong>Stopped tracking <span class="mono">{{.Untracked}}</span>.</strong> Existing images and build records are not deleted.</p></div></div>{{end}}{{end}}
+{{- if .Status.LastError}}<div class="banner error" role="alert">{{template "icon-lg" "error"}}<div class="body">
+  <p><strong>{{if .Status.Document}}The last status check failed.{{else}}Lupetto couldn’t check your images.{{end}}</strong> {{if .Status.Document}}What you see below is from the previous successful check{{with .Status.Document}}{{if not .ComputedAt.IsZero}} ({{template "time" .ComputedAt}}){{end}}{{end}}.{{else}}Registry, index and security information is unavailable until a check succeeds.{{end}}</p>
+  <pre class="errtext">{{.Status.LastError}}</pre>
+  <div class="actions">{{template "refresh-form" .}}<a class="btn quiet small" href="/builds">Build history</a></div></div></div>{{end}}
+{{- if eq .Shell.DockerState "unavailable"}}<div class="banner warn">{{template "icon-lg" "plug"}}<div class="body"><p><strong>Docker isn’t available.</strong> Local Docker images can’t be listed, so “Local” shows only Lupetto’s build records. Builds don’t need Docker.</p>{{with .Shell.DockerReason}}<p class="small muted">{{.}}</p>{{end}}</div></div>{{end}}
+{{- with .Inventory.Error}}<div class="banner warn">{{template "icon-lg" "error"}}<div class="body"><p><strong>Local inventory couldn’t be read.</strong> Local images and build history may be missing.</p><pre class="errtext">{{.}}</pre></div></div>{{end}}
+{{- if not .BuildsEnabled}}<div class="banner info">{{template "icon-lg" "lock"}}<div class="body"><p><strong>Read-only server.</strong> Builds are disabled (the server was started without <span class="mono">--enable-builds</span>). You can still browse images, vulnerabilities, packages, and build history{{if .Groups}}, and change tracked products{{end}}.</p></div></div>{{end}}
+{{- with .Shell.RunningBuild}}<div class="banner info" role="status">{{template "icon-lg" "running"}}<div class="body"><p><strong>Building <span class="mono">{{.Package}}{{with .Version}} {{.}}{{end}}</span>.</strong> One build runs at a time; other builds can start when it finishes.</p><div class="actions"><a class="btn small" href="{{.DetailURL}}">View progress</a></div></div></div>{{end}}
+{{end}}

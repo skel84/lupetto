@@ -1,0 +1,167 @@
+{{/* Image detail (one tracked version), tabbed. Root: ImageView. */}}
+{{define "image"}}{{template "head" .}}<title>{{.Product.Package}} {{.Product.Selector}} · Images · Lupetto</title>
+{{template "rail-images" .}}
+{{- $p := .Product}}{{$t := .Product.Track}}
+{{- if .Status.LastError}}<div class="banner error" role="alert">{{template "icon-lg" "error"}}<div class="body"><p><strong>The last status check failed.</strong> {{if .Status.Document}}This page shows the previous successful check.{{else}}Registry and security information is unavailable.{{end}}</p><pre class="errtext">{{.Status.LastError}}</pre></div></div>{{end}}
+{{- with .Inventory.Error}}<div class="banner warn">{{template "icon-lg" "error"}}<div class="body"><p><strong>Local inventory couldn’t be read.</strong> Local images and build history may be missing.</p><pre class="errtext">{{.}}</pre></div></div>{{end}}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">Images</a><span aria-hidden="true">/</span><span>{{$p.Package}}</span><span aria-hidden="true">/</span><span aria-current="page">{{$p.Selector}}</span></nav>
+<div class="page-head">
+  <div class="titles"><div class="title-row"><span class="pmark" aria-hidden="true">{{printf "%.2s" $p.Package}}</span><h1>{{$p.Package}} <span class="mono">{{$p.Selector}}</span></h1>{{template "verdict" $p}}</div>
+  <p class="lede">{{with $t.Latest}}Newest in Wolfi: <span class="mono">{{.Name}} {{.Version}}</span>{{else}}No match in the Wolfi index{{end}}{{with $t.Repository}} · <span class="mono">{{.}}</span>{{end}}</p></div>
+  <div class="actions">{{template "image-action" .}}<a class="btn" href="/products/track?package={{$p.Package}}&amp;selector={{$p.Selector}}">{{template "icon" "edit"}}Edit tracking</a></div>
+</div>
+{{if gt (len .Siblings) 1}}<nav class="segmented" aria-label="Tracked versions of {{$p.Package}}">{{range .Siblings}}<a href="{{.URL}}?tab={{$.Tab}}"{{if .Current}} aria-current="page"{{end}}>{{$p.Package}} {{.Selector}}</a>{{end}}</nav>{{end}}
+<nav class="tabs" aria-label="Image sections">
+  <a href="{{$p.DetailURL}}?tab=overview"{{if or (eq .Tab "overview") (eq .Tab "")}} aria-current="page"{{end}}>Overview &amp; versions</a>
+  <a href="{{$p.DetailURL}}?tab=vulnerabilities"{{if eq .Tab "vulnerabilities"}} aria-current="page"{{end}}>Vulnerabilities{{if $p.Severity.Total}} <span class="count{{if .FixedByRebuilding}} hot{{end}}">{{$p.Severity.Total}}</span>{{end}}</a>
+  <a href="{{$p.DetailURL}}?tab=packages"{{if eq .Tab "packages"}} aria-current="page"{{end}}>Packages / SBOM</a>
+  <a href="{{$p.DetailURL}}?tab=compare"{{if eq .Tab "compare"}} aria-current="page"{{end}}>Compare</a>
+  <a href="{{$p.DetailURL}}?tab=builds"{{if eq .Tab "builds"}} aria-current="page"{{end}}>Builds{{if .Builds}} <span class="count">{{len .Builds}}</span>{{end}}</a>
+</nav>
+{{if eq .Tab "vulnerabilities"}}{{template "image-vulns" .}}
+{{else if eq .Tab "packages"}}{{template "image-packages" .}}
+{{else if eq .Tab "compare"}}{{template "image-compare" .}}
+{{else if eq .Tab "builds"}}{{template "image-builds" .}}
+{{else}}{{template "image-overview" .}}{{end}}
+{{template "page-end" .}}
+{{template "doc-end"}}{{end}}
+
+{{/* Root: ImageView. Primary build action (POST form) or nothing. */}}
+{{define "image-action"}}{{with .Product.Action}}{{if eq .Kind "build"}}{{if and $.BuildsEnabled (not $.Shell.RunningBuild)}}<form class="inline" method="post" action="/builds" data-build-form><input type="hidden" name="csrfToken" value="{{$.CSRFToken}}"><input type="hidden" name="package" value="{{.Package}}"><input type="hidden" name="selector" value="{{.Selector}}"><input type="hidden" name="mode" value="{{.Mode}}"><button class="btn primary" type="submit">{{template "action-icon" $.Product.VerdictKind}}{{.Label}}</button></form>{{else}}<button class="btn primary" type="button" disabled title="{{if not $.BuildsEnabled}}Builds are disabled on this server{{else}}Another build is running{{end}}">{{template "action-icon" $.Product.VerdictKind}}{{.Label}}</button>{{end}}{{end}}{{end}}{{end}}
+
+{{/* Root: ImageView. */}}
+{{define "image-overview"}}{{$p := .Product}}{{$t := .Product.Track}}<div class="stack-lg">
+<section class="card track-panel" aria-labelledby="track-head">
+<div class="card-head"><h2 id="track-head">{{$p.Package}} {{$p.Selector}} {{with $t.Latest}}<span class="muted small mono">{{.Name}}</span>{{end}}</h2></div>
+<div class="verdict-block">
+  <div>{{template "verdict" $p}}</div>
+  {{if eq $t.State "error"}}<p class="why">Missing fixes and newer packages could not be determined because of the error below.</p>{{else if $t.Newest}}<div class="why"><span class="label">Missing fixes in newest registry image</span><div class="sevset">{{template "sev-counts" $p.Severity}}{{if $p.UnreachableCount}}<span class="extra">{{template "icon" "error"}}{{$p.UnreachableCount}} need another version</span>{{end}}</div></div>{{else}}<p class="why muted">{{if eq $t.State "error"}}Lupetto can’t compare this version until the error is resolved.{{else}}Nothing published to the registry yet, so missing fixes can’t be checked.{{end}}</p>{{end}}
+  {{if $t.Outdated}}<div><span class="label">Newer packages in Wolfi</span><div class="small">{{len $t.Outdated}} installed package{{if ne (len $t.Outdated) 1}}s have{{else}} has{{end}} a newer version</div></div>{{end}}
+</div>
+{{if eq $t.State "error"}}<div class="card-body"><div class="empty small-empty"><span class="art">{{template "icon-xl" "error"}}</span><h3>Lupetto can’t compare {{$p.Package}} {{$p.Selector}}</h3>{{with $t.Error}}<p class="wrap-any">{{.}}</p>{{end}}
+<div class="actions"><a class="btn" href="/products/track?package={{$p.Package}}&amp;selector={{$p.Selector}}">{{template "icon" "edit"}}Edit tracking</a><a class="btn quiet" href="/catalog/{{$p.Package}}">{{template "icon" "catalog"}}Versions in the catalog</a></div></div></div>{{end}}
+<div class="where">
+  <section aria-labelledby="where-reg"><h3 id="where-reg">{{template "icon" "registry"}}Registry</h3><ul>
+    {{- range $i, $img := $t.Images}}<li><div class="line1"><span class="ver">{{$img.Version}}</span>{{if eq $i 0}}<span class="chip accent">newest</span>{{end}}</div>
+    <div class="line2">{{if not $img.Created.IsZero}}{{template "date" $img.Created}} · {{end}}{{template "short-digest" $img.Digest}}</div>{{if $img.Tags}}<div class="line2 mono">{{range $j, $tag := $img.Tags}}{{if $j}}, {{end}}{{$tag}}{{end}}</div>{{end}}</li>
+    {{- else}}<li class="none">Nothing published yet.</li>{{end}}
+    {{- if $t.UnidentifiedCount}}<li class="none">{{$t.UnidentifiedCount}} image{{if ne $t.UnidentifiedCount 1}}s{{end}} without Lupetto labels (not analyzed)</li>{{end}}
+    {{- if $t.ArtifactCount}}<li class="none">{{$t.ArtifactCount}} other artifact{{if ne $t.ArtifactCount 1}}s{{end}} (signatures, attestations; not images)</li>{{end}}
+  </ul></section>
+  <section aria-labelledby="where-dock"><h3 id="where-dock">{{template "icon" "local"}}Local Docker</h3><ul>
+    {{- $any := false}}{{range .Product.Versions}}{{range .LocalImages}}{{$any = true}}<li><div class="line1"><span class="ver">{{with .Identity}}{{.Version}}{{end}}</span></div>{{range $j, $tag := .Tags}}{{if eq $j 0}}<div class="line2 mono">{{$tag}}</div>{{end}}{{end}}<div class="line2">{{if not .Created.IsZero}}{{template "date" .Created}} · {{end}}image {{template "short-digest" .ID}}</div></li>{{end}}{{end}}
+    {{- if not $any}}<li class="none">{{if eq .Shell.DockerState "unavailable"}}Docker isn’t available.{{else}}No images in local Docker.{{end}}</li>{{end}}
+  </ul></section>
+  <section aria-labelledby="where-builds"><h3 id="where-builds">{{template "icon" "record"}}Recent {{$p.Package}} builds</h3><ul>
+    {{- range $i, $b := .Builds}}{{if lt $i 3}}<li><div class="line1">{{template "build-state" $b.State}}<a class="ver" href="{{$b.DetailURL}}">{{if $b.Version}}{{$b.Version}}{{else}}{{$b.ID}}{{end}}</a></div><div class="line2">{{if not $b.StartedAt.IsZero}}{{template "date" $b.StartedAt}} · {{end}}{{template "build-result" $b}}</div></li>{{end}}
+    {{- else}}<li class="none">No builds yet.</li>{{end}}
+  </ul></section>
+</div>
+{{if .Product.Versions}}<div class="card-head"><h3>Versions <span class="muted small">newest in Wolfi first, then registry and local images</span></h3></div>
+<ol class="timeline" aria-label="{{$p.Package}} {{$p.Selector}} versions">{{range .Product.Versions}}<li class="{{if or .Registry .LocalImages}}has{{end}}{{if .Latest}} latest{{end}}"><span class="node" aria-hidden="true"></span><span class="v">{{.Identity.Version}}</span><span class="marks">{{if .Latest}}<span class="mark latest">Latest</span>{{end}}{{if .Registry}}<span class="mark reg">{{template "icon" "registry"}}Registry</span>{{end}}{{if .LocalImages}}<span class="mark dock">{{template "icon" "local"}}Docker</span>{{end}}{{if and .Builds (not .Registry) (not .LocalImages)}}<span class="mark">{{template "icon" "record"}}Build</span>{{end}}</span></li>{{end}}</ol>{{end}}
+</section>
+</div>{{end}}
+
+{{/* Root: ImageView. */}}
+{{define "image-vulns"}}{{$p := .Product}}{{$t := .Product.Track}}<div class="stack">
+{{with $t.Newest}}<p class="muted small">Newest registry image <span class="ver">{{.Version}}</span> · {{template "short-digest" .Digest}}{{if not .Created.IsZero}} · built {{template "date" .Created}}{{end}}. Local images are not checked.</p>{{end}}
+{{if eq $t.State "error"}}<div class="banner error" role="alert">{{template "icon-lg" "error"}}<div class="body"><p><strong>Missing fixes could not be determined.</strong> An error prevented comparing this version; this is not a clean result.</p>{{with $t.Error}}<pre class="errtext">{{.}}</pre>{{end}}</div></div>
+{{else if not $t.Newest}}<div class="empty"><span class="art">{{template "icon-xl" "shield"}}</span><h2>No registry image to check</h2>
+<p>Lupetto compares the newest image in your registry with the Wolfi security feed. {{$p.Package}} {{$p.Selector}} hasn’t been published yet.</p>
+<div class="actions">{{template "image-action" .}}</div></div>
+{{else}}
+{{if .FixedByRebuilding}}<div class="banner warn">{{template "icon-lg" "rebuild"}}<div class="body"><p><strong>Fixes are available by rebuilding</strong> in {{len .FixedByRebuilding}} package{{if ne (len .FixedByRebuilding) 1}}s{{end}}. The fixed packages are already in the Wolfi index. A rebuild resolves dependencies again, so check the result.</p><div class="actions">{{template "image-action" .}}</div></div></div>
+{{else if and (not .NeedsAnotherVersion) (not $t.UnevaluatedFixes)}}<div class="banner ok">{{template "icon-lg" "ok"}}<div class="body"><p><strong>No missing fixes found.</strong> The image has every fix that Wolfi’s feed lists for its packages. <a href="#about-data">What this does and doesn’t cover</a></p></div></div>{{end}}
+{{template "sev-tiles" $p.Severity}}
+{{if .FixedByRebuilding}}<div class="group-title"><h2>Fixed by rebuilding</h2><span class="hint">{{len .FixedByRebuilding}} package{{if ne (len .FixedByRebuilding) 1}}s{{end}} · the newer packages are already in the Wolfi index</span></div>
+<div class="card">{{template "fix-table" .FixedByRebuilding}}</div>{{end}}
+{{if .NeedsAnotherVersion}}<div class="group-title"><h2>Needs another version</h2><span class="hint">{{len .NeedsAnotherVersion}} package fix{{if ne (len .NeedsAnotherVersion) 1}}es{{end}} · fixed only in a version outside {{$p.Package}} {{$p.Selector}}</span></div>
+<div class="banner warn">{{template "icon-lg" "error"}}<div class="body"><p><strong>Rebuilding {{$p.Package}} {{$p.Selector}} won’t fix these.</strong> Wolfi lists the fix only in a newer version than this track follows. If this version isn’t actually affected (for example, fixed by a backport), the feed can’t tell, so treat these as “check before you rely on this version”.</p>{{if gt (len .Siblings) 1}}<div class="actions">{{range .Siblings}}{{if not .Current}}<a class="btn small" href="{{.URL}}?tab=vulnerabilities">See {{$p.Package}} {{.Selector}}</a>{{end}}{{end}}</div>{{end}}</div></div>
+<div class="card">{{template "fix-table" .NeedsAnotherVersion}}</div>{{end}}
+{{end}}
+{{if $t.UnevaluatedFixes}}<div class="group-title"><h2>Couldn’t be evaluated</h2><span class="hint">feed entries for installed packages with a malformed fixed version or unsupported advisory IDs</span></div>
+<div class="banner warn">{{template "icon-lg" "error"}}<div class="body"><p><strong>These advisories may or may not apply.</strong> Lupetto can’t compare their fixed versions, so it doesn’t count them as fixed or missing.</p></div></div>
+<div class="card"><table class="data stackable"><thead><tr><th scope="col">Severity</th><th scope="col">Advisory</th><th scope="col">Package</th><th scope="col">Installed</th><th scope="col">Feed’s fixed version</th></tr></thead><tbody>{{range $t.UnevaluatedFixes}}<tr>
+<td data-label="Severity">{{template "sev-badge" .MaxSeverity}}</td>
+<td class="lead" data-label="Advisory">{{range $i, $id := .IDs}}{{if $i}}<br>{{end}}{{template "advisory-link" $id}}{{else}}<span class="muted">No IDs listed</span>{{end}}</td>
+<td data-label="Package"><span class="mono">{{.Name}}</span></td>
+<td data-label="Installed">{{if .InstalledVersion}}<span class="ver">{{.InstalledVersion}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+<td data-label="Feed’s fixed version"><span class="ver">{{.FixedVersion}}</span></td></tr>{{end}}</tbody></table></div>{{end}}
+{{with .Status.Document}}{{template "data-note" .Security}}{{end}}
+</div>{{end}}
+
+{{/* Root: []MissingFix. */}}
+{{define "fix-table"}}<table class="data stackable"><thead><tr><th scope="col">Severity</th><th scope="col">Advisory</th><th scope="col">Package</th><th scope="col">Installed → fixed</th><th scope="col">How to get it</th></tr></thead><tbody>
+{{- range $fix := .}}{{if $fix.Advisories}}{{range $a := $fix.Advisories}}<tr>
+<td data-label="Severity">{{template "sev-badge" $a.Severity}}{{with $a.SeveritySource}}<span class="aliases">{{.}}</span>{{end}}</td>
+<td class="lead" data-label="Advisory">{{template "advisory-link" $a.ID}}</td>
+<td data-label="Package"><span class="mono">{{$fix.Name}}</span></td>
+<td data-label="Installed → fixed"><span class="ver">{{$fix.InstalledVersion}}</span><span class="arrow" aria-hidden="true">→</span><span class="sr-only"> fixed in </span><span class="ver newer">{{$fix.FixedVersion}}</span>{{if and $fix.AvailableVersion (ne $fix.AvailableVersion $fix.FixedVersion)}}<span class="aliases">index has {{$fix.AvailableVersion}}</span>{{end}}</td>
+<td data-label="How to get it">{{if $fix.ReachableByTrack}}<span class="reach yes">{{template "icon" "rebuild"}}Any new build</span>{{else}}<span class="reach no">{{template "icon" "error"}}Needs another version</span>{{end}}</td></tr>{{end}}{{else}}{{range $id := $fix.IDs}}<tr>
+<td data-label="Severity">{{template "sev-badge" $fix.MaxSeverity}}</td>
+<td class="lead" data-label="Advisory">{{template "advisory-link" $id}}</td>
+<td data-label="Package"><span class="mono">{{$fix.Name}}</span></td>
+<td data-label="Installed → fixed"><span class="ver">{{$fix.InstalledVersion}}</span><span class="arrow" aria-hidden="true">→</span><span class="sr-only"> fixed in </span><span class="ver newer">{{$fix.FixedVersion}}</span>{{if and $fix.AvailableVersion (ne $fix.AvailableVersion $fix.FixedVersion)}}<span class="aliases">index has {{$fix.AvailableVersion}}</span>{{end}}</td>
+<td data-label="How to get it">{{if $fix.ReachableByTrack}}<span class="reach yes">{{template "icon" "rebuild"}}Any new build</span>{{else}}<span class="reach no">{{template "icon" "error"}}Needs another version</span>{{end}}</td></tr>{{else}}<tr>
+<td data-label="Severity">{{template "sev-badge" $fix.MaxSeverity}}</td>
+<td class="lead" data-label="Advisory"><span class="muted">No advisory IDs listed</span></td>
+<td data-label="Package"><span class="mono">{{$fix.Name}}</span></td>
+<td data-label="Installed → fixed"><span class="ver">{{$fix.InstalledVersion}}</span><span class="arrow" aria-hidden="true">→</span><span class="sr-only"> fixed in </span><span class="ver newer">{{$fix.FixedVersion}}</span>{{if and $fix.AvailableVersion (ne $fix.AvailableVersion $fix.FixedVersion)}}<span class="aliases">index has {{$fix.AvailableVersion}}</span>{{end}}</td>
+<td data-label="How to get it">{{if $fix.ReachableByTrack}}<span class="reach yes">{{template "icon" "rebuild"}}Any new build</span>{{else}}<span class="reach no">{{template "icon" "error"}}Needs another version</span>{{end}}</td></tr>{{end}}{{end}}{{end}}</tbody></table>{{end}}
+
+{{/* Root: ImageView. */}}
+{{define "image-packages"}}{{$p := .Product}}{{$t := .Product.Track}}{{$set := .Packages}}<div class="stack">
+{{if not .Versions}}<div class="empty"><span class="art">{{template "icon-xl" "package"}}</span><h2>No image to list packages for</h2>
+<p>{{$p.Package}} {{$p.Selector}} has no image in the registry or in local builds yet. Once built, its installed packages and SPDX SBOM appear here.</p>
+<div class="actions">{{template "image-action" .}}</div></div>
+{{else}}
+<nav class="segmented" aria-label="Image">{{range .Versions}}<a href="{{$p.DetailURL}}?tab=packages&amp;version={{.Key}}"{{if eq .Key $set.Key}} aria-current="page"{{end}}>{{if eq .Source "local"}}{{template "icon" "record"}}{{else}}{{template "icon" "registry"}}{{end}} {{.Label}}</a>{{end}}</nav>
+{{with $set.Error}}<div class="banner error" role="alert">{{template "icon-lg" "error"}}<div class="body"><p><strong>Packages couldn’t be read.</strong></p><pre class="errtext">{{.}}</pre></div></div>{{end}}
+{{if eq $set.Source "local"}}<div class="banner info">{{template "icon-lg" "seal"}}<div class="body"><p><strong>{{if $set.SPDXURL}}SPDX SBOM validated against the build’s lock.{{else}}No SPDX SBOM is available for this build.{{end}}</strong> From local build {{$set.Label}}.</p>{{if $set.SPDXURL}}<div class="actions"><a class="btn small" href="{{$set.SPDXURL}}" download>{{template "icon" "download"}}Download SPDX (JSON)</a></div>{{end}}</div></div>
+{{else if eq $set.Source "registry"}}<div class="banner info">{{template "icon-lg" "seal"}}<div class="body"><p><strong>Packages read from the registry image</strong> {{template "short-digest" $set.Key}}. SBOM download from registry attestations comes later; switch to a local build to download its SPDX file.</p></div></div>{{end}}
+{{if $set.Packages}}<p class="muted small">{{len $set.Packages}} packages{{if and (eq $set.Source "registry") $t.Newest}}{{if eq $set.Key $t.Newest.Digest}}{{if $t.Outdated}} · {{len $t.Outdated}} with newer versions in Wolfi{{end}}{{end}}{{end}}</p>
+{{$current := false}}{{if and (eq $set.Source "registry") $t.Newest}}{{if eq $set.Key $t.Newest.Digest}}{{$current = true}}{{end}}{{end}}
+<div class="card"><table class="data stackable"><thead><tr><th scope="col">Package</th><th scope="col">Installed</th>{{if $current}}<th scope="col">Newer in Wolfi</th><th scope="col">Missing fixes</th>{{end}}<th scope="col">Architecture</th></tr></thead>
+<tbody>{{range $pkg := $set.Packages}}<tr><td class="lead" data-label="Package"><span class="mono">{{$pkg.Name}}</span></td>
+<td data-label="Installed"><span class="ver">{{$pkg.Version}}</span></td>
+{{if $current}}<td data-label="Newer in Wolfi">{{$n := false}}{{range $t.Outdated}}{{if and (eq .Name $pkg.Name) (eq .Architecture $pkg.Architecture)}}{{$n = true}}<span class="ver newer">{{.LatestVersion}}</span>{{end}}{{end}}{{if not $n}}<span class="muted">—</span>{{end}}</td>
+<td data-label="Missing fixes">{{$f := false}}{{range $t.MissingFixes}}{{if and (eq .Name $pkg.Name) (eq .Architecture $pkg.Architecture)}}{{$f = true}}<a href="{{$p.DetailURL}}?tab=vulnerabilities">{{template "sev-badge" .MaxSeverity}}</a> {{end}}{{end}}{{if not $f}}<span class="muted">—</span>{{end}}</td>{{end}}
+<td data-label="Architecture"><span class="muted small">{{$pkg.Architecture}}</span></td></tr>{{end}}</tbody></table></div>
+{{else if not $set.Error}}<div class="empty small-empty"><p>No packages listed for this image.</p></div>{{end}}
+{{end}}
+</div>{{end}}
+
+{{/* Root: ImageView. */}}
+{{define "image-compare"}}{{$p := .Product}}{{$c := .Compare}}<div class="stack">
+{{if lt (len .Versions) 2}}<div class="empty"><span class="art">{{template "icon-xl" "compare"}}</span><h2>Nothing to compare yet</h2>
+<p>Compare needs two images of {{$p.Package}} {{$p.Selector}}, from the registry or local builds. {{if .Versions}}There is only one so far.{{else}}There are none yet.{{end}}</p></div>
+{{else}}
+<form class="card card-body compare-form" method="get" action="{{$p.DetailURL}}">
+  <input type="hidden" name="tab" value="compare">
+  <div class="field"><label for="cmp-a">From</label><select class="input" id="cmp-a" name="from">{{range .Versions}}<option value="{{.Key}}"{{if eq .Key $c.From}} selected{{end}}>{{.Label}}</option>{{end}}</select></div>
+  <span class="arrow" aria-hidden="true">{{template "icon" "compare"}}</span>
+  <div class="field"><label for="cmp-b">To</label><select class="input" id="cmp-b" name="to">{{range .Versions}}<option value="{{.Key}}"{{if eq .Key $c.To}} selected{{end}}>{{.Label}}</option>{{end}}</select></div>
+  <button class="btn" type="submit">Compare</button>
+</form>
+{{with $c.Error}}<div class="banner error" role="alert">{{template "icon-lg" "error"}}<div class="body"><p><strong>These images couldn’t be compared.</strong></p><pre class="errtext">{{.}}</pre></div></div>{{end}}
+{{if and $c.From $c.To (not $c.Error)}}
+<div class="section-head"><h2>{{$c.Before.Label}} → {{$c.After.Label}}</h2></div>
+<div class="diff-summary">
+  <span class="diff-pill"><span class="chg add">+</span><strong>{{$c.Added}}</strong> added</span>
+  <span class="diff-pill"><span class="chg rem">−</span><strong>{{$c.Removed}}</strong> removed</span>
+  <span class="diff-pill"><span class="chg up">↕</span><strong>{{$c.Changed}}</strong> changed</span>
+  <span class="diff-pill"><strong>{{$c.Unchanged}}</strong> unchanged</span>
+</div>
+{{if $c.Changes}}<div class="card"><table class="data stackable"><thead><tr><th scope="col">Package</th><th scope="col">Change</th><th scope="col"><span class="ver">{{$c.Before.Label}}</span></th><th scope="col"><span class="ver">{{$c.After.Label}}</span></th></tr></thead>
+<tbody>{{range $c.Changes}}<tr><td class="lead" data-label="Package"><span class="mono">{{.Name}}</span>{{with .Architecture}} <span class="muted small">{{.}}</span>{{end}}</td>
+<td data-label="Change">{{if eq .Kind "added"}}<span class="chg add">+ Added</span>{{else if eq .Kind "removed"}}<span class="chg rem">− Removed</span>{{else}}<span class="chg up">↕ Changed</span>{{end}}</td>
+<td data-label="From"><span class="ver">{{if .Before}}{{.Before}}{{else}}—{{end}}</span></td><td data-label="To"><span class="ver">{{if .After}}{{.After}}{{else}}—{{end}}</span></td></tr>{{end}}</tbody></table></div>
+<p class="muted small">Unchanged packages are hidden. Version changes are listed as they appear in each image; Lupetto does not rank them.</p>
+{{else}}<div class="empty small-empty"><p>The two images contain identical packages.</p></div>{{end}}
+{{else if not $c.Error}}<p class="muted small">Choose two images to see which packages were added, removed, or changed.</p>{{end}}
+{{end}}
+</div>{{end}}
+
+{{/* Root: ImageView. */}}
+{{define "image-builds"}}<p class="muted small">Builds of every {{.Product.Package}} version, newest first. History comes from build records in Lupetto’s cache, including builds run from the command line, plus builds started from this server since it started.</p>
+{{if .Builds}}<div class="stack">{{template "builds-table" .Builds}}</div>{{else}}<div class="empty"><span class="art">{{template "icon-xl" "builds"}}</span><h2>No builds yet</h2><p>Builds started here or with the lupetto CLI on this machine appear in this list.</p><div class="actions">{{template "image-action" .}}</div></div>{{end}}{{end}}

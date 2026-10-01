@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -40,6 +41,9 @@ func ValidateBuild(request BuildRequest) error {
 	if request.APKVersion != "" && (len(request.APKVersion) > 256 || !versionPattern.MatchString(request.APKVersion)) {
 		return errors.New("invalid apkVersion: expected an exact APK version ending in -r<digits>")
 	}
+	if request.Mode != "" && request.Mode != "local" && request.Mode != "publish" {
+		return errors.New("invalid build mode: choose local or publish")
+	}
 	return nil
 }
 func validPackage(name string) bool { return len(name) <= 256 && packagePattern.MatchString(name) }
@@ -50,7 +54,10 @@ func buildArgs(request BuildRequest) []string {
 	} else {
 		args = append(args, "--apk-version", request.APKVersion)
 	}
-	return append(args, "--no-load", "--json")
+	if request.Mode != "local" {
+		args = append(args, "--no-load")
+	}
+	return append(args, "--json")
 }
 
 type CLI struct {
@@ -71,12 +78,26 @@ func NewCLI(binary string) (*CLI, error) {
 // Lupetto main uses signal.NotifyContext for SIGINT and SIGTERM. SIGTERM lets
 // it retain a failure record and cancel child commands; WaitDelay bounds grace.
 func (c *CLI) execute(ctx context.Context, args []string, stderr io.Writer) ([]byte, int, error) {
+	return c.executeMode(ctx, args, stderr, false)
+}
+func (c *CLI) executeMode(ctx context.Context, args []string, stderr io.Writer, local bool) ([]byte, int, error) {
 	cmd := exec.CommandContext(ctx, c.binary, args...)
 	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
 	cmd.WaitDelay = c.grace
 	stdout := &limitedOutput{limit: maxDocumentBytes}
 	cmd.Stdout, cmd.Stderr = stdout, stderr
-	// Env is deliberately nil: inherit, never inspect, copy, or log it.
+	// Local-only builds explicitly exclude publication/signing settings while
+	// retaining Docker configuration and credentials. Never log environment.
+	if local {
+		for _, entry := range os.Environ() {
+			key, _, _ := strings.Cut(entry, "=")
+			switch key {
+			case "LUPETTO_REGISTRY", "LUPETTO_REPOSITORY", "LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP":
+				continue
+			}
+			cmd.Env = append(cmd.Env, entry)
+		}
+	}
 	err := cmd.Run()
 	exit := -1
 	if cmd.ProcessState != nil {
@@ -197,10 +218,12 @@ func (b *limitedOutput) Write(p []byte) (int, error) {
 }
 
 type logBuffer struct {
-	mu    sync.Mutex
-	data  []byte
-	limit int
-	total int64
+	mu        sync.Mutex
+	data      []byte
+	limit     int
+	total     int64
+	stage     int
+	stageTail string
 }
 
 func newLogBuffer(limit int) *logBuffer { return &logBuffer{limit: limit} }
@@ -209,6 +232,12 @@ func (b *logBuffer) Write(p []byte) (int, error) {
 	defer b.mu.Unlock()
 	n := len(p)
 	b.total += int64(n)
+	progress := b.stageTail + string(p)
+	b.stage = max(b.stage, livePhase(progress))
+	if len(progress) > 128 {
+		progress = progress[len(progress)-128:]
+	}
+	b.stageTail = progress
 	if n >= b.limit {
 		b.data = append(b.data[:0], p[n-b.limit:]...)
 	} else {
@@ -219,6 +248,11 @@ func (b *logBuffer) Write(p []byte) (int, error) {
 		b.data = append(b.data, p...)
 	}
 	return n, nil
+}
+func (b *logBuffer) stages(mode string) []BuildStage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return liveStagesAt(b.stage, mode)
 }
 func (b *logBuffer) chunk(offset int64) LogChunk {
 	b.mu.Lock()

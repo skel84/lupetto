@@ -112,6 +112,7 @@ type BuildRequest struct {
 	Package    string `json:"package"`
 	Selector   string `json:"selector"`
 	APKVersion string `json:"apkVersion"`
+	Mode       string `json:"mode,omitempty"`
 }
 type RecordSelection struct {
 	Package      string `json:"package"`
@@ -171,13 +172,15 @@ type BuildRecord struct {
 
 // BaseView is embedded in every page. Never turn CLI strings into template.HTML.
 type BaseView struct {
-	CSRFToken     string `json:"csrfToken"`
-	BuildsEnabled bool   `json:"buildsEnabled"`
+	CSRFToken     string    `json:"csrfToken"`
+	BuildsEnabled bool      `json:"buildsEnabled"`
+	Shell         ShellView `json:"shell"`
 }
 type StatusView struct {
 	Document   *StatusDocument `json:"document,omitempty"`
 	LastError  string          `json:"lastError,omitempty"`
 	Refreshing bool            `json:"refreshing"`
+	Empty      bool            `json:"empty"`
 }
 type TrackSummary struct {
 	Track               Track  `json:"track"`
@@ -200,6 +203,7 @@ type TrackView struct {
 type PackageItem struct {
 	DiscoveredPackage
 	DetailURL string `json:"detailURL"`
+	Tracked   bool   `json:"tracked"`
 }
 type PackagesView struct {
 	BaseView
@@ -227,17 +231,22 @@ type JobView struct {
 	Record          *BuildRecord `json:"record,omitempty"`
 	Error           string       `json:"error,omitempty"`
 	CancelRequested bool         `json:"cancelRequested"`
+	Progress        []BuildStage `json:"progress"`
 }
 type JobsView struct {
 	BaseView
-	Jobs         []JobView `json:"jobs"`
-	Running      bool      `json:"running"`
-	HistoryLimit int       `json:"historyLimit"`
+	Jobs         []JobView     `json:"jobs"`
+	Running      bool          `json:"running"`
+	HistoryLimit int           `json:"historyLimit"`
+	Items        []BuildItem   `json:"items"`
+	Inventory    InventoryView `json:"inventory"`
 }
 type JobDetailView struct {
 	BaseView
-	Job JobView  `json:"job"`
-	Log LogChunk `json:"log"`
+	Job    JobView   `json:"job"`
+	Log    LogChunk  `json:"log"`
+	Item   BuildItem `json:"item"`
+	HasLog bool      `json:"hasLog"`
 }
 
 // Offsets are absolute stderr byte positions, even after old bytes are dropped.

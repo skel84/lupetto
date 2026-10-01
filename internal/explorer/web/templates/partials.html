@@ -1,0 +1,109 @@
+{{/* Shared partials. Every define name is global across the template set. */}}
+
+{{/* Root: time.Time (non-zero). */}}
+{{define "time"}}<time datetime="{{.Format "2006-01-02T15:04:05Z07:00"}}">{{.Format "2006-01-02 15:04 MST"}}</time>{{end}}
+{{define "time-hm"}}<time datetime="{{.Format "2006-01-02T15:04:05Z07:00"}}">{{.Format "15:04 MST"}}</time>{{end}}
+
+{{/* Root: digest string. Short form with the full value in the title. */}}
+{{define "short-digest"}}{{if gt (len .) 19}}<span class="digest" title="{{.}}">{{slice . 0 19}}</span>{{else}}<span class="digest">{{.}}</span>{{end}}{{end}}
+{{define "short-hash"}}{{if gt (len .) 12}}<span class="mono" title="{{.}}">{{slice . 0 12}}</span>{{else}}<span class="mono">{{.}}</span>{{end}}{{end}}
+
+{{/* Root: severity level string (critical|high|medium|low|unknown). 4-segment meter + text. */}}
+{{define "sev-badge"}}{{$l := .}}{{if not (or (eq $l "critical") (eq $l "high") (eq $l "medium") (eq $l "low"))}}{{$l = "unknown"}}{{end}}<span class="sev sev-{{$l}}">{{template "icon" (printf "sev-%s" $l)}}{{if eq $l "critical"}}Critical{{else if eq $l "high"}}High{{else if eq $l "medium"}}Medium{{else if eq $l "low"}}Low{{else}}Unknown{{end}}</span>{{end}}
+
+{{/* Root: SeverityCounts. Badges only (caller wraps in .sevset); "None found" when empty. */}}
+{{define "sev-counts"}}{{if .Critical}}<span class="sev sev-critical" title="{{.Critical}} critical">{{template "icon" "sev-critical"}}{{.Critical}}<span aria-hidden="true">&nbsp;Crit</span><span class="sr-only"> critical</span></span>{{end}}
+{{- if .High}}<span class="sev sev-high" title="{{.High}} high">{{template "icon" "sev-high"}}{{.High}}<span aria-hidden="true">&nbsp;High</span><span class="sr-only"> high</span></span>{{end}}
+{{- if .Medium}}<span class="sev sev-medium" title="{{.Medium}} medium">{{template "icon" "sev-medium"}}{{.Medium}}<span aria-hidden="true">&nbsp;Med</span><span class="sr-only"> medium</span></span>{{end}}
+{{- if .Low}}<span class="sev sev-low" title="{{.Low}} low">{{template "icon" "sev-low"}}{{.Low}}<span aria-hidden="true">&nbsp;Low</span><span class="sr-only"> low</span></span>{{end}}
+{{- if .Unknown}}<span class="sev sev-unknown" title="{{.Unknown}} unknown severity">{{template "icon" "sev-unknown"}}{{.Unknown}}<span aria-hidden="true">&nbsp;Unk</span><span class="sr-only"> unknown severity</span></span>{{end}}
+{{- if not (or .Critical .High .Medium .Low .Unknown)}}<span class="none">None found</span>{{end}}{{end}}
+
+{{/* Root: SeverityCounts. Five tiles for the vulnerabilities tab. */}}
+{{define "sev-tiles"}}<div class="sev-tiles" role="group" aria-label="Missing fixes by severity">
+<div class="sev-tile{{if not .Critical}} zero{{end}}"><span class="n">{{.Critical}}</span>{{template "sev-badge" "critical"}}</div>
+<div class="sev-tile{{if not .High}} zero{{end}}"><span class="n">{{.High}}</span>{{template "sev-badge" "high"}}</div>
+<div class="sev-tile{{if not .Medium}} zero{{end}}"><span class="n">{{.Medium}}</span>{{template "sev-badge" "medium"}}</div>
+<div class="sev-tile{{if not .Low}} zero{{end}}"><span class="n">{{.Low}}</span>{{template "sev-badge" "low"}}</div>
+<div class="sev-tile{{if not .Unknown}} zero{{end}}"><span class="n">{{.Unknown}}</span>{{template "sev-badge" "unknown"}}</div>
+</div>{{end}}
+
+{{/* Root: advisory ID string. Known prefixes link to their public databases. */}}
+{{define "advisory-link"}}{{if and (gt (len .) 4) (eq (slice . 0 4) "CVE-")}}<a class="vuln-id" href="https://nvd.nist.gov/vuln/detail/{{.}}" rel="noopener noreferrer">{{.}}</a>{{else if and (gt (len .) 5) (eq (slice . 0 5) "GHSA-")}}<a class="vuln-id" href="https://github.com/advisories/{{.}}" rel="noopener noreferrer">{{.}}</a>{{else if and (gt (len .) 3) (eq (slice . 0 3) "GO-")}}<a class="vuln-id" href="https://pkg.go.dev/vuln/{{.}}" rel="noopener noreferrer">{{.}}</a>{{else}}<span class="vuln-id">{{.}}</span>{{end}}{{end}}
+
+{{/* Root: BuildItem.State (Explorer job state or history record status). */}}
+{{define "build-state"}}{{if eq . "running"}}<span class="verdict v-running">{{template "icon" "running"}}Running</span>{{else if eq . "succeeded"}}<span class="verdict v-ok">{{template "icon" "ok"}}Succeeded</span>{{else if eq . "failed"}}<span class="verdict v-error">{{template "icon" "fail"}}Failed</span>{{else if eq . "canceled"}}<span class="verdict v-update">{{template "icon" "stop"}}Canceled</span>{{else if eq . "unsupported"}}<span class="verdict v-muted">{{template "icon" "skip"}}Unsupported record</span>{{else if eq . "invalid"}}<span class="verdict v-error">{{template "icon" "error"}}Invalid record</span>{{else if eq . "unreadable"}}<span class="verdict v-error">{{template "icon" "error"}}Unreadable record</span>{{else}}<span class="verdict v-muted">{{template "icon" "skip"}}{{.}}</span>{{end}}{{end}}
+
+{{/* Root: StageOutcome / BuildStage status string -> CSS class. */}}
+{{define "stage-class"}}{{if or (eq . "completed") (eq . "loaded") (eq . "published") (eq . "signed") (eq . "attested") (eq . "ok")}}ok{{else if eq . "failed"}}failed{{else if eq . "running"}}running{{else if eq . "skipped"}}skipped{{else if eq . "not-attempted"}}notattempted{{else if or (eq . "pending") (eq . "")}}pending{{else}}unknown{{end}}{{end}}
+{{define "stage-icon"}}{{if or (eq . "completed") (eq . "loaded") (eq . "published") (eq . "signed") (eq . "attested") (eq . "ok")}}check{{else if eq . "failed"}}fail{{else if eq . "running"}}running{{else if or (eq . "skipped") (eq . "not-attempted")}}skip{{else}}pending{{end}}{{end}}
+{{define "stage-text"}}{{if eq . "completed"}}Done{{else if eq . "loaded"}}Loaded{{else if eq . "published"}}Published{{else if eq . "signed"}}Signed{{else if eq . "attested"}}Attested{{else if eq . "ok"}}Done{{else if eq . "failed"}}Failed{{else if eq . "running"}}In progress{{else if eq . "skipped"}}Skipped · not requested{{else if eq . "not-attempted"}}Not attempted · earlier stage failed{{else if or (eq . "pending") (eq . "")}}Waiting{{else}}{{.}}{{end}}{{end}}
+{{define "stage-name"}}{{if eq . "resolve"}}Resolve{{else if eq . "build"}}Build{{else if eq . "validate"}}Validate SBOM{{else if eq . "load"}}Load into Docker{{else if eq . "publish" "publication"}}Publish{{else if eq . "sign" "signing"}}Sign{{else if eq . "attest" "attestation"}}Attest SBOM{{else}}{{.}}{{end}}{{end}}
+
+{{/* Root: []BuildStage. 7-stage progress. */}}
+{{define "stage-list"}}<ol class="stages" aria-label="Build stages" data-stages>{{range .}}<li class="stage {{template "stage-class" .Status}}" data-stage="{{.Name}}"><span class="name">{{if eq .Status "completed" "loaded" "published" "signed" "attested" "ok"}}{{template "icon" "check"}}{{else if eq .Status "failed"}}{{template "icon" "fail"}}{{else if eq .Status "running"}}{{template "icon" "running"}}{{else if eq .Status "skipped" "not-attempted"}}{{template "icon" "skip"}}{{else}}{{template "icon" "pending"}}{{end}}{{template "stage-name" .Name}}</span>
+<span class="state" data-stage-state>{{template "stage-text" .Status}}</span></li>{{end}}</ol>{{end}}
+
+{{/* Root: SecuritySource (may be zero). The single explained security-data note. */}}
+{{define "data-note"}}<details class="datanote" id="about-data">
+  <summary>{{template "icon" "info"}}<span><strong>About this security data.</strong> Fixes come from Wolfi’s public security feed. It isn’t a full vulnerability scan.</span><span class="more"><span class="open-l">What this means</span><span class="close-l">Hide</span></span></summary>
+  <div class="note-body">
+    <ul>
+      <li><strong>Fixed issues only.</strong> Lupetto lists advisories that Wolfi has already fixed in a newer package. Issues without a fix yet are not listed, so “none found” does not mean “no vulnerabilities”.{{if not .FixedOnly}} (The current feed did not report this limitation, but Lupetto treats it as fixed-only.){{end}}</li>
+      <li><strong>Wolfi packages only.</strong> Software added outside Wolfi packages is not covered.</li>
+      <li><strong>{{if .Unsigned}}The feed is not signed.{{else}}Feed signature.{{end}}</strong> It is fetched over HTTPS{{if .URL}} from <span class="mono">{{.URL}}</span>{{end}}{{if .SHA256}} (SHA-256 <span class="mono">{{.SHA256}}</span>){{end}}, unlike the package index, whose signature is verified.</li>
+      <li><strong>Severity</strong> comes from NVD (CVSS) or GitHub/OSV advisories. Advisories without a score show <em>Unknown</em>; severity never changes a verdict.{{with .Severity}}{{if .PendingCount}} {{.PendingCount}} advisory {{if eq .PendingCount 1}}ID is{{else}}IDs are{{end}} still waiting to be scored.{{end}}{{if .FetchFailureCount}} {{.FetchFailureCount}} severity {{if eq .FetchFailureCount 1}}lookup{{else}}lookups{{end}} failed and will be retried.{{end}}{{end}}</li>
+      {{if gt .UnevaluatedFixCount 0}}<li><strong>{{.UnevaluatedFixCount}} feed {{if eq .UnevaluatedFixCount 1}}entry{{else}}entries{{end}} could not be evaluated</strong> because of a malformed fixed version or unsupported advisory IDs{{if .UnevaluatedFixes}}: {{range $i, $u := .UnevaluatedFixes}}{{if $i}}, {{end}}<span class="mono">{{$u.Name}} {{$u.FixedVersion}}</span>{{end}}{{end}}. Images containing these packages are flagged on their vulnerabilities tab.</li>{{end}}
+    </ul>
+  </div>
+</details>{{end}}
+
+{{/* Root: time.Time (non-zero). Date only, for dense cells. */}}
+{{define "date"}}<time datetime="{{.Format "2006-01-02T15:04:05Z07:00"}}" title="{{.Format "2006-01-02 15:04 MST"}}">{{.Format "2006-01-02"}}</time>{{end}}
+
+{{/* Root: ProductRow.VerdictKind -> icon. */}}
+{{define "verdict-icon"}}{{if eq . "ok"}}{{template "icon" "ok"}}{{else if eq . "update"}}{{template "icon" "update"}}{{else if eq . "rebuild"}}{{template "icon" "rebuild"}}{{else if eq . "notbuilt"}}{{template "icon" "notbuilt"}}{{else if eq . "local"}}{{template "icon" "upload"}}{{else if eq . "error"}}{{template "icon" "error"}}{{else}}{{template "icon" "skip"}}{{end}}{{end}}
+{{define "verdict-class"}}{{if eq . "ok"}}v-ok{{else if eq . "update"}}v-update{{else if eq . "rebuild"}}v-rebuild{{else if eq . "notbuilt"}}v-notbuilt{{else if eq . "local"}}v-local{{else if eq . "error"}}v-error{{else}}v-muted{{end}}{{end}}
+{{define "action-icon"}}{{if eq . "rebuild"}}{{template "icon" "rebuild"}}{{else if eq . "local"}}{{template "icon" "upload"}}{{else}}{{template "icon" "builds"}}{{end}}{{end}}
+
+{{/* Root: ProductRow. Verdict chip, sub-line and track error. */}}
+{{define "verdict"}}<span class="verdict {{template "verdict-class" .VerdictKind}}">{{template "verdict-icon" .VerdictKind}}{{.Verdict}}</span>{{with .VerdictDetail}}<span class="verdict-sub">{{.}}</span>{{end}}{{with .Track.Error}}<span class="verdict-sub warn wrap-any">{{.}}</span>{{end}}{{end}}
+
+{{/* Root: Track. Newest registry image. */}}
+{{define "where-registry"}}{{with .Newest}}<span class="where-line">{{template "icon" "registry"}}<span class="ver">{{.Version}}</span></span><span class="verdict-sub">{{if not .Created.IsZero}}{{template "date" .Created}}{{end}}{{if gt (len $.Images) 1}} · {{len $.Images}} images{{end}}</span>{{else}}<span class="where-line">{{if eq .State "error"}}<span class="none">—</span>{{else}}{{template "icon" "registry"}}<span class="none">Not in registry</span>{{end}}</span>{{end}}{{end}}
+
+{{/* Root: ProductRow. Newest local Docker image, else newest local build record. */}}
+{{define "where-local"}}{{$done := false}}{{range .Versions}}{{if and (not $done) .LocalImages}}{{$done = true}}<span class="where-line">{{template "icon" "local"}}<span class="ver">{{.Identity.Version}}</span></span><span class="verdict-sub">in Docker{{with index .LocalImages 0}}{{if not .Created.IsZero}} · {{template "date" .Created}}{{end}}{{end}}</span>{{end}}{{end}}
+{{- if not $done}}{{range .Versions}}{{if and (not $done) .Builds}}{{$done = true}}<span class="where-line">{{template "icon" "record"}}<span class="ver">{{.Identity.Version}}</span></span><span class="verdict-sub">build record{{with index .Builds 0}} · {{template "date" .StartedAt}}{{end}}</span>{{end}}{{end}}{{end}}
+{{- if not $done}}<span class="where-line">{{template "icon" "local"}}<span class="none">None</span></span>{{end}}{{end}}
+
+{{/* Root: any page model with CSRFToken. "Check now" status refresh. */}}
+{{define "refresh-form"}}<form class="inline" method="post" action="/status/refresh"><input type="hidden" name="csrfToken" value="{{.CSRFToken}}"><button class="btn small" type="submit">{{template "icon" "rebuild"}}Check again</button></form>{{end}}
+
+{{/* Root: CSRF token string. Track-a-product dialog (the opener link goes to /products/track without JS). */}}
+{{define "track-dialog"}}<dialog id="track-dialog" aria-labelledby="track-title-d">
+  <form method="post" action="/products/add">
+  <input type="hidden" name="csrfToken" value="{{.}}">
+  <div class="sheet-head dialog-head">
+    <div><h2 id="track-title-d">Track a product</h2><p class="muted small">Lupetto will watch these versions and tell you when to build, update, or rebuild.</p></div>
+    <a class="iconbtn" href="/" data-closes aria-label="Close">{{template "icon" "close"}}</a>
+  </div>
+  <div class="sheet-body">
+    <div class="field">
+      <label for="track-package-d">Wolfi package</label>
+      <input class="input mono" id="track-package-d" name="package" required maxlength="256" autocomplete="off" placeholder="e.g. postgresql">
+      <span class="help">A package name or a provider, as listed in the <a href="/catalog">catalog</a>.</span>
+    </div>
+    <div class="field">
+      <label for="track-selector-d">Versions to track</label>
+      <input class="input mono" id="track-selector-d" name="selector" required maxlength="256" autocomplete="off" placeholder="e.g. 17 16" inputmode="decimal">
+      <span class="help">One or more versions separated by spaces. Lupetto always builds the newest release matching each: “17” follows every 17.x, “17.10” stays on 17.10.x.</span>
+    </div>
+  </div>
+  <div class="sheet-foot">
+    <span class="left">Saved to the products file on the server.</span>
+    <a class="btn" href="/" data-closes>Cancel</a>
+    <button class="btn primary" type="submit">{{template "icon" "track"}}Track</button>
+  </div>
+  </form>
+</dialog>{{end}}

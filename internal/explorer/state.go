@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,7 @@ func (c *statusCache) finish(document *StatusDocument, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.view.Refreshing = false
+	c.view.Empty = false
 	if err != nil {
 		c.view.LastError = err.Error()
 		return
@@ -100,6 +102,9 @@ func (r *jobRunner) start(request BuildRequest) (JobView, error) {
 	if err := ValidateBuild(request); err != nil {
 		return JobView{}, err
 	}
+	if request.Mode == "publish" && (os.Getenv("LUPETTO_REGISTRY") == "" || os.Getenv("LUPETTO_REPOSITORY") == "") {
+		return JobView{}, errors.New("Build & publish requires configured LUPETTO_REGISTRY and LUPETTO_REPOSITORY; choose a local build instead")
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed || r.ctx.Err() != nil {
@@ -123,7 +128,7 @@ func (r *jobRunner) start(request BuildRequest) (JobView, error) {
 func (r *jobRunner) run(ctx context.Context, j *job) {
 	defer r.wg.Done()
 	defer j.cancel()
-	data, exit, err := r.cli.execute(ctx, buildArgs(j.view.Request), j.log)
+	data, exit, err := r.cli.executeMode(ctx, buildArgs(j.view.Request), j.log, j.view.Request.Mode == "local")
 	var record *BuildRecord
 	var parseErr error
 	if len(strings.TrimSpace(string(data))) != 0 {
@@ -169,7 +174,11 @@ func (r *jobRunner) list() ([]JobView, bool) {
 	defer r.mu.Unlock()
 	views := make([]JobView, 0, len(r.jobs))
 	for i := len(r.jobs) - 1; i >= 0; i-- {
-		views = append(views, r.jobs[i].view)
+		view := r.jobs[i].view
+		if view.State == "running" {
+			view.Progress = r.jobs[i].log.stages(view.Request.Mode)
+		}
+		views = append(views, view)
 	}
 	return views, r.active != ""
 }
@@ -190,7 +199,11 @@ func (r *jobRunner) detail(id string, offset int64) (JobView, LogChunk, bool) {
 	}
 	chunk := j.log.chunk(offset)
 	chunk.Done = j.view.State != "running"
-	return j.view, chunk, true
+	view := j.view
+	if view.State == "running" {
+		view.Progress = j.log.stages(view.Request.Mode)
+	}
+	return view, chunk, true
 }
 func (r *jobRunner) cancelJob(id string) (bool, error) {
 	r.mu.Lock()

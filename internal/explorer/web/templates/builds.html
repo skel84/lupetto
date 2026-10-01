@@ -1,0 +1,78 @@
+{{/* Builds list and build detail. */}}
+
+{{/* Root: []BuildItem. */}}
+{{define "builds-table"}}<div class="card"><table class="data stackable"><thead><tr><th scope="col">Build</th><th scope="col">Outcome</th><th scope="col">Result</th><th scope="col">Started</th><th scope="col">Source</th></tr></thead>
+<tbody>{{range .}}<tr><td class="lead" data-label="Build"><a href="{{.DetailURL}}"><strong>{{if .Package}}{{.Package}}{{else}}Unknown package{{end}}{{with .Version}} {{.}}{{end}}</strong></a><span class="build-row-ref">{{.ID}}</span></td>
+<td data-label="Outcome">{{template "build-state" .State}}</td>
+<td data-label="Result">{{template "build-result" .}}</td>
+<td data-label="Started">{{if .StartedAt.IsZero}}<span class="muted">—</span>{{else}}{{template "time" .StartedAt}}{{end}}</td>
+<td data-label="Source">{{if .Live}}This server{{else}}Build record{{end}}</td></tr>{{end}}</tbody></table></div>{{end}}
+
+{{/* Root: BuildItem. Short plain-language result from the per-stage statuses. */}}
+{{define "build-result"}}{{if eq .State "running"}}in progress{{else if or (eq .State "unsupported") (eq .State "invalid") (eq .State "unreadable")}}<span class="wrap-any">{{if .Error}}{{.Error}}{{else}}record can’t be read{{end}}</span>{{else}}{{$failed := ""}}{{range .Stages}}{{if and (eq .Status "failed") (not $failed)}}{{$failed = .Name}}{{end}}{{end}}{{$sep := false}}{{range .Stages}}{{if or (eq .Status "loaded") (eq .Status "published") (eq .Status "signed") (eq .Status "attested")}}{{if $sep}}, {{end}}{{$sep = true}}{{if eq .Status "loaded"}}loaded into Docker{{else}}{{.Status}}{{end}}{{end}}{{end}}{{if $failed}}{{if $sep}}; {{end}}failed at {{template "stage-name" $failed}}{{else if eq .State "canceled"}}{{if $sep}}; {{end}}canceled{{else if not $sep}}{{if eq .State "succeeded"}}built{{else if eq .State "failed"}}failed{{else}}—{{end}}{{end}}{{end}}{{end}}
+
+{{/* Builds list. Root: JobsView. */}}
+{{define "jobs"}}{{template "head" .}}<title>Builds · Lupetto</title>
+{{template "rail-builds" .}}
+{{with .Inventory.Error}}<div class="banner warn">{{template "icon-lg" "error"}}<div class="body"><p><strong>Build records couldn’t be read.</strong> History below may be incomplete.</p><pre class="errtext">{{.}}</pre></div></div>{{end}}
+{{if not .BuildsEnabled}}<div class="banner info">{{template "icon-lg" "lock"}}<div class="body"><p><strong>Read-only server.</strong> Builds are disabled (the server was started without <span class="mono">--enable-builds</span>). Build history is still shown.</p></div></div>{{end}}
+<div class="page-head"><div class="titles"><h1>Builds</h1><p class="lede">One build runs at a time. History comes from build records in Lupetto’s cache, so it includes builds run from the command line.</p></div></div>
+<div class="stack">
+{{with .Shell.RunningBuild}}<section class="card" aria-labelledby="now"><div class="card-head"><h2 id="now">Running now</h2></div>
+<div class="card-body stack" data-live-url="{{.DetailURL}}?format=json">
+  <div class="outcome"><a href="{{.DetailURL}}"><strong>{{.Package}}{{with .Version}} {{.}}{{end}}</strong></a>{{template "build-state" .State}}{{if not .StartedAt.IsZero}}<span class="muted small">started {{template "time" .StartedAt}}</span>{{end}}
+  <span class="spacer"></span><a class="btn small" href="{{.DetailURL}}">View</a>{{if .Live}}<form class="inline" method="post" action="{{.DetailURL}}/cancel"><input type="hidden" name="csrfToken" value="{{$.CSRFToken}}"><button class="btn small danger" type="submit">{{template "icon" "stop"}}Cancel</button></form>{{end}}</div>
+  {{template "stage-list" .Stages}}
+</div></section>{{end}}
+<div class="section-head"><h2>History</h2><span class="hint">{{len .Items}} build{{if ne (len .Items) 1}}s{{end}} · newest first · builds started here are kept in memory for the last {{.HistoryLimit}} jobs; build records persist</span></div>
+{{if .Items}}{{template "builds-table" .Items}}{{else}}<div class="empty"><span class="art">{{template "icon-xl" "builds"}}</span><h2>No builds yet</h2><p>Builds started here or with the lupetto CLI on this machine appear in this list.</p><div class="actions"><a class="btn" href="/">{{template "icon" "images"}}Go to Images</a></div></div>{{end}}
+</div>
+{{template "page-end" .}}
+{{template "doc-end"}}{{end}}
+
+{{/* Build detail. Root: JobDetailView. */}}
+{{define "job"}}{{template "head" .}}<title>Build {{.Item.ID}} · Lupetto</title>
+{{template "rail-builds" .}}
+{{- $i := .Item}}{{$r := .Item.Record}}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/builds">Builds</a><span aria-hidden="true">/</span><span aria-current="page">{{$i.ID}}</span></nav>
+{{if eq $i.State "running"}}<div class="banner info" role="status">{{template "icon-lg" "running"}}<div class="body"><p><strong>{{if .Job.CancelRequested}}Cancellation requested.{{else}}Building.{{end}}</strong> Stages update as the CLI reports them. <span data-live-status>This page updates automatically; without JavaScript, reload it.</span></p></div></div>
+{{else if eq $i.State "succeeded"}}<div class="banner ok">{{template "icon-lg" "ok"}}<div class="body"><p><strong>Succeeded:</strong> {{template "build-result" $i}}.</p></div></div>
+{{else if eq $i.State "canceled"}}<div class="banner warn" role="alert">{{template "icon-lg" "stop"}}<div class="body"><p><strong>Build canceled.</strong> External side effects may remain (for example a pushed tag); no rollback was attempted.</p></div></div>
+{{else if eq $i.State "failed"}}<div class="banner error" role="alert">{{template "icon-lg" "fail"}}<div class="body"><p><strong>Failed{{with $r}}{{with .Failure}}{{with .Stage}} at {{template "stage-name" .}}{{end}}{{end}}{{end}}.</strong> Partial results are listed stage by stage below; the build as a whole did not succeed.</p>
+{{with $r}}{{with .Failure}}{{with .Error}}<pre class="errtext">{{.}}</pre>{{end}}{{if .SideEffectsPossible}}<p class="small"><strong>Side effects may remain.</strong> Something may already have been loaded, pushed, signed or attested; no rollback was attempted.</p>{{end}}{{end}}{{end}}</div></div>
+{{else}}<div class="banner warn" role="alert">{{template "icon-lg" "error"}}<div class="body"><p><strong>This build record can’t be fully read.</strong></p></div></div>{{end}}
+{{with $i.Error}}<div class="banner warn">{{template "icon-lg" "error"}}<div class="body"><p><strong>Explorer diagnostic</strong></p><pre class="errtext">{{.}}</pre></div></div>{{end}}
+<div class="page-head">
+  <div class="titles"><div class="title-row"><span class="pmark" aria-hidden="true">{{printf "%.2s" $i.Package}}</span><h1>{{if $i.Package}}{{$i.Package}}{{else}}Build{{end}}{{with $i.Version}} <span class="mono">{{.}}</span>{{end}}</h1>{{template "build-state" $i.State}}</div>
+  <p class="lede">{{if not $i.StartedAt.IsZero}}Started {{template "time" $i.StartedAt}}{{end}}{{if $i.Live}} from this server{{with .Job.EndedAt}} · ended {{template "time" .}}{{end}}{{with .Job.ExitCode}} · exit code {{.}}{{end}}{{else}} · from a build record{{end}}</p></div>
+  <div class="actions">{{if and (eq $i.State "running") $i.Live (not .Job.CancelRequested)}}<form class="inline" method="post" action="{{$i.DetailURL}}/cancel"><input type="hidden" name="csrfToken" value="{{.CSRFToken}}"><button class="btn danger" type="submit">{{template "icon" "stop"}}Cancel build</button></form>{{end}}</div>
+</div>
+<div class="stack">
+<div class="card"><div class="card-body"{{if eq $i.State "running"}} data-live-url="{{$i.DetailURL}}?format=json"{{end}}>{{template "stage-list" $i.Stages}}</div></div>
+<div class="grid-2">
+  <section class="card" aria-labelledby="outputs"><div class="card-body"><h2 id="outputs">Outputs</h2><hr class="sep"><dl class="kv">
+  {{- $any := false}}{{with $r}}{{with .Stages.Publication}}{{if or .Digest .ImmutableReference .Reference}}{{$any = true}}<dt>Registry</dt><dd>{{with .Reference}}<span class="mono">{{.}}</span><br>{{end}}{{with .ImmutableReference}}<span class="digest">{{.}}</span>{{else}}{{with .Digest}}<span class="digest">{{.}}</span>{{end}}{{end}}{{if and .Digest (not .Verified)}}<br><span class="reach no">{{template "icon" "error"}}Digest not verified — not a confirmed publication</span>{{end}}</dd>{{end}}{{end}}
+  {{- with .Stages.Load}}{{if and (eq .Status "loaded") (or .ImageReference .DockerImageID)}}{{$any = true}}<dt>Docker</dt><dd>{{with .ImageReference}}<span class="mono">{{.}}</span>{{end}}{{with .DockerImageID}}<br><span class="digest">{{.}}</span>{{end}}</dd>{{end}}{{end}}
+  {{- $any = true}}<dt>Signature</dt><dd>{{template "stage-text" .Stages.Signing.Status}}</dd><dt>SBOM attestation</dt><dd>{{template "stage-text" .Stages.Attestation.Status}}</dd>{{end}}
+  {{- with $i.SPDXURL}}{{$any = true}}<dt>SBOM</dt><dd><a href="{{.}}" download>{{template "icon" "download"}} SPDX JSON</a>{{with $r}}{{with .Evidence}}{{if .SPDXValidated}} · validated against lock{{else}} · <span class="reach no">not validated</span>{{end}}{{end}}{{end}}</dd>{{end}}
+  {{- if not $any}}<dt>Outputs</dt><dd class="muted">{{if eq $i.State "running"}}None yet{{else}}None recorded{{end}}</dd>{{end}}
+  </dl></div></section>
+  <section class="card" aria-labelledby="inputs"><div class="card-body"><h2 id="inputs">Inputs</h2><hr class="sep"><dl class="kv">
+    {{- if $r}}<dt>Requested</dt><dd><span class="mono">{{$r.Request.Package}} {{if $r.Request.APKVersion}}{{$r.Request.APKVersion}} (exact){{else}}{{$r.Request.Selector}} (newest match){{end}}</span></dd>
+    <dt>Publish / sign</dt><dd>{{if $r.Request.Publish}}publish requested{{else}}no publication{{end}} · {{if $r.Request.Sign}}signing requested{{else}}no signing{{end}}{{if $r.Request.Load}} · Docker load requested{{end}}</dd>
+    {{- else if $i.Live}}<dt>Requested</dt><dd><span class="mono">{{.Job.Request.Package}} {{if .Job.Request.APKVersion}}{{.Job.Request.APKVersion}} (exact){{else}}{{.Job.Request.Selector}} (newest match){{end}}</span></dd>{{end}}
+    {{- with $r}}{{with .Selection}}<dt>Selected</dt><dd><span class="mono">{{.Package}} {{.Version}}</span> · {{.Architecture}}</dd><dt>Wolfi index</dt><dd><span class="mono">{{.IndexSHA256}}</span> · signature verified</dd>{{end}}
+    {{- with .Evidence}}{{with .ApkoVersion}}<dt>apko</dt><dd><span class="mono">{{.}}</span></dd>{{end}}{{with .LockPath}}<dt>Lock</dt><dd><span class="mono">{{.}}</span></dd>{{end}}{{end}}
+    {{- with .Workspace}}<dt>Workspace</dt><dd><span class="mono">{{.}}</span></dd>{{end}}{{end}}
+    {{- if and (not $r) (not $i.Live)}}<dt>Record</dt><dd class="muted">No readable record</dd>{{end}}
+  </dl></div></section>
+</div>
+{{if .HasLog}}<details class="raw"{{if eq $i.State "failed"}} open{{end}}><summary>{{template "icon" "terminal"}}Raw log</summary>
+{{if .Log.Truncated}}<p class="muted small">Earlier output was discarded; only the most recent 1 MiB is kept.</p>{{end}}
+<pre class="log" id="job-log" tabindex="0" aria-label="Build log"{{if not .Log.Done}} data-log-url="{{$i.DetailURL}}/logs" data-log-offset="{{.Log.NextOffset}}"{{end}}>{{.Log.Text}}</pre>
+<p class="muted small" id="log-status" aria-live="polite">{{if not .Log.Done}}Live{{end}}</p>
+<p class="muted small">The log is the CLI’s progress output and tool diagnostics. The outcome above comes from the build record, not from this text.</p></details>
+{{else}}<p class="muted small">{{template "icon" "terminal"}} The raw log is kept only for builds started from this server while it runs.</p>{{end}}
+</div>
+{{template "page-end" .}}
+{{template "doc-end"}}{{end}}

@@ -22,18 +22,23 @@ import (
 )
 
 type fakeConfig struct {
-	Status        string
-	Discover      string
-	Build         string
-	StatusExit    int
-	BuildExit     int
-	StatusDelay   int
-	DiscoverDelay int
-	BuildDelay    int
-	LogBytes      int
-	OutputBytes   int
-	IgnoreTERM    bool
-	Calls         string
+	Status           string
+	Discover         string
+	Build            string
+	Images           string
+	Inspect          string
+	Products         string
+	ProductsExit     int
+	BuildEnvironment string
+	StatusExit       int
+	BuildExit        int
+	StatusDelay      int
+	DiscoverDelay    int
+	BuildDelay       int
+	LogBytes         int
+	OutputBytes      int
+	IgnoreTERM       bool
+	Calls            string
 }
 
 const goodStatus = `{"kind":"status","version":2,"computedAt":"2026-10-01T00:00:00Z","security":{"severity":{"idCount":1,"resolvedCount":1,"sourceCounts":{"nvd-cvss-v3.1":1}}},"tracks":[{"package":"cmd:curl","selector":"1","state":"current","outdated":[{"name":"dep"}],"missingFixes":[{"reachableByTrack":true,"maxSeverity":"high","advisories":[{"id":"CVE-2026-1234","severity":"high","severitySource":"nvd-cvss-v3.1"}]},{"reachableByTrack":false}],"unevaluatedFixes":[{"name":"dep","fixedVersion":"invalid"}]}]}`
@@ -110,7 +115,27 @@ func TestCLIHelper(t *testing.T) {
 			os.Exit(1)
 		}
 		_, _ = fmt.Fprint(os.Stdout, config.Discover)
+	case "images":
+		_, _ = fmt.Fprint(os.Stdout, config.Images)
+	case "inspect":
+		_, _ = fmt.Fprint(os.Stdout, config.Inspect)
+	case "products":
+		if config.ProductsExit != 0 {
+			_, _ = fmt.Fprint(os.Stderr, "products file is read-only")
+			os.Exit(config.ProductsExit)
+		}
+		_, _ = fmt.Fprint(os.Stdout, config.Products)
 	case "build":
+		if config.BuildEnvironment != "" {
+			present := map[string]bool{}
+			for _, key := range []string{"LUPETTO_REGISTRY", "LUPETTO_REPOSITORY", "LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP", "DOCKER_HOST", "DOCKER_CONFIG"} {
+				_, present[key] = os.LookupEnv(key)
+			}
+			data, _ := json.Marshal(present)
+			if os.WriteFile(config.BuildEnvironment, data, 0600) != nil {
+				os.Exit(3)
+			}
+		}
 		_, _ = fmt.Fprint(os.Stderr, strings.Repeat("x", config.LogBytes)+"live stderr tail\n")
 		if !pause(config.BuildDelay) {
 			_, _ = fmt.Fprint(os.Stdout, `{"version":6,"command":"build","outcome":"failed","failure":{"stage":"build","error":"context canceled","sideEffectsPossible":true}}`)
@@ -153,7 +178,7 @@ func fakeCLI(t *testing.T, config fakeConfig) (string, func(fakeConfig), string)
 	return wrapper, update, calls
 }
 func goodFake() fakeConfig {
-	return fakeConfig{Status: goodStatus, Discover: goodDiscover, Build: goodRecord}
+	return fakeConfig{Status: goodStatus, Discover: goodDiscover, Build: goodRecord, Images: `{"kind":"images","version":1,"builds":[],"docker":{"available":false,"reason":"Docker unavailable","images":[]}}`, Products: `{"kind":"products","version":1,"products":[{"package":"cmd:curl","selectors":["1"]}],"changed":false,"message":"synthetic"}`}
 }
 func testServer(t *testing.T, config fakeConfig, builds bool) (*Server, func(fakeConfig), string) {
 	t.Helper()
@@ -344,7 +369,7 @@ func TestHTTPBuildDisabledAndConcurrentAndArgs(t *testing.T) {
 		config.BuildDelay = 250
 		server, _, calls := testServer(t, config, true)
 		w := request(server, "POST", "/builds", buildForm(server))
-		if w.Code != 303 || w.Header().Get("Location") != "/jobs/1" {
+		if w.Code != 303 || w.Header().Get("Location") != "/builds/1" {
 			t.Fatalf("response = %d %s", w.Code, w.Body.String())
 		}
 		w = request(server, "POST", "/builds", buildForm(server))
@@ -394,6 +419,9 @@ func TestRequestSafety(t *testing.T) {
 			{"get", "", "", "127.0.0.1:8080", server.token, "GET", 405},
 		} {
 			t.Run(route+test.name, func(t *testing.T) {
+				if test.name == "get" && route == "/builds" {
+					test.expected = 200
+				}
 				form := buildForm(server)
 				form.Set("csrfToken", test.token)
 				target := route
@@ -591,8 +619,8 @@ func TestViewModelsPackageBoundAndEscaping(t *testing.T) {
 	server, _, _ := testServer(t, goodFake(), false)
 	server.status.finish(&StatusDocument{Tracks: []Track{{Package: "cmd:curl", Selector: "1", State: "current", Outdated: []OutdatedPackage{{Name: "dep"}}, MissingFixes: []MissingFix{{ReachableByTrack: true}, {ReachableByTrack: false}}, UnevaluatedFixes: []UnevaluatedFix{{Name: "dep"}}}}}, nil)
 	w := request(server, "GET", "/?format=json", nil)
-	var overview OverviewView
-	if json.Unmarshal(w.Body.Bytes(), &overview) != nil || len(overview.Tracks) != 1 || overview.Tracks[0].ReachableFixCount != 1 || overview.Tracks[0].UnreachableFixCount != 1 || overview.Tracks[0].OutdatedCount != 1 || overview.Tracks[0].UnevaluatedFixCount != 1 || overview.CSRFToken == "" {
+	var overview ImagesView
+	if json.Unmarshal(w.Body.Bytes(), &overview) != nil || len(overview.Products) != 1 || overview.Products[0].UnreachableCount != 1 || len(overview.Products[0].Track.Outdated) != 1 || len(overview.Products[0].Track.UnevaluatedFixes) != 1 || overview.CSRFToken == "" {
 		t.Fatal(w.Body.String())
 	}
 	w = request(server, "GET", "/tracks/cmd:curl/1?format=json", nil)
