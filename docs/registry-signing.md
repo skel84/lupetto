@@ -36,7 +36,9 @@ These are rejected before tool checks, workspace creation, network access, or bu
 - Exactly one of registry/repository set. (Both absent skips publication.)
 - A key without complete publication settings; a signing config or HTTP consent without a key. There is no implicit keyless signing.
 - HTTP consent for a non-loopback authority (a DNS name that merely resolves to loopback does not count), or signing to a literal-loopback authority **without** HTTP consent.
-- Invalid authorities or prefixes. Registry is an authority, not a URL: DNS name, IPv4, or bracketed IPv6, optional port 1–65535; a single-label name needs a port unless it is `localhost`. Repository has no leading/trailing/repeated slash, `.`/`..`, tag, or digest. The complete reference must parse to the same registry, repository, and tag in both `github.com/distribution/reference` and go-containerregistry; the only accepted difference is `docker.io` ↔ `index.docker.io`. Nothing is truncated or normalized into another target.
+- Invalid authorities or prefixes. Registry is an authority, not a URL: DNS name, IPv4, or bracketed IPv6, optional port 1–65535; a single-label name needs a port unless it is `localhost`. Repository has no leading/trailing/repeated slash, `.`/`..`, tag, or digest. Nothing is truncated or normalized into another target.
+
+After the APK is selected (so after the workspace exists and the index is fetched) but before composition, loading, or publication, the complete reference is checked: it must parse to the same registry, repository, and tag in both `github.com/distribution/reference` and go-containerregistry (the only accepted difference is `docker.io` ↔ `index.docker.io`) and fit the length limits. A failure there is a `build`-stage failure with a `failure.json`.
 
 `--no-load` is valid with publication and signing. `sbom` ignores all five environment inputs and rejects their flags (including false/empty forms).
 
@@ -70,7 +72,7 @@ The APK component and exact-version/architecture tag reuse the local literal-or-
 
 Publication then:
 
-1. Pushes the single validated image manifest from the OCI layout **unchanged**, so the pushed digest is the local manifest digest (`evidence.imageDigest` in the record).
+1. Confirms the layout's manifest is still the one validated earlier (`evidence.imageDigest`), then pushes it **unchanged**, so the pushed digest equals that validated digest.
 2. Fetches the manifest **by digest** and requires its bytes to hash to that digest and equal the local manifest.
 3. Fetches the unique **tag** and requires the same manifest bytes (the body is hashed; a `Docker-Content-Digest` header is not trusted).
 4. Fetches the config by digest and requires it to equal the source config.
@@ -200,4 +202,4 @@ Every workflow uses the version-6 record described in the [operator guide](../RE
 | Attestation (including the SPDX checksum check) | Publication and signing confirmed; attestation failed. An attestation may already exist. |
 | Final result recording | Earlier stages can be confirmed, but the workflow is not complete success. |
 
-Failures and cancellation exit nonzero with no success summary, may leave remote tags, images, signatures, or attestations, and are **never rolled back**. Retained records contain no passwords, key or config contents or paths, environment, Docker credential configuration, or tool transcripts.
+Failures and cancellation exit nonzero with no success summary, may leave remote tags, images, signatures, or attestations, and are **never rolled back**. Publication/signing records contain only sanitized stage messages: no passwords, key or config contents or paths, environment, Docker credential configuration, or tool transcripts.
