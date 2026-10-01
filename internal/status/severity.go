@@ -260,6 +260,9 @@ func (run *severityRun) resolve(id string) SeverityResult {
 		if knownSeverity(result) {
 			return run.record(id, result)
 		}
+		if !nvdOK {
+			return run.record(id, pendingSeverity())
+		}
 		advisory, osvOK := run.osv(id)
 		if severity := normalizeSeverity(advisory.DatabaseSpecific.Severity); severity != "" {
 			return run.record(id, SeverityResult{severity, "osv"})

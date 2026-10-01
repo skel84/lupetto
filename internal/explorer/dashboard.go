@@ -12,50 +12,109 @@ import (
 
 func (s *Server) inventory(ctx context.Context) InventoryView {
 	s.dashboard.mu.Lock()
-	defer s.dashboard.mu.Unlock()
-	if time.Since(s.dashboard.inventoryAt) < 15*time.Second {
-		return s.dashboard.inventory
+	view, fresh := s.dashboard.inventory, time.Since(s.dashboard.inventoryAt) < 15*time.Second
+	s.dashboard.mu.Unlock()
+	if fresh {
+		return view
 	}
-	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
-	defer cancel()
-	stop := context.AfterFunc(s.ctx, cancel)
-	defer stop()
-	document, err := s.cli.Images(ctx)
-	if err != nil {
-		s.dashboard.inventory.Error = err.Error()
-	} else {
-		s.dashboard.inventory = InventoryView{Document: document}
+	result := s.dashboard.loads.DoChan("inventory", func() (any, error) {
+		s.dashboard.mu.Lock()
+		view, fresh := s.dashboard.inventory, time.Since(s.dashboard.inventoryAt) < 15*time.Second
+		generation := s.dashboard.inventoryGeneration
+		s.dashboard.mu.Unlock()
+		if fresh {
+			return view, nil
+		}
+		readCtx, finish, err := s.dashboardReadContext()
+		if err != nil {
+			view.Error = err.Error()
+			return view, nil
+		}
+		defer finish()
+		document, err := s.cli.Images(readCtx)
+		s.dashboard.mu.Lock()
+		defer s.dashboard.mu.Unlock()
+		if err != nil {
+			s.dashboard.inventory.Error = err.Error()
+		} else {
+			s.dashboard.inventory = InventoryView{Document: document}
+		}
+		// A build/edit that finished during the read must not make older
+		// inventory fresh for another TTL.
+		if s.dashboard.inventoryGeneration == generation {
+			s.dashboard.inventoryAt = time.Now()
+		}
+		return s.dashboard.inventory, nil
+	})
+	select {
+	case loaded := <-result:
+		return loaded.Val.(InventoryView)
+	case <-ctx.Done():
+		view = s.dashboard.inventorySnapshot()
+		view.Error = ctx.Err().Error()
+		return view
 	}
-	s.dashboard.inventoryAt = time.Now()
-	return s.dashboard.inventory
 }
 func (s *Server) invalidateInventory() {
 	s.dashboard.mu.Lock()
 	s.dashboard.inventoryAt = time.Time{}
+	s.dashboard.inventoryGeneration++
 	s.dashboard.mu.Unlock()
 }
 func (s *Server) inspect(ctx context.Context, reference string) (*InspectDocument, error) {
 	s.dashboard.mu.Lock()
-	defer s.dashboard.mu.Unlock()
-	if d := s.dashboard.inspect[reference]; d != nil {
-		return d, nil
+	document := s.dashboard.inspect[reference]
+	s.dashboard.mu.Unlock()
+	if document != nil {
+		return document, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
-	defer cancel()
-	stop := context.AfterFunc(s.ctx, cancel)
-	defer stop()
-	d, err := s.cli.Inspect(ctx, reference)
-	if err != nil {
-		return nil, err
+	result := s.dashboard.loads.DoChan("inspect:"+reference, func() (any, error) {
+		s.dashboard.mu.Lock()
+		document := s.dashboard.inspect[reference]
+		s.dashboard.mu.Unlock()
+		if document != nil {
+			return document, nil
+		}
+		readCtx, finish, err := s.dashboardReadContext()
+		if err != nil {
+			return nil, err
+		}
+		defer finish()
+		document, err = s.cli.Inspect(readCtx, reference)
+		if err != nil {
+			return nil, err
+		}
+		s.dashboard.mu.Lock()
+		defer s.dashboard.mu.Unlock()
+		if s.dashboard.inspect == nil || len(s.dashboard.inspect) >= 256 {
+			s.dashboard.inspect = map[string]*InspectDocument{}
+		}
+		s.dashboard.inspect[reference] = document
+		return document, nil
+	})
+	select {
+	case loaded := <-result:
+		if loaded.Err != nil {
+			return nil, loaded.Err
+		}
+		return loaded.Val.(*InspectDocument), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	if s.dashboard.inspect == nil {
-		s.dashboard.inspect = map[string]*InspectDocument{}
+}
+
+// Shared reads outlive a disconnected client, but not the server. Register
+// them before Close can start waiting; no new subprocess starts after closing.
+func (s *Server) dashboardReadContext() (context.Context, func(), error) {
+	s.mu.Lock()
+	if s.closing {
+		s.mu.Unlock()
+		return nil, nil, ErrShuttingDown
 	}
-	if len(s.dashboard.inspect) >= 256 {
-		s.dashboard.inspect = map[string]*InspectDocument{}
-	}
-	s.dashboard.inspect[reference] = d
-	return d, nil
+	s.wg.Add(1)
+	s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(s.ctx, 25*time.Second)
+	return ctx, func() { cancel(); s.wg.Done() }, nil
 }
 func (s *Server) images(w http.ResponseWriter, r *http.Request) {
 	query, filter := r.URL.Query().Get("q"), r.URL.Query().Get("filter")
@@ -392,7 +451,9 @@ func (s *Server) editProducts(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
+	s.productsMu.Lock()
 	d, err := s.cli.Products(ctx, s.config.Products, action, name, strings.Fields(raw))
+	s.productsMu.Unlock()
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		s.render(w, r, "tracking", TrackingView{BaseView: s.base(), Package: name, Selector: raw, Error: fmt.Sprintf("Tracking could not be changed: %v. The products file and its directory must be writable (mount the directory, not a single file).", err)})
@@ -427,9 +488,7 @@ func (s *Server) shell() ShellView {
 	if status.LastError != "" {
 		shell.RegistryState = "error"
 	}
-	s.dashboard.mu.Lock()
-	inventory := s.dashboard.inventory.Document
-	s.dashboard.mu.Unlock()
+	inventory := s.dashboard.inventorySnapshot().Document
 	if inventory != nil {
 		shell.DockerState = "unavailable"
 		if inventory.Docker.Available {

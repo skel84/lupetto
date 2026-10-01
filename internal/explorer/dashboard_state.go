@@ -8,13 +8,23 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 type dashboardState struct {
-	mu          sync.Mutex
-	inventory   InventoryView
-	inventoryAt time.Time
-	inspect     map[string]*InspectDocument
+	mu                  sync.Mutex
+	inventory           InventoryView
+	inventoryAt         time.Time
+	inspect             map[string]*InspectDocument
+	loads               singleflight.Group
+	inventoryGeneration uint64
+}
+
+func (d *dashboardState) inventorySnapshot() InventoryView {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.inventory
 }
 
 func buildID(b InventoryBuild) string {
@@ -62,7 +72,7 @@ func buildStages(record *BuildRecord, running bool) []BuildStage {
 	stages[6].Status = record.Stages.Attestation.Status
 	if record.Failure != nil {
 		stage := record.Failure.Stage
-		idx := 0
+		idx := -1
 		switch {
 		case strings.Contains(stage, "valid") || stage == "installed" || stage == "spdx":
 			idx = 2
@@ -70,7 +80,7 @@ func buildStages(record *BuildRecord, running bool) []BuildStage {
 			idx = 3
 		case stage == "publication":
 			idx = 4
-		case stage == "signing":
+		case stage == "signing" || stage == "cosign-version":
 			idx = 5
 		case stage == "attestation":
 			idx = 6
@@ -319,7 +329,7 @@ func livePhase(log string) int {
 		{"Locking apko dependencies", 1}, {"Composing OCI image", 1},
 		{"Checking installed APK", 2}, {"Validating SPDX", 2},
 		{"Exporting Docker", 3}, {"Loading", 3}, {"Inspecting Docker", 3}, {"Tagging readable", 3},
-		{"Publishing", 4}, {"Signing", 5}, {"Attesting", 6},
+		{"Pushing OCI image to registry", 4}, {"Verifying registry", 4}, {"Signing", 5}, {"Attesting", 6},
 	}
 	position := -1
 	for _, marker := range markers {

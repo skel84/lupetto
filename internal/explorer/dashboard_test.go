@@ -276,7 +276,7 @@ func TestDashboardBuildModesStagesAndMerge(t *testing.T) {
 	for _, test := range []struct {
 		log, mode string
 		active    int
-	}{{"", "publish", 0}, {"lupetto: Composing OCI image with apko", "publish", 1}, {"lupetto: Validating SPDX against apko lock", "local", 2}, {"lupetto: Publishing image", "publish", 4}} {
+	}{{"", "publish", 0}, {"lupetto: Composing OCI image with apko", "publish", 1}, {"lupetto: Validating SPDX against apko lock", "local", 2}, {"lupetto: Pushing OCI image to registry", "publish", 4}, {"lupetto: Verifying registry manifest by digest", "publish", 4}, {"lupetto: Verifying registry tag", "publish", 4}, {"lupetto: Verifying registry config and layers", "publish", 4}} {
 		stages := liveStages(test.log, test.mode)
 		if len(stages) != 7 || stages[test.active].Status != "running" {
 			t.Fatalf("stages: %+v", stages)
@@ -443,5 +443,192 @@ func TestDashboardSPDXRejectsFIFO(t *testing.T) {
 	build.Record.Evidence.SPDXPath = fifo
 	if _, err := readValidatedSPDX(build); err == nil || !strings.Contains(err.Error(), "regular file") {
 		t.Fatalf("FIFO must be rejected without opening or reading it: %v", err)
+	}
+}
+
+func TestDashboardUnreadableInventoryTimestamp(t *testing.T) {
+	config := goodFake()
+	config.Images = `{"kind":"images","version":1,"builds":[{"workspace":"/unknown","recordPath":"/unknown/result.json","recordVersion":0,"status":"unreadable","error":"permission denied","recordedAt":""},{"recordPath":"/known/result.json","status":"unsupported","recordVersion":5,"recordedAt":"2026-10-01T00:00:00Z"}],"docker":{"available":true,"images":[{"id":"sha256:known","tags":[]}]}}`
+	binary, _, _ := fakeCLI(t, config)
+	cli, err := NewCLI(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := cli.Images(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory.Builds) != 2 || !inventory.Builds[0].RecordedAt.IsZero() || inventory.Builds[1].RecordedAt.IsZero() || len(inventory.Docker.Images) != 1 {
+		t.Fatalf("lost inventory: %+v", inventory)
+	}
+	item := buildItem(inventory.Builds[0])
+	if item.State != "unreadable" || item.Error != "permission denied" || !item.StartedAt.IsZero() {
+		t.Fatalf("unreadable history item: %+v", item)
+	}
+}
+
+func TestDashboardRecordFailureStageMapping(t *testing.T) {
+	for _, test := range []struct {
+		stage  string
+		failed int
+	}{{"cosign-version", 5}, {"publication", 4}, {"future-unknown-stage", -1}, {"record", -1}} {
+		stages := buildStages(&BuildRecord{Failure: &RecordFailure{Stage: test.stage}}, false)
+		for i, stage := range stages {
+			if (stage.Status == "failed") != (i == test.failed) {
+				t.Fatalf("failure %s: %+v", test.stage, stages)
+			}
+		}
+	}
+}
+
+func TestDashboardSharedReadsDoNotBlockShellOrPoisonCache(t *testing.T) {
+	config := goodFake()
+	config.ImagesDelay = 600
+	config.InspectDelay = 600
+	reference := "127.0.0.1:5000/team/curl@sha256:" + strings.Repeat("a", 64)
+	config.Inspect = encodeFixture(t, InspectDocument{Kind: "inspect", Version: 1, Reference: reference, Digest: "sha256:" + strings.Repeat("a", 64), Packages: []PackageIdentity{{Name: "curl", Version: "1-r0", Architecture: "x86_64"}}})
+	server, _, calls := testServer(t, config, false)
+	requestCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	first := make(chan InventoryView, 1)
+	go func() { first <- server.inventory(requestCtx) }()
+	eventually(t, func() bool { data, _ := os.ReadFile(calls); return strings.Contains(string(data), "images|") })
+	assertShellFast := func() {
+		t.Helper()
+		done := make(chan ShellView, 1)
+		go func() { done <- server.shell() }()
+		select {
+		case <-done:
+		case <-time.After(250 * time.Millisecond):
+			t.Fatal("shell blocked on shared CLI read")
+		}
+	}
+	assertShellFast()
+	second := make(chan InventoryView, 1)
+	go func() { second <- server.inventory(context.Background()) }()
+	cancel()
+	select {
+	case view := <-first:
+		if !strings.Contains(view.Error, "canceled") {
+			t.Fatalf("caller cancellation: %+v", view)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("disconnected inventory caller blocked")
+	}
+	select {
+	case view := <-second:
+		if view.Document == nil || view.Error != "" {
+			t.Fatalf("client cancellation poisoned shared inventory: %+v", view)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("inventory refresh stalled")
+	}
+	if view := server.inventory(context.Background()); view.Document == nil || view.Error != "" {
+		t.Fatal("bad cached inventory")
+	}
+	type inspectResult struct {
+		document *InspectDocument
+		err      error
+	}
+	one := make(chan inspectResult, 1)
+	two := make(chan inspectResult, 1)
+	go func() { d, err := server.inspect(context.Background(), reference); one <- inspectResult{d, err} }()
+	eventually(t, func() bool { data, _ := os.ReadFile(calls); return strings.Contains(string(data), "inspect|") })
+	assertShellFast()
+	// The inventory snapshot must remain immediately usable during inspect.
+	if view := server.inventory(context.Background()); view.Document == nil {
+		t.Fatal("inspect blocked or hid inventory")
+	}
+	go func() { d, err := server.inspect(context.Background(), reference); two <- inspectResult{d, err} }()
+	for _, channel := range []chan inspectResult{one, two} {
+		select {
+		case result := <-channel:
+			if result.err != nil || result.document == nil {
+				t.Fatalf("inspect: %+v", result)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("inspect refresh stalled")
+		}
+	}
+	data, _ := os.ReadFile(calls)
+	if strings.Count(string(data), "images|") != 1 || strings.Count(string(data), "inspect|") != 1 {
+		t.Fatalf("reads not single-flight: %s", data)
+	}
+}
+
+func TestDashboardInventoryInvalidationDuringSharedRead(t *testing.T) {
+	config := goodFake()
+	config.ImagesDelay = 200
+	server, _, calls := testServer(t, config, false)
+	done := make(chan InventoryView, 1)
+	go func() { done <- server.inventory(context.Background()) }()
+	eventually(t, func() bool { data, _ := os.ReadFile(calls); return strings.Contains(string(data), "images|") })
+	server.invalidateInventory()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("shared read stalled")
+	}
+	server.dashboard.mu.Lock()
+	fresh := !server.dashboard.inventoryAt.IsZero()
+	server.dashboard.mu.Unlock()
+	if fresh {
+		t.Fatal("in-flight old inventory became fresh after invalidation")
+	}
+	if view := server.inventory(context.Background()); view.Document == nil {
+		t.Fatal("replacement inventory read failed")
+	}
+	data, _ := os.ReadFile(calls)
+	if strings.Count(string(data), "images|") != 2 {
+		t.Fatalf("did not refresh after invalidation: %s", data)
+	}
+}
+
+func TestDashboardCloseCancelsSharedInventoryRead(t *testing.T) {
+	config := goodFake()
+	config.ImagesDelay = 5000
+	server, _, calls := testServer(t, config, false)
+	done := make(chan InventoryView, 1)
+	go func() { done <- server.inventory(context.Background()) }()
+	eventually(t, func() bool { data, _ := os.ReadFile(calls); return strings.Contains(string(data), "images|") })
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := server.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case view := <-done:
+		if view.Error == "" {
+			t.Fatal("shutdown returned successful shared read")
+		}
+	case <-ctx.Done():
+		t.Fatal("shared read survived Close")
+	}
+}
+
+func TestDashboardProductsMutationsSerialized(t *testing.T) {
+	config := goodFake()
+	config.ProductsDelay = 150
+	config.ProductsGuard = filepath.Join(t.TempDir(), "mutation.lock")
+	server, _, _ := testServer(t, config, false)
+	start := make(chan struct{})
+	results := make(chan int, 2)
+	for _, name := range []string{"curl", "openssl"} {
+		go func() {
+			<-start
+			w := request(server, "POST", "/products/add", url.Values{"csrfToken": {server.token}, "package": {name}, "selector": {"1"}})
+			results <- w.Code
+		}()
+	}
+	close(start)
+	for range 2 {
+		select {
+		case code := <-results:
+			if code != http.StatusSeeOther {
+				t.Fatalf("overlapping mutation rejected/lost: HTTP%d", code)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("serialized products edit stalled")
+		}
 	}
 }

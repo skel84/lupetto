@@ -1,6 +1,9 @@
 package explorer
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Product struct {
 	Package   string   `json:"package"`
@@ -30,6 +33,31 @@ type InventoryBuild struct {
 	Record        *BuildRecord `json:"record,omitempty"`
 	SPDX          SPDXArtifact `json:"spdx"`
 }
+
+// An unreadable CLI history item has no record modification timestamp and
+// encodes recordedAt as an empty string. Keep it as unknown, not a fatal
+// document incompatibility that would hide all other inventory.
+func (b *InventoryBuild) UnmarshalJSON(data []byte) error {
+	type record InventoryBuild
+	var decoded record
+	wire := struct {
+		*record
+		RecordedAt string `json:"recordedAt"`
+	}{record: &decoded}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	if wire.RecordedAt != "" {
+		var err error
+		decoded.RecordedAt, err = time.Parse(time.RFC3339Nano, wire.RecordedAt)
+		if err != nil {
+			return err
+		}
+	}
+	*b = InventoryBuild(decoded)
+	return nil
+}
+
 type DockerImage struct {
 	ID             string           `json:"id"`
 	Tags           []string         `json:"tags"`

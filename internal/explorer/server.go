@@ -48,6 +48,7 @@ type Server struct {
 	ctx           context.Context
 	cancel        context.CancelFunc
 	mu            sync.Mutex
+	productsMu    sync.Mutex
 	started       bool
 	closing       bool
 	statusPending bool

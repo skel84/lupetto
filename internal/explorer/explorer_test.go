@@ -35,6 +35,10 @@ type fakeConfig struct {
 	StatusDelay      int
 	DiscoverDelay    int
 	BuildDelay       int
+	ImagesDelay      int
+	InspectDelay     int
+	ProductsDelay    int
+	ProductsGuard    string
 	LogBytes         int
 	OutputBytes      int
 	IgnoreTERM       bool
@@ -116,13 +120,36 @@ func TestCLIHelper(t *testing.T) {
 		}
 		_, _ = fmt.Fprint(os.Stdout, config.Discover)
 	case "images":
+		if !pause(config.ImagesDelay) {
+			os.Exit(1)
+		}
 		_, _ = fmt.Fprint(os.Stdout, config.Images)
 	case "inspect":
+		if !pause(config.InspectDelay) {
+			os.Exit(1)
+		}
 		_, _ = fmt.Fprint(os.Stdout, config.Inspect)
 	case "products":
 		if config.ProductsExit != 0 {
 			_, _ = fmt.Fprint(os.Stderr, "products file is read-only")
 			os.Exit(config.ProductsExit)
+		}
+		if len(args) > 1 && args[1] != "list" {
+			if config.ProductsGuard != "" {
+				guard, err := os.OpenFile(config.ProductsGuard, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+				if err != nil {
+					_, _ = fmt.Fprint(os.Stderr, "concurrent products mutation")
+					os.Exit(1)
+				}
+				_ = guard.Close()
+			}
+			completed := pause(config.ProductsDelay)
+			if config.ProductsGuard != "" {
+				_ = os.Remove(config.ProductsGuard)
+			}
+			if !completed {
+				os.Exit(1)
+			}
 		}
 		_, _ = fmt.Fprint(os.Stdout, config.Products)
 	case "build":

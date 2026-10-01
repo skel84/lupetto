@@ -320,16 +320,21 @@ func TestSeverityRateLimitStopsOnlyNVD(t *testing.T) {
 					fmt.Fprint(w, "secret-canary")
 					return
 				}
+				if req.URL.Path == "/osv/"+severityTestGHSA {
+					fmt.Fprint(w, `{"database_specific":{"severity":"HIGH"}}`)
+					return
+				}
 				if strings.HasSuffix(req.URL.Path, "2222") {
 					fmt.Fprint(w, `{"database_specific":{"severity":"HIGH"}}`)
 				} else {
 					w.WriteHeader(404)
 				}
 			})
-			groups := [][]string{{severityTestCVE, "CVE-2026-2222", "CVE-2026-3333"}}
+			groups := [][]string{{severityTestCVE, "CVE-2026-2222", "CVE-2026-3333", severityTestGHSA}}
 			result := resolver.Resolve(context.Background(), groups, time.Second)
 			severityAssert(t, result[severityTestCVE], "unknown", "pending")
-			severityAssert(t, result["CVE-2026-2222"], "high", "osv")
+			severityAssert(t, result["CVE-2026-2222"], "unknown", "pending")
+			severityAssert(t, result[severityTestGHSA], "high", "osv")
 			severityAssert(t, result["CVE-2026-3333"], "unknown", "pending")
 			if nvdCalls != 1 {
 				t.Fatalf("NVD calls %d", nvdCalls)
@@ -460,7 +465,7 @@ func TestSeverityRateWaitHonorsBudget(t *testing.T) {
 func TestSeverityFailureStatsResetAndBudgetExclusion(t *testing.T) {
 	resolver, _ := severityFixture(t, func(w http.ResponseWriter, req *http.Request) { w.WriteHeader(500) })
 	resolver.Resolve(context.Background(), [][]string{{severityTestCVE}}, time.Second)
-	if resolver.Stats().FetchFailureCount != 2 {
+	if resolver.Stats().FetchFailureCount != 1 {
 		t.Fatalf("stats %+v", resolver.Stats())
 	}
 	resolver.Resolve(context.Background(), [][]string{{severityTestCVE}}, 0)
@@ -680,5 +685,37 @@ func TestSeverityGoTrueGHSAUsesOwnOSVAndIgnoresAliasCycles(t *testing.T) {
 	severityAssert(t, result[severityTestGO], "low", "osv-alias:"+severityTestGHSA)
 	if len(result) != 1 {
 		t.Fatal("internal alias leaked into output")
+	}
+}
+
+func TestSeverityCVEFailedNVDCannotCacheOSVFallback(t *testing.T) {
+	for _, code := range []int{http.StatusForbidden, http.StatusTooManyRequests, http.StatusInternalServerError} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			var blocked atomic.Bool
+			var osvCalls atomic.Int64
+			blocked.Store(true)
+			resolver, directory := severityFixture(t, func(w http.ResponseWriter, req *http.Request) {
+				if req.URL.Path == "/nvd" {
+					if blocked.Load() {
+						w.WriteHeader(code)
+						return
+					}
+					fmt.Fprint(w, severityNVDJSON(severityTestCVE, `{"cvssMetricV31":[{"type":"Primary","cvssData":{"baseSeverity":"HIGH"}}]}`))
+					return
+				}
+				osvCalls.Add(1)
+				fmt.Fprint(w, `{"id":"`+severityTestCVE+`","database_specific":{"severity":"LOW"}}`)
+			})
+			severityAssert(t, resolver.Resolve(context.Background(), [][]string{{severityTestCVE}}, time.Second)[severityTestCVE], "unknown", "pending")
+			files, _ := os.ReadDir(directory)
+			if len(files) != 0 {
+				t.Fatalf("failed/skipped NVD cached lower-precedence fallback: %v", files)
+			}
+			if osvCalls.Load() != 0 {
+				t.Fatal("OSV consulted before preferred NVD completed")
+			}
+			blocked.Store(false)
+			severityAssert(t, resolver.Resolve(context.Background(), [][]string{{severityTestCVE}}, time.Second)[severityTestCVE], "high", "nvd-cvss-v3.1")
+		})
 	}
 }
