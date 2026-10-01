@@ -119,7 +119,7 @@ func TestEmbeddedTemplatesRenderRepresentativeModels(t *testing.T) {
 		Stages: stages("completed", "completed", "completed", "loaded", "skipped", "skipped", "skipped")}
 	invalidItem := BuildItem{ID: "x", DetailURL: "/builds/x", State: "unreadable", Error: evil}
 
-	shell := ShellView{Registry: "127.0.0.1:5000/x", RegistryState: "ready", DockerState: "available", StatusComputedAt: created, IndexSHA256: strings.Repeat("d", 64), FeedSHA256: strings.Repeat("e", 64), Architecture: "x86_64"}
+	shell := ShellView{Registry: "127.0.0.1:5000/x", RegistryState: "ready", DockerState: "available", PublishLoad: true, StatusComputedAt: created, IndexSHA256: strings.Repeat("d", 64), FeedSHA256: strings.Repeat("e", 64), Architecture: "x86_64"}
 	base := BaseView{CSRFToken: "tok-123", BuildsEnabled: true, Shell: shell}
 	disabled := BaseView{CSRFToken: "tok-123", Shell: ShellView{Registry: "127.0.0.1:1/x", RegistryState: "error", DockerState: "unavailable", DockerReason: evil}}
 	busyShell := shell

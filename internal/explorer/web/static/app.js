@@ -120,8 +120,15 @@
       svg.appendChild(document.importNode(node, true));
     });
   }
-  function applyStages(container, stages) {
-    (stages || []).forEach(function (stage) {
+  // A publish-only job keeps the server's reason on its skipped Load stage.
+  function loadSkipReason(item, stage) {
+    if (stage.name === "load" && stage.status === "skipped" && item.mode === "publish" && !item.load && item.loadReason) {
+      return "Skipped · " + String(item.loadReason);
+    }
+    return "";
+  }
+  function applyStages(container, item) {
+    (item.stages || []).forEach(function (stage) {
       var li = null;
       Array.prototype.forEach.call(container.querySelectorAll("[data-stage]"), function (el) {
         if (el.getAttribute("data-stage") === stage.name) { li = el; }
@@ -133,7 +140,7 @@
         setStageIcon(li, cls);
       }
       var state = li.querySelector("[data-stage-state]");
-      if (state) { state.textContent = stageText(stage.status); }
+      if (state) { state.textContent = loadSkipReason(item, stage) || stageText(stage.status); }
     });
   }
   function liveStages(container) {
@@ -143,7 +150,7 @@
       getJSON(url).then(function (data) {
         var item = data && data.item;
         if (!item) { return; }
-        applyStages(container, item.stages);
+        applyStages(container, item);
         if (item.state !== "running") {
           // Let the log stream append its final bytes first, then reload for the record.
           window.setTimeout(reload, 1200);

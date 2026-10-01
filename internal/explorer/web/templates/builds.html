@@ -22,7 +22,7 @@
 <div class="card-body stack" data-live-url="{{.DetailURL}}?format=json">
   <div class="outcome"><a href="{{.DetailURL}}"><strong>{{.Package}}{{with .Version}} {{.}}{{end}}</strong></a>{{template "build-state" .State}}{{if not .StartedAt.IsZero}}<span class="muted small">started {{template "time" .StartedAt}}</span>{{end}}
   <span class="spacer"></span><a class="btn small" href="{{.DetailURL}}">View</a>{{if .Live}}<form class="inline" method="post" action="{{.DetailURL}}/cancel"><input type="hidden" name="csrfToken" value="{{$.CSRFToken}}"><button class="btn small danger" type="submit">{{template "icon" "stop"}}Cancel</button></form>{{end}}</div>
-  {{template "stage-list" .Stages}}
+  {{template "stage-list" .}}
 </div></section>{{end}}
 <div class="section-head"><h2>History</h2><span class="hint">{{len .Items}} build{{if ne (len .Items) 1}}s{{end}} · newest first · builds started here are kept in memory for the last {{.HistoryLimit}} jobs; build records persist</span></div>
 {{if .Items}}{{template "builds-table" .Items}}{{else}}<div class="empty"><span class="art">{{template "icon-xl" "builds"}}</span><h2>No builds yet</h2><p>Builds started here or with the lupetto CLI on this machine appear in this list.</p><div class="actions"><a class="btn" href="/">{{template "icon" "images"}}Go to Images</a></div></div>{{end}}
@@ -48,7 +48,7 @@
   <div class="actions">{{if and (eq $i.State "running") $i.Live (not .Job.CancelRequested)}}<form class="inline" method="post" action="{{$i.DetailURL}}/cancel"><input type="hidden" name="csrfToken" value="{{.CSRFToken}}"><button class="btn danger" type="submit">{{template "icon" "stop"}}Cancel build</button></form>{{end}}</div>
 </div>
 <div class="stack">
-<div class="card"><div class="card-body"{{if eq $i.State "running"}} data-live-url="{{$i.DetailURL}}?format=json"{{end}}>{{template "stage-list" $i.Stages}}</div></div>
+<div class="card"><div class="card-body"{{if eq $i.State "running"}} data-live-url="{{$i.DetailURL}}?format=json"{{end}}>{{template "stage-list" $i}}</div></div>
 <div class="grid-2">
   <section class="card" aria-labelledby="outputs"><div class="card-body"><h2 id="outputs">Outputs</h2><hr class="sep"><dl class="kv">
   {{- $any := false}}{{with $r}}{{with .Stages.Publication}}{{if or .Digest .ImmutableReference .Reference}}{{$any = true}}<dt>Registry</dt><dd>{{with .Reference}}<span class="mono">{{.}}</span><br>{{end}}{{with .ImmutableReference}}<span class="digest">{{.}}</span>{{else}}{{with .Digest}}<span class="digest">{{.}}</span>{{end}}{{end}}{{if and .Digest (not .Verified)}}<br><span class="reach no">{{template "icon" "error"}}Digest not verified — not a confirmed publication</span>{{end}}</dd>{{end}}{{end}}
@@ -59,8 +59,9 @@
   </dl></div></section>
   <section class="card" aria-labelledby="inputs"><div class="card-body"><h2 id="inputs">Inputs</h2><hr class="sep"><dl class="kv">
     {{- if $r}}<dt>Requested</dt><dd><span class="mono">{{$r.Request.Package}} {{if $r.Request.APKVersion}}{{$r.Request.APKVersion}} (exact){{else}}{{$r.Request.Selector}} (newest match){{end}}</span></dd>
-    <dt>Publish / sign</dt><dd>{{if $r.Request.Publish}}publish requested{{else}}no publication{{end}} · {{if $r.Request.Sign}}signing requested{{else}}no signing{{end}}{{if $r.Request.Load}} · Docker load requested{{end}}</dd>
-    {{- else if $i.Live}}<dt>Requested</dt><dd><span class="mono">{{.Job.Request.Package}} {{if .Job.Request.APKVersion}}{{.Job.Request.APKVersion}} (exact){{else}}{{.Job.Request.Selector}} (newest match){{end}}</span></dd>{{end}}
+    <dt>Publish / sign</dt><dd>{{if $r.Request.Publish}}publish requested{{else}}no publication{{end}} · {{if $r.Request.Sign}}signing requested{{else}}no signing{{end}}{{if $r.Request.Load}} · Docker load requested{{else if and (eq $i.Mode "publish") $i.LoadReason}} · no Docker load: {{$i.LoadReason}}{{end}}</dd>
+    {{- else if $i.Live}}<dt>Requested</dt><dd><span class="mono">{{.Job.Request.Package}} {{if .Job.Request.APKVersion}}{{.Job.Request.APKVersion}} (exact){{else}}{{.Job.Request.Selector}} (newest match){{end}}</span></dd>
+    {{- with $i.Mode}}<dt>Mode</dt><dd>{{if eq . "local"}}build locally · load into Docker; no publication or signing{{else if $i.Load}}publish · also loads into local Docker{{else}}publish only{{with $i.LoadReason}} · {{.}}{{end}}{{end}}</dd>{{end}}{{end}}
     {{- with $r}}{{with .Selection}}<dt>Selected</dt><dd><span class="mono">{{.Package}} {{.Version}}</span> · {{.Architecture}}</dd><dt>Wolfi index</dt><dd><span class="mono">{{.IndexSHA256}}</span> · signature verified</dd>{{end}}
     {{- with .Evidence}}{{with .ApkoVersion}}<dt>apko</dt><dd><span class="mono">{{.}}</span></dd>{{end}}{{with .LockPath}}<dt>Lock</dt><dd><span class="mono">{{.}}</span></dd>{{end}}{{end}}
     {{- with .Workspace}}<dt>Workspace</dt><dd><span class="mono">{{.}}</span></dd>{{end}}{{end}}

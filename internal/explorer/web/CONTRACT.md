@@ -58,10 +58,12 @@ Every page model embeds `BaseView`, so its fields are at the root (`{{.CSRFToken
 
 ```
 ShellView { Registry, RegistryState, DockerState, DockerReason string; RunningBuild *BuildItem;
-            StatusComputedAt time.Time; StatusRefreshing bool; IndexSHA256, FeedSHA256, Architecture string }
+            StatusComputedAt time.Time; StatusRefreshing bool; IndexSHA256, FeedSHA256, Architecture string;
+            PublishLoad bool; PublishLoadReason string }
 ```
 
 - `Registry` is the configured `host/repository` ("" = not configured). `RegistryState` is the result of the last status comparison, not a separate health check: `ready` (comparison without errors), `error` (`Status.LastError` or any track error), or `unknown`/`""` (not compared yet). `DockerState` is `available`, `unavailable` (show `DockerReason`), or `""` (not known yet, e.g. `lupetto images` failed before any successful load). Only `available` may be presented as "no images in local Docker"; any other value reads "Local Docker state unknown or unavailable".
+- `PublishLoad` is true exactly when the latest local inventory reports Docker as `available`; a "Build & publish" started now would then also load into local Docker. Otherwise `PublishLoadReason` says why it would publish only (the inventory's Docker reason, "Docker is unavailable", or "Docker availability is unknown"). Every enabled "Build & publish" control carries a short sub-line (`btn-note`): "also loads into local Docker", or "publish only: Docker unavailable" / "publish only: Docker state unknown" (by `DockerState`).
 - `RunningBuild` is non-nil while a build runs. Only one build runs at a time: render every build control disabled with "Another build is running", show the nav count and a link to the running build.
 - `StatusComputedAt` can be zero (no successful check yet). The footer offers `POST /status/refresh` ("Check now").
 
@@ -80,11 +82,11 @@ Adding `?format=json` to any GET page route returns its model as `application/js
 | --- | --- | --- |
 | `ProductRow.VerdictKind` | verdict chip colour/icon | `ok` (green check), `update` (amber up-arrow), `rebuild` (amber cycle), `notbuilt` (blue dashed plus), `local` (blue upload), `error` (red triangle); anything else renders muted. The text is always `ProductRow.Verdict` (Go display string, e.g. "Up to date", "Update available", "Fixes available", "Not in registry", "Unable to compare"); optional sub-line `VerdictDetail`. |
 | `PrimaryAction.Kind` | row/page primary action | `build` → POST `/builds` form with `package`, `selector`, `mode`, label `Label`; `tracking` → link to `URL` (or `/products/track?package=`); `""` → "Details" link. |
-| `PrimaryAction.Mode`, form `mode` | builds | `publish`: `--no-load`, inherits registry/signing settings. `local`: loads into local Docker; publication and signing are suppressed. |
+| `PrimaryAction.Mode`, form `mode` | builds | `publish`: inherits registry/signing settings and also loads into local Docker when `Shell.PublishLoad` is true at submission; otherwise publish only (`--no-load`). `local`: loads into local Docker; publication and signing are suppressed. |
 | severity | `MissingFix.MaxSeverity`, `Advisory.Severity` | `critical`, `high`, `medium`, `low`; anything else (including `""`) is shown as `unknown`. Meter segments filled: 4/3/2/1/0. Text label always present. |
 | `BuildItem.State` | builds | `running`, `succeeded`, `failed`, `canceled` (Explorer jobs and records); `unsupported`, `invalid`, `unreadable` (history records that could not be used; show `Error`). |
 | `BuildStage.Name` | 7-stage progress, always all seven in order | `resolve`, `build`, `validate`, `load`, `publish`, `sign`, `attest` → "Resolve", "Build", "Validate SBOM", "Load into Docker", "Publish", "Sign", "Attest SBOM". |
-| `BuildStage.Status` | stage cells | record values `completed`, `loaded`, `published`, `signed`, `attested` (done), `failed`, `skipped` ("Skipped · not requested"), `not-attempted` ("Not attempted · earlier stage failed"); live jobs also `running` ("In progress") and `pending` ("Waiting") for stages not yet reached. No percentages. |
+| `BuildStage.Status` | stage cells | record values `completed`, `loaded`, `published`, `signed`, `attested` (done), `failed`, `skipped` ("Skipped · not requested"; a publish-only job with `BuildItem.LoadReason` shows "Skipped · <LoadReason>" on its Load stage instead), `not-attempted` ("Not attempted · earlier stage failed"); live jobs also `running` ("In progress") and `pending` ("Waiting") for stages not yet reached. A live job's Load stage follows `BuildItem.Load`, not the button that was clicked. No percentages. |
 | `PackageSet.Source` | packages/compare | `registry`, `local`. |
 | `PackageChange.Kind` | compare | `added`, `removed`, `changed`. Explorer does not order versions, so a change is never labelled an upgrade or downgrade. |
 
@@ -156,17 +158,18 @@ PackageView { BaseView; Name string; Document *DiscoverDocument; Error string }
 ```
 
 - Runs `lupetto discover --json <name>` synchronously (25 s limit, at most four concurrent; otherwise `503 package discovery is busy; retry shortly`). Invalid names are `400`. `Error` is shown verbatim; `Document` is then nil.
-- Each exact version has two POST `/builds` forms with `package` = the requested `Name` (preserves providers such as `cmd:curl`), `apkVersion` = the entry's `Version`, and `mode` = `publish` ("Build & publish") or `local` ("Build locally"). "Track versions" opens the dialog prefilled with `Name`.
+- Each exact version has two POST `/builds` forms with `package` = the requested `Name` (preserves providers such as `cmd:curl`), `apkVersion` = the entry's `Version`, and `mode` = `publish` ("Build & publish") or `local` ("Build locally"). The help text below the table says whether "Build & publish" also loads into local Docker (`Shell.PublishLoad`) or publishes only and why (`Shell.PublishLoadReason`). "Track versions" opens the dialog prefilled with `Name`.
 
 ### `jobs`: `JobsView` (builds list)
 
 ```
 JobsView  { BaseView; Items []BuildItem; Inventory InventoryView; Jobs []JobView; Running bool; HistoryLimit int }
 BuildItem { ID, DetailURL, Package, Version, State string; StartedAt time.Time; Record *BuildRecord; Error string;
-            Stages []BuildStage; Live bool; SPDXURL string }
+            Stages []BuildStage; Live bool; SPDXURL string; Mode string; Load bool; LoadReason string }
 BuildStage{ Name, Status string }
 ```
 
+- `Mode` (`publish`/`local`, empty when unknown), `Load` and `LoadReason` come from the live job's request, or from `Record.Request` for history records. `Load` is whether loading into Docker was requested. `LoadReason` is set only for jobs started by this server process whose publish build stays publish-only; it is the Docker reason recorded at submission. History records cannot recover that reason, so their skipped Load stage reads "Skipped · not requested".
 - `Items` is newest first and merges retained build records (`lupetto images --json`, including CLI builds) with Explorer's in-memory jobs (`Live` true). Explorer keeps the last `HistoryLimit` (50) live jobs in memory only; records persist in the cache directory. `?package=` filters by package.
 - `Shell.RunningBuild` renders a "Running now" card with live stages, View and Cancel (POST `/builds/{id}/cancel`).
 - The result column is derived only from stage statuses (e.g. "published; failed at Sign"), never from log text.
@@ -180,7 +183,7 @@ LogChunk { Offset, NextOffset int64; Text string; Truncated, Done bool }
 ```
 
 - An unknown ID is a plain-text `404`. `Job` is meaningful only when `Item.Live`. `HasLog` is false for history records (the raw log exists only for builds started by this server process).
-- The page shows: an outcome banner by `Item.State` (running: "This page updates automatically"; failed: `Record.Failure.Stage`/`Error` and the side-effects warning when `SideEffectsPossible`; canceled: "external side effects may remain"), `Item.Error` verbatim as "Explorer diagnostic", the 7-stage progress, Outputs (publication reference/digest, a warning when `Digest` is not `Verified`, Docker reference, signing/attestation status, SPDX download from `Item.SPDXURL` with `Evidence.SPDXValidated`), Inputs (request, selection, index SHA-256, apko, lock and workspace paths as text), and the raw log behind a `<details>` toggle (open by default when failed).
+- The page shows: an outcome banner by `Item.State` (running: "This page updates automatically"; failed: `Record.Failure.Stage`/`Error` and the side-effects warning when `SideEffectsPossible`; canceled: "external side effects may remain"), `Item.Error` verbatim as "Explorer diagnostic", the 7-stage progress, Outputs (publication reference/digest, a warning when `Digest` is not `Verified`, Docker reference, signing/attestation status, SPDX download from `Item.SPDXURL` with `Evidence.SPDXValidated`), Inputs (request; for a live job without a record its mode, "publish · also loads into local Docker" or "publish only · <LoadReason>"; with a record the requested publication/signing/load, plus "no Docker load: <LoadReason>" for a publish-only job; selection, index SHA-256, apko, lock and workspace paths as text), and the raw log behind a `<details>` toggle (open by default when failed).
 - Show both Explorer's state and the record's stage outcomes; never infer success from either alone or from log text.
 
 ### `tracking`: `TrackingView`
@@ -197,7 +200,7 @@ Product          { Package string; Selectors []string }
 ## Live updates (polling, no push)
 
 - **Status:** background refreshes run at startup, every refresh interval (default 15 min), after each build ends, after products change, and on `POST /status/refresh`. Elements with `data-poll-url` + `data-poll-field` poll that JSON every ~2.5 s and reload the page when the field becomes false. With `data-poll-error-field` + `data-poll-unless-field` (the catalog uses `lastError`/`document`), an error while the second value is still missing stops polling and replaces the loading state with the error as text, because each catalog GET without a document starts another discovery.
-- **Stages:** an element with `data-live-url="/builds/{id}?format=json"` polls every ~2 s and updates each `[data-stage="<name>"]` item's class, icon and `[data-stage-state]` text from `item.stages`; when `item.state` is no longer `running` the page reloads for the record.
+- **Stages:** an element with `data-live-url="/builds/{id}?format=json"` polls every ~2 s and updates each `[data-stage="<name>"]` item's class, icon and `[data-stage-state]` text from `item.stages` (a skipped Load stage keeps "Skipped · <item.loadReason>" when `item.mode` is `publish` and `item.load` is false); when `item.state` is no longer `running` the page reloads for the record.
 - **Log:** `GET /builds/{id}/logs?offset=N` (alias `/jobs/{id}/logs`) returns `LogChunk` JSON, never a template. `offset` is an absolute byte position (omitted = 0; negative/non-integer = `400`; unknown job = `404`). Only the most recent 1 MiB is kept: an older `offset` starts at the oldest retained byte with `truncated: true`; an offset past the end is clamped with empty `text`. Append `text`, set `offset = nextOffset`, repeat every ~1.5 s until `done: true` (that response already holds the final bytes), then reload. `text` may split lines or multibyte characters and invalid UTF-8 becomes U+FFFD; append with text nodes only. The log is CLI progress and tool diagnostics, not the result.
 - **Build buttons:** forms marked `data-build-form` are disabled on submit and while `/builds?format=json` reports `running`; pages rendered during a build reload when it ends.
 
@@ -219,7 +222,7 @@ All POSTs:
 | `POST /products/add` | `csrfToken`, `package`, `selector` (one or more selectors separated by whitespace) | 303 → `/?tracked=<package>` | `tracking` page with `Error`; 403 Host/origin/CSRF |
 | `POST /products/remove` | `csrfToken`, `package`, `selector` | 303 → `/?untracked=<package>` | `tracking` page with `Error`; 403 Host/origin/CSRF |
 
-Build field validation (the UI may mirror it): `package` ≤ 256 bytes, `^[A-Za-z0-9][A-Za-z0-9+._-]*(?::[A-Za-z0-9][A-Za-z0-9+._-]*)*$`; `selector` ≤ 128 bytes, `^[0-9]+(?:\.[0-9]+)*$`; `apkVersion` ≤ 256 bytes ending in `-r<digits>`. Explorer runs `lupetto build <package> (<selector> | --apk-version <apkVersion>) --json` plus `--no-load` for `publish`; publication and signing follow the inherited environment and are shown by `Record.Request.Publish`/`Sign`/`Load`. Products edits run `lupetto products add|remove --products <file> --json`; they are not gated by `--enable-builds`.
+Build field validation (the UI may mirror it): `package` ≤ 256 bytes, `^[A-Za-z0-9][A-Za-z0-9+._-]*(?::[A-Za-z0-9][A-Za-z0-9+._-]*)*$`; `selector` ≤ 128 bytes, `^[0-9]+(?:\.[0-9]+)*$`; `apkVersion` ≤ 256 bytes ending in `-r<digits>`. Explorer runs `lupetto build <package> (<selector> | --apk-version <apkVersion>) --json`. For `publish` it adds `--no-load` only when the latest local inventory does not report Docker as available (decided once at submission and kept in the job's request as `load`/`loadReason`); otherwise the one CLI run loads, then publishes and signs/attests when configured, so a load failure fails the build before publication. Publication and signing follow the inherited environment and are shown by `Record.Request.Publish`/`Sign`/`Load`. `local` loads only, with publication and signing suppressed. Products edits run `lupetto products add|remove --products <file> --json`; they are not gated by `--enable-builds`.
 
 ## Build records
 

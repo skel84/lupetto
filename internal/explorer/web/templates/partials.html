@@ -40,9 +40,12 @@
 {{define "stage-text"}}{{if eq . "completed"}}Done{{else if eq . "loaded"}}Loaded{{else if eq . "published"}}Published{{else if eq . "signed"}}Signed{{else if eq . "attested"}}Attested{{else if eq . "ok"}}Done{{else if eq . "failed"}}Failed{{else if eq . "running"}}In progress{{else if eq . "skipped"}}Skipped · not requested{{else if eq . "not-attempted"}}Not attempted · earlier stage failed{{else if or (eq . "pending") (eq . "")}}Waiting{{else}}{{.}}{{end}}{{end}}
 {{define "stage-name"}}{{if eq . "resolve"}}Resolve{{else if eq . "build"}}Build{{else if eq . "validate"}}Validate SBOM{{else if eq . "load"}}Load into Docker{{else if eq . "publish" "publication"}}Publish{{else if eq . "sign" "signing"}}Sign{{else if eq . "attest" "attestation"}}Attest SBOM{{else}}{{.}}{{end}}{{end}}
 
-{{/* Root: []BuildStage. 7-stage progress. */}}
-{{define "stage-list"}}<ol class="stages" aria-label="Build stages" data-stages>{{range .}}<li class="stage {{template "stage-class" .Status}}" data-stage="{{.Name}}"><span class="name">{{if eq .Status "completed" "loaded" "published" "signed" "attested" "ok"}}{{template "icon" "check"}}{{else if eq .Status "failed"}}{{template "icon" "fail"}}{{else if eq .Status "running"}}{{template "icon" "running"}}{{else if eq .Status "skipped" "not-attempted"}}{{template "icon" "skip"}}{{else}}{{template "icon" "pending"}}{{end}}{{template "stage-name" .Name}}</span>
-<span class="state" data-stage-state>{{template "stage-text" .Status}}</span></li>{{end}}</ol>{{end}}
+{{/* Root: BuildItem. 7-stage progress. A publish-only job (Mode "publish", Load false) with a LoadReason shows that reason on its skipped Load stage. */}}
+{{define "stage-list"}}{{$it := .}}<ol class="stages" aria-label="Build stages" data-stages>{{range .Stages}}<li class="stage {{template "stage-class" .Status}}" data-stage="{{.Name}}"><span class="name">{{if eq .Status "completed" "loaded" "published" "signed" "attested" "ok"}}{{template "icon" "check"}}{{else if eq .Status "failed"}}{{template "icon" "fail"}}{{else if eq .Status "running"}}{{template "icon" "running"}}{{else if eq .Status "skipped" "not-attempted"}}{{template "icon" "skip"}}{{else}}{{template "icon" "pending"}}{{end}}{{template "stage-name" .Name}}</span>
+<span class="state" data-stage-state>{{if and (eq .Name "load") (eq .Status "skipped") (eq $it.Mode "publish") (not $it.Load) $it.LoadReason}}Skipped · {{$it.LoadReason}}{{else}}{{template "stage-text" .Status}}{{end}}</span></li>{{end}}</ol>{{end}}
+
+{{/* Root: ShellView. Short sub-line for a "Build & publish" action: whether this publish build also loads into local Docker. */}}
+{{define "publish-load-note"}}{{if .PublishLoad}}also loads into local Docker{{else}}publish only: {{if eq .DockerState "unavailable"}}Docker unavailable{{else}}Docker state unknown{{end}}{{end}}{{end}}
 
 {{/* Root: SecuritySource (may be zero). The single explained security-data note. */}}
 {{define "data-note"}}<details class="datanote" id="about-data">
