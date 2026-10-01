@@ -123,6 +123,8 @@ The bounded private runtime/result contract and final source received independen
 
 ## Authenticated registry publication evidence
 
+> **Historical (superseded mechanism).** This section and the two Cosign sections below record the earlier Docker tag/push/pull/save publication path and version 4/5 records, replaced on 2026-10-01 by [direct OCI publication](#direct-oci-publication-and-version-6-record-evidence). They remain valid observations of that earlier implementation.
+
 A separately built executable, `go build -o <temporary>/lupetto ./cmd/lupetto`, exited 0. `<temporary>` denotes a disposable directory outside the repository. With a fresh `DOCKER_CONFIG` referring only to an isolated synthetic credential helper, and with no `COSIGN_PASSWORD` in the environment, the following external-binary command exited 0:
 
 ```text
@@ -216,6 +218,38 @@ After the latest source changes, the final release gates `go test ./... -count=1
 
 Production HTTPS, TUF/default-service interaction, and Rekor/transparency-log verification remain **unexercised**, not authorized by this local proof. The explicitly selected upstream-generated config had no services, and verification intentionally used the local-only transparency-log exception. No production credentials/keys or targets were used, and no secret values, credentials, key/config files, or runtime evidence files were committed.
 
+## Direct OCI publication and version-6 record evidence
+
+Observed 2026-10-01 on darwin/amd64 → linux/amd64 with Go 1.27.1, native apko 1.4.5, Docker client/server 27.4.0 (containerd store, used only for scenario C), and Cosign v3.1.3. The binary was built from commit `1671d04` with `go build -o <temporary>/lupetto ./cmd/lupetto`. The target was a disposable `registry:3` bound only to `127.0.0.1` over HTTP, with htpasswd authentication using a freshly generated synthetic password. Throwaway Cosign keys and an upstream no-service signing config were generated outside the repository. Passwords reached processes only through files and the process environment, never command arguments. `<temporary>` and `$REG` stand for the disposable binary directory and `127.0.0.1:<port>`. All runs selected `busybox-static@1.38.0-r2` (x86_64) from signed APKINDEX SHA-256 `f53bda2286a6edf801c5d2b5589c35a12b1069961bfe131d32030c64f63006fa`.
+
+| Scenario | Command (plus environment) | Exit | Observed record |
+| --- | --- | --- | --- |
+| A. Publish, no Docker | `build busybox-static 1 --no-load --json --registry $REG --repository tests/final/publish`, `DOCKER_HOST` unreachable | 0 | v6 `succeeded`; load `skipped`; publication `published`, `verified: true`; digest `sha256:a3325f44…cf05` equal to `evidence.imageDigest`. |
+| B. Publish + sign + attest, no Docker | as A plus `--cosign-key`, `--cosign-signing-config`, `--cosign-allow-http`; `COSIGN_PASSWORD` exported | 0 | publication `published`/verified; signing `signed`; attestation `attested`; digest `sha256:f2e7a0fe…1f82`. |
+| C. Load + publish | `build busybox-static 1 --registry $REG --repository tests/final/loaded` | 0 | Human summary: Docker loaded with readable and build references, published, immutable `…@sha256:810e4a0f…f8fe`. |
+| D. No credentials | as A with an empty `DOCKER_CONFIG` | 1 | v6 `failed`; `failure.stage` `publication`; error `publication push failed (HTTP 401)`; no digest; `result.json` absent; `failure.json` mode 0600 and byte-identical to stdout. |
+| E. SBOM | `sbom busybox-static --apk-version 1.38.0-r2 --json`, `DOCKER_HOST` unreachable | 0 | v6 `command: sbom`; all optional stages `skipped`. |
+| F. Credential helper | as A with `DOCKER_CONFIG` containing only `{"credsStore":"lupettoe2e"}`; a synthetic `docker-credential-lupettoe2e` on `PATH` returned the registry credentials and wrote a random canary to stderr | 0 | publication `published`/verified (scenario D shows anonymous access fails), so the helper's credentials were used; the canary appeared in neither Lupetto stdout nor stderr. |
+
+For A, B, E, and F, `--json` stdout was byte-identical to the workspace `result.json` (mode 0600). Progress showed the four publication stages; scenario A/B/F workspaces contained no Docker archives, confirming that Docker was not used.
+
+Independent checks:
+
+- An authenticated `curl` (credentials from a mode-0600 netrc file) fetched scenario A's manifest by digest. Its SHA-256 equaled the recorded digest, and its bytes equaled both the retained `published-manifest.json` (mode 0600) and the local OCI layout's manifest blob, proving the manifest was pushed unchanged.
+- `cosign verify` and `cosign verify-attestation --type spdxjson`, both with `--allow-http-registry --insecure-ignore-tlog`, against B's immutable reference: trusted key exit 0 and 0; wrong key exit 1 and 1. The decoded attestation had `predicateType` `https://spdx.dev/Document`, a predicate equal as JSON to the validated architecture SPDX, and a subject digest equal to the pushed digest.
+- None of the outputs, records, or workspace JSON files contained the registry password, the Cosign password, or the helper canary.
+
+Gates on the final tree: `gofmt -l cmd internal` empty; `go vet ./...` passed; `go test -count=1 ./...` and `go test -race -count=1 ./...` passed (`ok` for `cmd/lupetto`, `internal/build`, `internal/wolfi`). Hermetic tests use an in-process OCI registry for tampering (manifest, media type, tag body, config, layer), the loopback HTTP guard and token-realm requests, Docker-config-only authentication (Podman auth ignored), credential helpers in a re-executed subprocess with captured stderr, sanitization (including uppercase registry-supplied canary codes), cancellation, `--no-load` publication and signing, and version-6/`--json` records for every failure stage.
+
+Limitations:
+
+- A plain `docker pull` of the pushed reference was not exercised: the Docker Desktop daemon runs in a VM and cannot reach a registry bound to the host's loopback interface.
+- `127.0.0.2` listener tests are skipped on macOS, which cannot bind that address; injected-dialer tests cover the HTTP fallback for that address instead.
+- Production HTTPS/TUF/Rekor remains unexercised, as do non-loopback registries, other hosts and architectures, and other registry implementations.
+- During an earlier intermediate run (before the final password rotation), the synthetic registry and Cosign passwords briefly appeared in local `htpasswd`, `curl`, and `env` process arguments in the test harness itself, not in Lupetto. Those disposable values were rotated before the final run, and the harness was corrected to use stdin, a netrc file, and shell `export`.
+
+One `go test -race ./...` run during package extraction hung for 10 minutes in the pre-existing fake-`cosign` exec test and was not reproduced: an immediate rerun, 20 targeted race iterations, and three later full race runs all passed.
+
 ## Selection and snapshots
 
 Persistent catalog import/history checks in this section are deferred. Exercise the existing live-index selectors and retained per-build provenance for publication/signing without requiring a catalog database; retaining an index alone does not establish historical APK availability.
@@ -239,7 +273,8 @@ Persistent catalog import/history checks in this section are deferred. Exercise 
 Use isolated test targets and synthetic credentials/keys; publication/signing against a live registry or use of existing credentials/keys requires authorization for the exact target/scope. Roadmap priority and unchecked acceptance criteria are not that authorization. Local HTTP/offline success must not be reported as production HTTPS/transparency-log verification.
 
 - Publish to a compatible test registry under a nested repository prefix; verify that the reported digest resolves to the pushed artifact.
-- Reject publishing with `--no-load` before publication side effects.
+- Publish with `--no-load` and an unreachable Docker endpoint; confirm Docker is not used and the digest is still verified by readback.
+- Tamper with registry responses (manifest, tag body, config, layer) and confirm publication fails unverified without signing.
 - Sign and attest the same immutable digest, then verify both with the trusted public key.
 - Inspect the verified attestation subject and SPDX predicate; compare the predicate with the validated local evidence.
 - Verify that a wrong key or unrelated image digest cannot satisfy the expected signature/attestation checks.
