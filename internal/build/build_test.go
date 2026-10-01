@@ -174,3 +174,11 @@ func TestCheckImagePackageRequiresExactInstalledVersionAndLayerDigest(t *testing
 		t.Fatalf("tampered layer accepted: %v", err)
 	}
 }
+
+func TestCheckImagePackageKeepsFirstSelectedRecordSemantics(t *testing.T) {
+	dir, _ := makeOCI(t, "9.1.2-r0\nA:x86_64\n\nP:valkey-9.1\nV:9.1.2-r1")
+	selected := wolfi.Package{Name: "valkey-9.1", Version: "9.1.2-r1", Arch: "x86_64"}
+	if _, err := checkImagePackage(dir, selected); err == nil || !strings.Contains(err.Error(), "different version or architecture") {
+		t.Fatalf("later duplicate record must not mask wrong first selected version: %v", err)
+	}
+}

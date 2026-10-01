@@ -74,3 +74,28 @@ func ReadIndexedPackages(ctx context.Context, requested, arch string) ([]Package
 	}
 	return ordered, SHA256Hex(index), nil
 }
+
+// ReadIndex returns every version in the current verified index for arch,
+// with the signed archive's SHA-256. It does not collapse versions by name.
+func ReadIndex(ctx context.Context, arch string) ([]Package, string, error) {
+	return ReadIndexedPackages(ctx, "", arch)
+}
+
+// LatestIndexedPackages returns one latest APK per actual package name,
+// sorted by name for browsing. Providers are not additional package names.
+func LatestIndexedPackages(packages []Package, arch string) ([]Package, error) {
+	ordered, err := orderedIndexedPackages(packages, arch)
+	if err != nil {
+		return nil, err
+	}
+	latest := make([]Package, 0)
+	seen := make(map[string]bool)
+	for _, pkg := range ordered {
+		if !seen[pkg.Name] {
+			latest = append(latest, pkg)
+			seen[pkg.Name] = true
+		}
+	}
+	sort.Slice(latest, func(i, j int) bool { return latest[i].Name < latest[j].Name })
+	return latest, nil
+}

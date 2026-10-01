@@ -59,3 +59,27 @@ func TestDiscoverMatchesNamespacedProvider(t *testing.T) {
 		t.Fatalf("selected namespaced provider: %+v, %v", selected, err)
 	}
 }
+
+func TestDiscoverAllPackagesLatestDescriptions(t *testing.T) {
+	fixture := "P:zeta\nV:1.9-r0\nA:x86_64\nC:one\nT:old description\np:virtual=1.9-r0\n\n" +
+		"P:zeta\nV:1.10-r2\nA:x86_64\nC:two\nT:new description: with colon\n\n" +
+		"P:zeta\nV:1.10-r10\nA:x86_64\nC:three\nT:latest description\n\n" +
+		"P:alpha\nV:2-r0\nA:x86_64\nC:four\n\n" +
+		"P:zeta\nV:99-r0\nA:aarch64\nC:five\nT:other architecture\n\n" +
+		"P:incomplete\nV:1-r0\nA:x86_64\n\n" +
+		"P:last\nV:3-r0\nA:x86_64\nC:six\nT:last without separator"
+	packages, err := ParseAPKINDEX(wolfitest.MakeIndex(t, fixture), "")
+	if err != nil || len(packages) != 6 {
+		t.Fatalf("full entries=%+v err=%v", packages, err)
+	}
+	latest, err := LatestIndexedPackages(packages, "x86_64")
+	if err != nil || len(latest) != 3 {
+		t.Fatalf("latest=%+v err=%v", latest, err)
+	}
+	if latest[0].Name != "alpha" || latest[0].Description != "" || latest[1].Name != "last" || latest[1].Description != "last without separator" || latest[2].Name != "zeta" || latest[2].Version != "1.10-r10" || latest[2].Description != "latest description" {
+		t.Fatalf("latest entries=%+v", latest)
+	}
+	if packages[1].Description != "new description: with colon" {
+		t.Fatalf("description parsing=%q", packages[1].Description)
+	}
+}

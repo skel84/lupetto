@@ -5,8 +5,6 @@
 package build
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -19,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"lupetto/internal/wolfi"
@@ -26,6 +25,8 @@ import (
 
 // ApkoVersion is the exact apko release this build path requires.
 const ApkoVersion = "1.4.5"
+
+type sourceDateEpochContextKey struct{}
 
 var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
@@ -174,7 +175,8 @@ func RunWith(ctx context.Context, request Request, services Services) (Result, e
 	}
 	buildMessage(ctx, "Selected %s@%s; local reference %s; build reference %s", selected.Name, selected.Version, imageReference, buildReference)
 	configPath := filepath.Join(workspace, "apko.yaml")
-	config := fmt.Sprintf("contents:\n  keyring:\n    - %s\n  repositories:\n    - %s\n  packages:\n    - %s\narchs:\n  - %s\n", strconv.Quote(keyPath), wolfi.Repository, strconv.Quote(selected.Name+"="+selected.Version), arch)
+	created := time.Now().UTC().Truncate(time.Second)
+	config := fmt.Sprintf("contents:\n  keyring:\n    - %s\n  repositories:\n    - %s\n  packages:\n    - %s\narchs:\n  - %s\nannotations:\n  org.opencontainers.image.version: %s\n  org.opencontainers.image.created: %s\n  lupetto.apk.name: %s\n  lupetto.apk.version: %s\n  lupetto.apk.architecture: %s\n  lupetto.index.sha256: %s\n", strconv.Quote(keyPath), wolfi.Repository, strconv.Quote(selected.Name+"="+selected.Version), arch, strconv.Quote(selected.Version), strconv.Quote(created.Format(time.RFC3339)), strconv.Quote(selected.Name), strconv.Quote(selected.Version), strconv.Quote(selected.Arch), strconv.Quote(indexDigest))
 	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
 		return buildFail(fmt.Errorf("retain apko config: %w", err))
 	}
@@ -196,7 +198,11 @@ func RunWith(ctx context.Context, request Request, services Services) (Result, e
 		return buildFail(fmt.Errorf("create OCI layout directory: %w", err))
 	}
 	buildStage(ctx, "Composing OCI image with apko")
-	if err := runApko(ctx, services.Command, "build", "--arch", arch, "--sbom-path", sbomDir, "--sbom-formats", "spdx", "--vcs=false", "--lockfile", lockPath, configPath, buildReference, imageDir+string(os.PathSeparator)); err != nil {
+	// apko replaces the configured created annotation with its build epoch.
+	// Pin that epoch for this subprocess only; an inherited SOURCE_DATE_EPOCH
+	// must not turn actual build time into an APK's historical build time.
+	buildContext := context.WithValue(ctx, sourceDateEpochContextKey{}, strconv.FormatInt(created.Unix(), 10))
+	if err := runApko(buildContext, services.Command, "build", "--build-date", created.Format(time.RFC3339), "--arch", arch, "--sbom-path", sbomDir, "--sbom-formats", "spdx", "--vcs=false", "--lockfile", lockPath, configPath, buildReference, imageDir+string(os.PathSeparator)); err != nil {
 		return buildFail(err)
 	}
 	buildStage(ctx, "Checking installed APK")
@@ -380,38 +386,17 @@ func checkImagePackage(dir string, selected wolfi.Package) (string, error) {
 	if _, err := layer.Seek(0, io.SeekStart); err != nil {
 		return "", fmt.Errorf("rewind OCI layer: %w", err)
 	}
-	gz, err := gzip.NewReader(layer)
+	installed, err := wolfi.ReadInstalledPackages(layer)
 	if err != nil {
-		return "", fmt.Errorf("open OCI layer gzip: %w", err)
+		return "", err
 	}
-	defer gz.Close()
-	archive := tar.NewReader(gz)
-	for {
-		header, err := archive.Next()
-		if err == io.EOF {
-			return "", fmt.Errorf("installed APK database missing from OCI image")
-		}
-		if err != nil {
-			return "", fmt.Errorf("read OCI layer tar: %w", err)
-		}
-		if header.Name != "usr/lib/apk/db/installed" {
-			continue
-		}
-		if header.Size > 8<<20 {
-			return "", fmt.Errorf("installed APK database exceeds 8 MiB")
-		}
-		installed, err := io.ReadAll(io.LimitReader(archive, (8<<20)+1))
-		if err != nil {
-			return "", fmt.Errorf("read installed APK database: %w", err)
-		}
-		for _, record := range strings.Split(string(installed), "\n\n") {
-			if strings.Contains("\n"+record+"\n", "\nP:"+selected.Name+"\n") {
-				if strings.Contains("\n"+record+"\n", "\nV:"+selected.Version+"\n") && strings.Contains("\n"+record+"\n", "\nA:"+selected.Arch+"\n") {
-					return index.Manifests[0].Digest, nil
-				}
-				return "", fmt.Errorf("OCI image contains a different version or architecture of %s", selected.Name)
+	for _, pkg := range installed {
+		if pkg.Name == selected.Name {
+			if pkg.Version == selected.Version && pkg.Arch == selected.Arch {
+				return index.Manifests[0].Digest, nil
 			}
+			return "", fmt.Errorf("OCI image contains a different version or architecture of %s", selected.Name)
 		}
-		return "", fmt.Errorf("OCI image does not contain selected %s@%s", selected.Name, selected.Version)
 	}
+	return "", fmt.Errorf("OCI image does not contain selected %s@%s", selected.Name, selected.Version)
 }

@@ -70,6 +70,8 @@ HOST/PREFIX/<resolved-actual-apk-component>:<local-readable-tag>-build-<workspac
 
 The APK component and exact-version/architecture tag reuse the local literal-or-SHA-256-fallback naming; an overlong combined tag is replaced by a deterministic hash of the whole tag. Evidence keeps the unchanged APK name/version.
 
+Every new build (including `--no-load` and `sbom`) carries the six [image identity annotations](../README.md#image-identity-annotations) in its apko-generated manifest: exact APK version, current UTC build time, actual APK name/version/architecture, and signed-index SHA-256. Read these rather than inferring package identity from the tag. Older manifests are not rewritten.
+
 Publication then:
 
 1. Confirms the layout's manifest is still the one validated earlier (`evidence.imageDigest`), then pushes it **unchanged**, so the pushed digest equals that validated digest.

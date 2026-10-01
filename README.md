@@ -41,11 +41,30 @@ lupetto discover postgresql
 lupetto discover nginx
 lupetto discover valkey
 lupetto discover cmd:curl
+lupetto discover --json nginx
+lupetto discover --json
 ```
 
 `discover` verifies the live APKINDEX signature against the pinned Wolfi public key, prints the signed archive's SHA-256, and lists all matching exact APK names/versions for the host architecture, newest first. Names can match an actual package or a version-matched virtual provider (`cmd:curl` resolves to actual APK entries). Different packages advertising the same version are not silently collapsed.
 
 **Indexed does not mean buildable.** apko must still lock the package/dependencies and fetch the needed APK bytes. Discovery creates no workspace, checks no APK contents, and does not browse imported or historical snapshots. A missing name exits unsuccessfully. The live index changes, so examples are not availability guarantees.
+
+`discover --json <name>` returns those same exact entries and descriptions as one versioned document. `--json` can appear before or after the name. Without a name, `discover --json` lists **one latest APK per actual package name**, alphabetically by name, using APK version/revision ordering for the host architecture; virtual providers are not extra names. Descriptions come from the signed index's `T:` field and may be empty. Human discovery still requires a name and its output is unchanged.
+
+```json
+{
+  "kind": "discover",
+  "version": 1,
+  "package": "nginx",
+  "architecture": "x86_64",
+  "indexSHA256": "…",
+  "packages": [
+    {"name": "nginx-stable", "version": "1.30.2-r0", "description": "…"}
+  ]
+}
+```
+
+The optional `package` field is the requested name/provider and is omitted for all-packages browsing. `indexSHA256` identifies the signed archive, not its decompressed contents. A successful empty all-packages result has `packages: []`; a missing named package or index/verification failure exits 1 with stderr diagnostics and **no JSON document**. Invalid arguments exit 2 with empty stdout. Discovery documents are separate from unchanged version-6 build/SBOM records.
 
 ## Build a local OCI image
 
@@ -87,6 +106,23 @@ docker image inspect lupetto/nginx-stable:1.30.2-r0-amd64
 ```
 
 Use the actual reference printed by your build. `--no-load` and `sbom` skip archive creation and all Docker commands; their reported references are **intended names**, not proof a tag exists or points to that build. `--no-load` can be combined with publication and signing, which push the validated OCI layout without Docker.
+
+### Image identity annotations
+
+Every `build` and `sbom` config supplies these manifest annotations through apko, independently of Docker loading or publication:
+
+| Annotation | Value |
+| --- | --- |
+| `org.opencontainers.image.version` | Exact selected APK version, including `-rN`. |
+| `org.opencontainers.image.created` | Actual build time, RFC 3339 UTC. |
+| `lupetto.apk.name` | Actual resolved APK name, not the requested provider. |
+| `lupetto.apk.version` | Exact selected APK version. |
+| `lupetto.apk.architecture` | Wolfi APK architecture (`x86_64` or `aarch64`). |
+| `lupetto.index.sha256` | SHA-256 of the signed APKINDEX archive used for selection. |
+
+apko's build date and its subprocess-only `SOURCE_DATE_EPOCH` are pinned to the same current UTC timestamp so an inherited reproducibility epoch cannot replace the created annotation with a historical package date. Other subprocess environment settings remain inherited; Lupetto does not record the environment. Publication pushes that annotated manifest unchanged. Version-6 result records are unchanged.
+
+Use annotations rather than parsing tags, which may contain naming fallbacks. Older images are not retrofitted; images without the required identity annotations remain unidentified. The provisional `lupetto.` prefix can change only with a status-document version bump.
 
 ## Generate validated SPDX
 

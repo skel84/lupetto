@@ -24,10 +24,11 @@ The [user-approved publication-first roadmap](decisions.md#publication-first-roa
 
 ## CLI compatibility targets
 
-The commands below are implemented. `build` loads into local Docker by default (`--no-load` skips it) and can optionally publish, sign, and attest, with or without loading. `sbom` composes a new image through the same exact-build pipeline and never loads, publishes, or signs. `--json` prints the version-6 result record. Angle-bracket terms must be replaced with actual values; [`--help`](../README.md#prerequisites-and-installation) is authoritative for flag spelling.
+The commands below are implemented. `build` loads into local Docker by default (`--no-load` skips it) and can optionally publish, sign, and attest, with or without loading. `sbom` composes a new image through the same exact-build pipeline and never loads, publishes, or signs. Build/SBOM `--json` prints the unchanged version-6 result record; discovery has its own kind `discover`, version-1 document. Angle-bracket terms must be replaced with actual values; [`--help`](../README.md#prerequisites-and-installation) is authoritative for flag spelling.
 
 ```text
 lupetto discover <package-or-provider>
+lupetto discover --json [<package-or-provider>]
 lupetto build <package-or-provider> <dotted-numeric-selector> [--no-load] [--json] [--registry <authority> --repository <prefix>] [--cosign-key <key> [--cosign-signing-config <file>] [--cosign-allow-http[=true|false]]]
 lupetto build <package-or-provider> --apk-version <exact-apk-version> [--no-load] [--json] [--registry <authority> --repository <prefix>] [--cosign-key <key> [--cosign-signing-config <file>] [--cosign-allow-http[=true|false]]]
 lupetto sbom <package-or-provider> --apk-version <exact-apk-version> [--json]

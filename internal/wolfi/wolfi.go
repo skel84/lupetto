@@ -45,7 +45,7 @@ var upstreamNumbers = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)*)`)
 
 // Package is one APKINDEX entry.
 type Package struct {
-	Name, Version, Arch, Checksum, Provides string
+	Name, Version, Arch, Checksum, Provides, Description string
 }
 
 // TargetArch returns the Wolfi architecture of the host.
@@ -153,7 +153,8 @@ func VerifyAPKINDEX(compressed, publicKey []byte) ([]byte, error) {
 }
 
 // ParseAPKINDEX returns the complete entries that match requested by name or
-// by a provider of the entry's own exact version.
+// by a provider of the entry's own exact version. An empty request returns all
+// complete named entries, retaining every version for index comparisons.
 func ParseAPKINDEX(compressed []byte, requested string) ([]Package, error) {
 	gz, err := gzip.NewReader(bytes.NewReader(compressed))
 	if err != nil {
@@ -186,7 +187,7 @@ func ParseAPKINDEX(compressed []byte, requested string) ([]Package, error) {
 		var current Package
 		for _, line := range strings.Split(string(data), "\n") {
 			if line == "" {
-				if matchesRequestedPackage(current, requested) && current.Version != "" && current.Arch != "" && current.Checksum != "" {
+				if (requested == "" && current.Name != "" || matchesRequestedPackage(current, requested)) && current.Version != "" && current.Arch != "" && current.Checksum != "" {
 					packages = append(packages, current)
 				}
 				current = Package{}
@@ -206,9 +207,11 @@ func ParseAPKINDEX(compressed []byte, requested string) ([]Package, error) {
 				current.Checksum = line[2:]
 			case 'p':
 				current.Provides = line[2:]
+			case 'T':
+				current.Description = line[2:]
 			}
 		}
-		if matchesRequestedPackage(current, requested) && current.Version != "" && current.Arch != "" && current.Checksum != "" {
+		if (requested == "" && current.Name != "" || matchesRequestedPackage(current, requested)) && current.Version != "" && current.Arch != "" && current.Checksum != "" {
 			packages = append(packages, current)
 		}
 		return packages, nil

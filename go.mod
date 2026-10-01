@@ -7,6 +7,7 @@ require (
 	github.com/distribution/reference v0.6.0
 	github.com/docker/cli v29.7.2+incompatible
 	github.com/google/go-containerregistry v0.22.1
+	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/term v0.46.0
 )
 

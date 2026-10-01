@@ -250,6 +250,41 @@ Limitations:
 
 One `go test -race ./...` run during package extraction hung for 10 minutes in the pre-existing fake-`cosign` exec test and was not reproduced: an immediate rerun, 20 targeted race iterations, and four later full race runs all passed.
 
+## Image annotations and discovery JSON (checkpoint 1)
+
+Observed 2026-10-01 on darwin/amd64 → linux/amd64 with Go 1.27.1 and native apko 1.4.5. An exact staged checkpoint-1 tree was exported with `git checkout-index --all --prefix=<temporary-tree>/`, excluding the concurrently developed checkpoint-2 files, and compiled with `go build -o <temporary>/lupetto-cp1 ./cmd/lupetto`. No remote registry or existing credentials were used: a disposable `registry:3` was started with `docker run --rm -d --name <owned-name> -p 127.0.0.1:54985:5000 registry:3`, and `DOCKER_CONFIG` pointed to a new directory containing only `{}`. `DOCKER_HOST` was an unreachable local socket.
+
+These actual commands exited 0; `SOURCE_DATE_EPOCH=1` was inherited deliberately to exercise replacement of a conflicting reproducible-build epoch:
+
+```bash
+SOURCE_DATE_EPOCH=1 <temporary>/lupetto-cp1 build busybox-static \
+  --apk-version 1.37.0-r56 --no-load --json \
+  --registry 127.0.0.1:54985 --repository tests/status/images
+SOURCE_DATE_EPOCH=1 <temporary>/lupetto-cp1 sbom busybox-static \
+  --apk-version 1.37.0-r56 --json
+<temporary>/lupetto-cp1 discover --json cmd:curl
+<temporary>/lupetto-cp1 discover --json
+```
+
+The build retained workspace `image-2154979337`, selected `busybox-static@1.37.0-r56`, and recorded APKINDEX SHA-256 `4ef1cfe0f53a73cf245e0cfbadb53252b004f8f0f74ae858ec0666a8feef6887`. Independent Python inspection of the OCI layout's manifest blob found exactly these identity annotations:
+
+```json
+{
+  "lupetto.apk.architecture": "x86_64",
+  "lupetto.apk.name": "busybox-static",
+  "lupetto.apk.version": "1.37.0-r56",
+  "lupetto.index.sha256": "4ef1cfe0f53a73cf245e0cfbadb53252b004f8f0f74ae858ec0666a8feef6887",
+  "org.opencontainers.image.created": "2026-10-01T14:59:31Z",
+  "org.opencontainers.image.version": "1.37.0-r56"
+}
+```
+
+The manifest SHA-256 was `sha256:51ff7537f57c5386d302626fecfa04363b38effd38c9abe59db12f69b8c4c111`. An independent HTTP GET by digest to the isolated registry found bytes equal to the local manifest and mode-0600 `published-manifest.json`; the version-6 result reported publication `published` / `verified: true` and loading `skipped`. The SBOM run retained `image-2125561630`, with all six manifest annotations, created `2026-10-01T15:00:08Z`, and manifest digest `sha256:6e9fc91d2c5afa685a3d93aee6d85c5d7ef40213d4de67d63608c2751017f68b`; loading/publication/signing remained skipped. This confirms actual build time rather than inherited epoch or APK build time, without post-build manifest mutation.
+
+Both discovery documents decoded as `kind: discover`, `version: 1`, architecture `x86_64`, and index SHA-256 `d964ce3f46ed46ff422e0e542ebffc601a58ef8bc8c96ebd05c708e3c6c949e8`. Named `cmd:curl` returned 45 exact entries with descriptions; all-packages discovery returned 15,494 unique, alphabetically ordered actual APK names with latest versions and descriptions, omitting the requested `package` field. Both stdout documents ended in a newline. Index hashes differ between operations because the live repository changed; no snapshot identity across separate invocations is promised.
+
+Scoped annotation/epoch/installed-reader/discovery regressions passed. Independent source review found no correctness defect; its newline-consistency suggestion was applied and tested. On the exact staged source tree exported above, `go test ./...` and `go test -race ./...` both passed (`cmd/lupetto`, `internal/build`, `internal/wolfi`; fixture packages have no tests). The same owned registry is retained temporarily for checkpoint 2, then removed; this proof does not exercise production authentication/TLS, other architectures, historical rebuildability, or any dashboard.
+
 ## Selection and snapshots
 
 Persistent catalog import/history checks in this section are deferred. Exercise the existing live-index selectors and retained per-build provenance for publication/signing without requiring a catalog database; retaining an index alone does not establish historical APK availability.

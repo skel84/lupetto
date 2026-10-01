@@ -28,6 +28,15 @@ func ExecuteLocalCommand(ctx context.Context, executable string, args ...string)
 		output.progress = ReporterFrom(ctx)
 	}
 	command := exec.CommandContext(ctx, executable, args...)
+	if epoch, ok := ctx.Value(sourceDateEpochContextKey{}).(string); ok {
+		command.Env = make([]string, 0)
+		for _, variable := range os.Environ() {
+			if !strings.HasPrefix(variable, "SOURCE_DATE_EPOCH=") {
+				command.Env = append(command.Env, variable)
+			}
+		}
+		command.Env = append(command.Env, "SOURCE_DATE_EPOCH="+epoch)
+	}
 	command.Stdout, command.Stderr = output, output
 	err := command.Run()
 	if ctx.Err() != nil {
