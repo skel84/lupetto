@@ -33,7 +33,7 @@ internal/status/      strict products YAML, registry/index/security comparison, 
 internal/wolfi/wolfitest/   shared test fixtures (signed index generation)
 cmd/lupetto-explorer/ flags, signal-aware HTTP/CLI shutdown
 internal/explorer/    own JSON decoding/view models, subprocess adapter, caches, job runner, HTTP safety/rendering seam
-internal/explorer/web/ embedded templates/static assets (placeholders at backend checkpoint), UI contract
+internal/explorer/web/ embedded dashboard templates/static assets, UI contract
 
 cmd/lupetto ──▶ internal/build ──▶ internal/wolfi
       └──────────────────────────────▶ internal/wolfi

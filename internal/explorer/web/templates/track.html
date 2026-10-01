@@ -1,0 +1,122 @@
+{{define "track"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{.Track.Package}} {{.Track.Selector}} · Lupetto Explorer</title>
+{{template "layout-assets"}}
+</head>
+<body>
+{{template "layout-nav" "track"}}
+<main id="main">
+  <nav aria-label="Breadcrumb" class="crumbs"><a href="/">Overview</a> / <span>{{.Track.Package}} {{.Track.Selector}}</span></nav>
+  <div class="page-head">
+    <h1>{{.Track.Package}} <span class="selector">{{.Track.Selector}}</span> {{template "partial-track-state" .Track.State}}</h1>
+    {{if .BuildsEnabled}}<form method="post" action="/builds" class="inline-form" data-build-form>
+      <input type="hidden" name="csrfToken" value="{{.CSRFToken}}">
+      <input type="hidden" name="package" value="{{.Track.Package}}">
+      <input type="hidden" name="selector" value="{{.Track.Selector}}">
+      <button type="submit">Build {{.Track.Package}} {{.Track.Selector}}</button>
+    </form>{{else}}<span class="tag">Builds disabled</span>{{end}}
+  </div>
+  {{template "partial-status-banner" .Status}}
+
+  {{if .Track.Error}}<div class="callout callout-bad" role="alert"><p><strong>Track error</strong></p><pre class="error-text">{{.Track.Error}}</pre></div>{{end}}
+
+  <dl class="facts">
+    <div><dt>Latest in signed index</dt><dd>{{with .Track.Latest}}<code>{{.Name}} {{.Version}}</code> ({{.Architecture}}){{else}}<span class="muted">unavailable</span>{{end}}</dd></div>
+    <div><dt>Newest image</dt><dd>{{with .Track.Newest}}<code>{{.Name}} {{.Version}}</code> <code class="hash">{{.Digest}}</code>{{else}}<span class="muted">no image</span>{{end}}</dd></div>
+    <div><dt>Repository</dt><dd>{{if .Track.Repository}}<code>{{.Track.Repository}}</code>{{else}}<span class="muted">not reported</span>{{end}}</dd></div>
+    {{with .Status.Document}}<div><dt>Status computed</dt><dd>{{if .ComputedAt.IsZero}}<span class="muted">not reported</span>{{else}}{{template "partial-time" .ComputedAt}}{{end}}</dd></div>{{end}}
+  </dl>
+
+  {{with .Status.Document}}<div class="callout callout-warn" role="note">
+    <p><strong>Security data lists known fixed issues from Wolfi's unsigned feed only.</strong> An empty list is not “no vulnerabilities”; this is not a vulnerability scan.</p>
+    <p class="small">Feed <code class="hash">{{.Security.URL}}</code> · SHA-256 <code class="hash">{{.Security.SHA256}}</code>{{if .Security.Unsigned}} · ⚠ not signed{{end}}{{if .Security.FixedOnly}} · ⚠ fixed vulnerabilities only{{end}}{{if .Security.WolfiOnly}} · ⚠ Wolfi packages only{{end}}{{if gt .Security.UnevaluatedFixCount 0}} · ⚠ {{.Security.UnevaluatedFixCount}} feed {{if eq .Security.UnevaluatedFixCount 1}}entry{{else}}entries{{end}} unevaluated (see <a href="/">overview</a>){{end}}</p>
+  </div>{{end}}
+
+  <section aria-labelledby="fixes-heading">
+    <h2 id="fixes-heading">Missing security fixes</h2>
+    {{$reachable := 0}}{{$unreachable := 0}}{{range .Track.MissingFixes}}{{if .ReachableByTrack}}{{$reachable = 1}}{{else}}{{$unreachable = 1}}{{end}}{{end}}
+    {{if not .Track.Newest}}<p class="muted">No image of this track exists, so no installed packages were compared.</p>
+    {{else if not .Track.MissingFixes}}<p>No known fixed-version advisories in this unsigned, fixed-only Wolfi feed apply to the newest image's installed packages. This is not evidence that the image has no vulnerabilities.</p>
+    {{end}}
+    {{if eq $reachable 1}}
+    <h3 id="reachable-heading">Reachable by this track</h3>
+    <p class="muted small">The CLI marks these reachable: top-level fixes through this track's selected APK; dependency fixes by same-name/same-architecture availability in the current index. This is not a solved dependency lock; a rebuild may not pick up the fix and may fail.</p>
+    <div class="table-wrap"><table aria-labelledby="reachable-heading">
+      {{template "partial-fix-head"}}
+      <tbody>{{range .Track.MissingFixes}}{{if .ReachableByTrack}}{{template "partial-fix-row" .}}{{end}}{{end}}</tbody>
+    </table></div>
+    {{end}}
+    {{if eq $unreachable 1}}
+    <h3 id="unreachable-heading">⚠ Outside this track's selector</h3>
+    <div class="callout callout-warn" role="note"><p>These top-level package fixes need a version beyond selector <code>{{.Track.Selector}}</code>; rebuilding this track will not pick them up.</p></div>
+    <div class="table-wrap"><table aria-labelledby="unreachable-heading">
+      {{template "partial-fix-head"}}
+      <tbody>{{range .Track.MissingFixes}}{{if not .ReachableByTrack}}{{template "partial-fix-row" .}}{{end}}{{end}}</tbody>
+    </table></div>
+    {{end}}
+  </section>
+
+  {{if .Track.UnevaluatedFixes}}
+  <section aria-labelledby="unevaluated-heading">
+    <h2 id="unevaluated-heading">⚠ Unevaluated advisories for installed packages</h2>
+    <p>The CLI could not evaluate these feed entries (unparseable fixed version or unsupported IDs). They may or may not apply; treat them as open questions, not as a clean result.</p>
+    {{template "partial-unevaluated-table" .Track.UnevaluatedFixes}}
+  </section>
+  {{end}}
+
+  <section aria-labelledby="outdated-heading">
+    <h2 id="outdated-heading">Outdated packages</h2>
+    {{if .Track.Outdated}}<div class="table-wrap"><table>
+      <thead><tr><th scope="col">Package</th><th scope="col">Architecture</th><th scope="col">Installed</th><th scope="col">Latest in index</th></tr></thead>
+      <tbody>{{range .Track.Outdated}}<tr><th scope="row">{{.Name}}</th><td>{{.Architecture}}</td><td><code>{{.InstalledVersion}}</code></td><td><code>{{.LatestVersion}}</code></td></tr>{{end}}</tbody>
+    </table></div>
+    {{else if .Track.Newest}}<p class="muted">No installed package has a newer version in the index.</p>
+    {{else}}<p class="muted">No image to compare.</p>{{end}}
+  </section>
+
+  <section aria-labelledby="images-heading">
+    <h2 id="images-heading">Images</h2>
+    {{if .Track.Images}}<div class="table-wrap"><table>
+      <thead><tr><th scope="col">Version</th><th scope="col">Tags</th><th scope="col">Digest</th><th scope="col">Created</th><th scope="col">Annotations</th></tr></thead>
+      <tbody>{{range .Track.Images}}<tr>
+        <th scope="row"><code>{{.Version}}</code><div class="muted small">{{.Name}} · {{.Architecture}}</div></th>
+        <td>{{if .Tags}}<ul class="tags">{{range .Tags}}<li><code>{{.}}</code></li>{{end}}</ul>{{else}}<span class="muted">untagged</span>{{end}}</td>
+        <td><code class="hash">{{.Digest}}</code></td>
+        <td>{{if .Created.IsZero}}<span class="muted">not reported</span>{{else}}{{template "partial-time" .Created}}{{end}}</td>
+        <td>{{if .Annotations}}<details><summary>{{len .Annotations}} annotations</summary><dl class="kv">{{range $k, $v := .Annotations}}<div><dt><code>{{$k}}</code></dt><dd><code class="hash">{{$v}}</code></dd></div>{{end}}</dl></details>{{else}}<span class="muted">none</span>{{end}}</td>
+      </tr>{{end}}</tbody>
+    </table></div>
+    {{else}}<p class="muted">No identified images for this track in the registry.</p>{{end}}
+    {{if or (gt .Track.UnidentifiedCount 0) (gt .Track.ArtifactCount 0)}}<p class="muted small">Not shown:{{if gt .Track.UnidentifiedCount 0}} {{.Track.UnidentifiedCount}} unidentified image manifest{{if ne .Track.UnidentifiedCount 1}}s{{end}} (no Lupetto identity annotations);{{end}}{{if gt .Track.ArtifactCount 0}} {{.Track.ArtifactCount}} non-image artifact{{if ne .Track.ArtifactCount 1}}s{{end}} (for example signatures or attestations).{{end}} These are not errors.</p>{{end}}
+  </section>
+
+  <section aria-labelledby="installed-heading">
+    <h2 id="installed-heading">Installed packages</h2>
+    {{if .Track.Installed}}<details>
+      <summary>{{len .Track.Installed}} APKs installed in the newest image</summary>
+      <div class="table-wrap"><table>
+        <thead><tr><th scope="col">Package</th><th scope="col">Version</th><th scope="col">Architecture</th></tr></thead>
+        <tbody>{{range .Track.Installed}}<tr><th scope="row">{{.Name}}</th><td><code>{{.Version}}</code></td><td>{{.Architecture}}</td></tr>{{end}}</tbody>
+      </table></div>
+    </details>
+    {{else}}<p class="muted">No installed package set (no image, or it could not be read).</p>{{end}}
+  </section>
+</main>
+{{template "layout-foot"}}
+</body>
+</html>{{end}}
+
+{{define "partial-fix-head"}}<thead><tr><th scope="col">Package</th><th scope="col">Architecture</th><th scope="col">Installed</th><th scope="col">Fixed in</th><th scope="col">Available in index</th><th scope="col">Advisory IDs</th><th scope="col">Reachable by track</th></tr></thead>{{end}}
+
+{{/* Root: MissingFix. */}}
+{{define "partial-fix-row"}}<tr>
+  <th scope="row">{{.Name}}</th>
+  <td>{{.Architecture}}</td>
+  <td><code>{{.InstalledVersion}}</code></td>
+  <td><code>{{.FixedVersion}}</code></td>
+  <td><code>{{.AvailableVersion}}</code></td>
+  <td>{{template "partial-advisory-ids" .IDs}}</td>
+  <td>{{if .ReachableByTrack}}yes{{else}}<span class="warn-text">no — outside selector</span>{{end}}</td>
+</tr>{{end}}

@@ -31,7 +31,7 @@ Every response carries these headers:
 ```
 Content-Security-Policy: default-src 'self'; frame-ancestors 'none'
 X-Content-Type-Options: nosniff
-Referrer-Policy: no-referrer
+Referrer-Policy: same-origin
 Cache-Control: no-store
 ```
 
@@ -192,7 +192,7 @@ All POSTs share these rules:
 - The body must be `application/x-www-form-urlencoded`, which is the default for an HTML `<form method="post">`. **Multipart bodies are not parsed**: a `FormData` body sent with `fetch` fails CSRF. Use `URLSearchParams` instead.
 - The body is limited to 8 KiB.
 - Include `csrfToken` **in the body**. A token in the query string is ignored. Each field must appear exactly once; a duplicated field counts as empty.
-- The request must be same-origin. If `Origin` is present, its scheme must be `http` or `https` and its authority must exactly equal the request `Host`, including any port (no path, query or userinfo). Either scheme is accepted so a TLS-terminating ingress that forwards plain HTTP works; no forwarded headers (`X-Forwarded-*`, `Forwarded`) are trusted. Without `Origin`, `Sec-Fetch-Site: same-origin` is required. Any `Sec-Fetch-Site` other than `same-origin` is rejected. Ordinary same-origin form posts from browsers already satisfy this.
+- The request must be same-origin. If `Origin` is present, its scheme must be `http` or `https` and its authority must exactly equal the request `Host`, including any port (no path, query or userinfo). Either scheme is accepted so a TLS-terminating ingress that forwards plain HTTP works; no forwarded headers (`X-Forwarded-*`, `Forwarded`) are trusted. Without `Origin`, `Sec-Fetch-Site: same-origin` is required. Any `Sec-Fetch-Site` other than `same-origin` is rejected. Ordinary same-origin form posts from browsers satisfy this because the server sends `Referrer-Policy: same-origin`: under `no-referrer`, browsers send `Origin: null` on form posts, and `Origin: null` is always rejected (do not set a stricter referrer policy in templates). `same-origin` still sends no referrer to any other origin.
 - Success returns `303 See Other`. Failures return plain-text errors (not templates). A JavaScript caller should display the response text.
 
 | Action | Fields | Success | Errors |

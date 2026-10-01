@@ -1,0 +1,45 @@
+{{define "package"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{.Name}} · Packages · Lupetto Explorer</title>
+{{template "layout-assets"}}
+</head>
+<body>
+{{template "layout-nav" "packages"}}
+<main id="main">
+  <nav aria-label="Breadcrumb" class="crumbs"><a href="/packages">Packages</a> / <span>{{.Name}}</span></nav>
+  <h1>{{.Name}}</h1>
+  {{template "layout-builds-mode" .}}
+
+  {{if .Error}}<div class="callout callout-bad" role="alert"><p><strong>Discovery failed.</strong></p><pre class="error-text">{{.Error}}</pre></div>{{end}}
+
+  {{with .Document}}
+  <dl class="facts">
+    <div><dt>Architecture</dt><dd>{{.Architecture}}</dd></div>
+    <div><dt>Signed index SHA-256</dt><dd><code class="hash">{{.IndexSHA256}}</code></dd></div>
+  </dl>
+  <section aria-labelledby="versions-heading">
+    <h2 id="versions-heading">Available versions</h2>
+    {{if .Packages}}<div class="table-wrap"><table>
+      <thead><tr><th scope="col">APK</th><th scope="col">Version</th><th scope="col">Description</th><th scope="col">Exact build</th></tr></thead>
+      <tbody>{{range .Packages}}<tr>
+        <th scope="row">{{.Name}}</th>
+        <td><code>{{.Version}}</code></td>
+        <td>{{.Description}}</td>
+        <td>{{if $.BuildsEnabled}}<form method="post" action="/builds" class="inline-form" data-build-form>
+          <input type="hidden" name="csrfToken" value="{{$.CSRFToken}}">
+          <input type="hidden" name="package" value="{{$.Name}}">
+          <input type="hidden" name="apkVersion" value="{{.Version}}">
+          <button type="submit" aria-label="Build {{$.Name}} exactly at {{.Version}}">Build {{.Version}}</button>
+        </form>{{else}}<span class="muted">builds disabled</span>{{end}}</td>
+      </tr>{{end}}</tbody>
+    </table></div>
+    {{if $.BuildsEnabled}}<p class="muted small">An exact build sends <code>{{$.Name}}</code> with <code>--apk-version</code>; the CLI publishes the image (and signs it when Explorer's environment configures a key).</p>{{end}}
+    {{else}}<p>No versions of this package are in the index.</p>{{end}}
+  </section>
+  {{end}}
+</main>
+{{template "layout-foot"}}
+</body>
+</html>{{end}}

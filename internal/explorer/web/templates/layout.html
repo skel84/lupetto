@@ -1,0 +1,102 @@
+{{/* Shared layout and partials. Every name is global across the template set. */}}
+
+{{define "layout-assets"}}<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>{{end}}
+
+{{/* Root: the current page key ("overview", "packages" or "jobs"). */}}
+{{define "layout-nav"}}<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header">
+  <a class="brand" href="/">Lupetto Explorer</a>
+  <nav aria-label="Main">
+    <ul>
+      <li><a href="/"{{if eq . "overview"}} aria-current="page"{{end}}>Overview</a></li>
+      <li><a href="/packages"{{if eq . "packages"}} aria-current="page"{{end}}>Packages</a></li>
+      <li><a href="/jobs"{{if eq . "jobs"}} aria-current="page"{{end}}>Jobs</a></li>
+    </ul>
+  </nav>
+</header>{{end}}
+
+{{/* Root: any page model (uses BaseView.BuildsEnabled). */}}
+{{define "layout-builds-mode"}}{{if .BuildsEnabled}}<p class="mode mode-enabled"><span class="tag">Builds enabled</span> Builds publish to the registry configured in Explorer's environment. Only one build runs at a time.</p>{{else}}<p class="mode mode-disabled" role="note"><span class="tag">Builds disabled</span> Explorer is read-only: start it with <code>--enable-builds</code> to build or cancel.</p>{{end}}{{end}}
+
+{{define "layout-foot"}}<footer class="site-footer">
+  <p>Explorer presents <code>lupetto</code> CLI documents. Times are UTC. Data is fetched only from this server.</p>
+</footer>{{end}}
+
+{{/* Root: time.Time (non-zero). */}}
+{{define "partial-time"}}<time datetime="{{.Format "2006-01-02T15:04:05Z07:00"}}">{{.Format "2006-01-02 15:04:05 MST"}}</time>{{end}}
+
+{{/* Root: digest string. Shows a short form with the full value available. */}}
+{{define "partial-short-digest"}}{{if gt (len .) 19}}<code class="digest" title="{{.}}">{{slice . 0 19}}…</code>{{else}}<code class="digest">{{.}}</code>{{end}}{{end}}
+
+{{/* Root: track State. Badge text carries the meaning; colour is secondary. */}}
+{{define "partial-track-state"}}{{if eq . "current"}}<span class="badge badge-info">= current</span>{{else if eq . "update-available"}}<span class="badge badge-warn">↑ update available</span>{{else if eq . "fixes-available"}}<span class="badge badge-warn">! fixes available</span>{{else if eq . "not-built"}}<span class="badge badge-muted">∅ not built</span>{{else if eq . "error"}}<span class="badge badge-bad">✕ error</span>{{else}}<span class="badge badge-muted">? {{.}}</span>{{end}}{{end}}
+
+{{/* Root: job State. */}}
+{{define "partial-job-state"}}{{if eq . "running"}}<span class="badge badge-info">… running</span>{{else if eq . "succeeded"}}<span class="badge badge-ok">✓ succeeded</span>{{else if eq . "failed"}}<span class="badge badge-bad">✕ failed</span>{{else if eq . "canceled"}}<span class="badge badge-warn">■ canceled</span>{{else}}<span class="badge badge-muted">? {{.}}</span>{{end}}{{end}}
+
+{{/* Root: record Outcome. */}}
+{{define "partial-outcome"}}{{if eq . "succeeded"}}<span class="badge badge-ok">✓ succeeded</span>{{else if eq . "failed"}}<span class="badge badge-bad">✕ failed</span>{{else}}<span class="badge badge-muted">? {{.}}</span>{{end}}{{end}}
+
+{{/* Root: StageOutcome.Status. skipped and not-attempted are labelled differently and neither is a failure. */}}
+{{define "partial-stage-status"}}{{if or (eq . "completed") (eq . "loaded") (eq . "published") (eq . "signed") (eq . "attested")}}<span class="badge badge-ok">✓ {{.}}</span>{{else if eq . "failed"}}<span class="badge badge-bad">✕ failed</span>{{else if eq . "skipped"}}<span class="badge badge-muted">– skipped (not requested)</span>{{else if eq . "not-attempted"}}<span class="badge badge-warn">○ not attempted (earlier stage failed)</span>{{else if eq . ""}}<span class="badge badge-muted">? not reported</span>{{else}}<span class="badge badge-muted">? {{.}}</span>{{end}}{{end}}
+
+{{/* Root: advisory ID string. Known prefixes link to their public databases. */}}
+{{define "partial-advisory-id"}}{{if and (gt (len .) 4) (eq (slice . 0 4) "CVE-")}}<a href="https://nvd.nist.gov/vuln/detail/{{.}}" rel="noopener noreferrer">{{.}}</a>{{else if and (gt (len .) 5) (eq (slice . 0 5) "GHSA-")}}<a href="https://github.com/advisories/{{.}}" rel="noopener noreferrer">{{.}}</a>{{else if and (gt (len .) 3) (eq (slice . 0 3) "GO-")}}<a href="https://pkg.go.dev/vuln/{{.}}" rel="noopener noreferrer">{{.}}</a>{{else}}<span class="advisory-other">{{.}}</span>{{end}}{{end}}
+
+{{/* Root: []string of advisory IDs. */}}
+{{define "partial-advisory-ids"}}{{if .}}<ul class="ids">{{range .}}<li>{{template "partial-advisory-id" .}}</li>{{end}}</ul>{{else}}<span class="muted">none listed</span>{{end}}{{end}}
+
+{{/* Root: StatusView. Freshness, provenance and required security-source wording. */}}
+{{define "partial-status-provenance"}}{{with .Document}}<dl class="facts">
+  <div><dt>Computed</dt><dd>{{if .ComputedAt.IsZero}}<span class="muted">not reported</span>{{else}}{{template "partial-time" .ComputedAt}}{{end}}</dd></div>
+  <div><dt>Architecture</dt><dd>{{.Architecture}}</dd></div>
+  <div><dt>Registry</dt><dd><code>{{.Registry}}</code></dd></div>
+  <div><dt>Repository</dt><dd><code>{{.Repository}}</code></dd></div>
+  <div><dt>Signed index SHA-256</dt><dd><code class="hash">{{.IndexSHA256}}</code></dd></div>
+  <div><dt>Security feed</dt><dd><code class="hash">{{.Security.URL}}</code></dd></div>
+  <div><dt>Security feed SHA-256</dt><dd><code class="hash">{{.Security.SHA256}}</code></dd></div>
+</dl>
+{{template "partial-security-flags" .Security}}{{end}}{{end}}
+
+{{/* Root: SecuritySource. */}}
+{{define "partial-security-flags"}}<div class="callout callout-warn" role="note">
+  <p><strong>Security data limits.</strong> This compares installed APKs with known fixed versions; it is not a vulnerability scan. An empty list means only “no known fixed-version advisories in this feed”, not “no vulnerabilities”.</p>
+  <ul>
+    {{if .Unsigned}}<li>⚠ The security feed is <strong>not signed</strong>.</li>{{end}}
+    {{if .FixedOnly}}<li>⚠ It lists <strong>fixed vulnerabilities only</strong>; unfixed issues are not shown.</li>{{end}}
+    {{if .WolfiOnly}}<li>⚠ It covers <strong>Wolfi packages only</strong>.</li>{{end}}
+    {{if gt .UnevaluatedFixCount 0}}<li>⚠ <strong>{{.UnevaluatedFixCount}} feed {{if eq .UnevaluatedFixCount 1}}entry{{else}}entries{{end}} could not be evaluated</strong> (unparseable fixed version or unsupported advisory IDs).</li>{{end}}
+  </ul>
+</div>{{end}}
+
+{{/* Root: []UnevaluatedFix. */}}
+{{define "partial-unevaluated-table"}}<div class="table-wrap"><table>
+  <thead><tr><th scope="col">Package</th><th scope="col">Installed</th><th scope="col">Architecture</th><th scope="col">Fixed-version key (unevaluated)</th><th scope="col">Advisory IDs</th></tr></thead>
+  <tbody>{{range .}}<tr>
+    <th scope="row">{{.Name}}</th>
+    <td>{{if .InstalledVersion}}<code>{{.InstalledVersion}}</code>{{else}}<span class="muted">–</span>{{end}}</td>
+    <td>{{if .Architecture}}{{.Architecture}}{{else}}<span class="muted">–</span>{{end}}</td>
+    <td><code>{{.FixedVersion}}</code></td>
+    <td>{{template "partial-advisory-ids" .IDs}}</td>
+  </tr>{{end}}</tbody>
+</table></div>{{end}}
+
+{{/* Root: StatusView. Status freshness banner (errors, refresh in progress). */}}
+{{define "partial-status-banner"}}{{if .LastError}}<div class="callout callout-bad" role="alert">
+  <p><strong>Last status refresh failed.</strong>{{if .Document}} The data below is from the previous successful comparison{{with .Document}}{{if not .ComputedAt.IsZero}} ({{template "partial-time" .ComputedAt}}){{end}}{{end}}.{{end}}</p>
+  <pre class="error-text">{{.LastError}}</pre>
+</div>{{end}}{{if .Refreshing}}<p class="callout callout-info" role="status" data-poll-url="/?format=json" data-poll-field="status.refreshing"><span class="spinner" aria-hidden="true"></span> Status refresh in progress… This page reloads when it finishes; without JavaScript, reload it manually.</p>{{end}}{{end}}
+
+{{/* Root: StageOutcome. Two cells: status, details. */}}
+{{define "partial-stage-cells"}}<td>{{template "partial-stage-status" .Status}}</td>
+<td>{{if or .Reference .Digest .ImmutableReference .ImageReference .BuildReference .DockerImageID}}<dl class="kv">
+  {{with .Reference}}<div><dt>Reference</dt><dd><code>{{.}}</code></dd></div>{{end}}
+  {{with .Digest}}<div><dt>Digest</dt><dd><code class="hash">{{.}}</code></dd></div>{{end}}
+  {{with .ImmutableReference}}<div><dt>Immutable reference</dt><dd><code class="hash">{{.}}</code></dd></div>{{end}}
+  {{with .ImageReference}}<div><dt>Image reference</dt><dd><code class="hash">{{.}}</code></dd></div>{{end}}
+  {{with .BuildReference}}<div><dt>Build reference</dt><dd><code class="hash">{{.}}</code></dd></div>{{end}}
+  {{with .DockerImageID}}<div><dt>Docker image ID</dt><dd><code class="hash">{{.}}</code></dd></div>{{end}}
+</dl>{{else}}<span class="muted">–</span>{{end}}</td>{{end}}

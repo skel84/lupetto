@@ -371,6 +371,8 @@ func TestRequestSafety(t *testing.T) {
 			{"query-token", "http://127.0.0.1:8080", "", "127.0.0.1:8080", "query", "POST", 403},
 			{"wrong-origin", "https://evil.invalid", "", "127.0.0.1:8080", server.token, "POST", 403},
 			{"null-origin", "null", "", "127.0.0.1:8080", server.token, "POST", 403},
+			// Browsers send "Origin: null" on form POSTs under no-referrer; it stays rejected.
+			{"null-origin-same-origin-site", "null", "same-origin", "127.0.0.1:8080", server.token, "POST", 403},
 			{"missing-origin", "", "", "127.0.0.1:8080", server.token, "POST", 403},
 			{"cross-site", "http://127.0.0.1:8080", "cross-site", "127.0.0.1:8080", server.token, "POST", 403},
 			{"rebind", "http://evil.invalid:8080", "same-origin", "evil.invalid:8080", server.token, "POST", 403},
@@ -408,7 +410,9 @@ func TestRequestSafety(t *testing.T) {
 		}
 	}
 	w := request(server, "GET", "/healthz", nil)
-	if w.Code != 200 || w.Body.String() != "ok\n" || !strings.Contains(w.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") || w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Referrer-Policy") == "" {
+	// same-origin (not no-referrer): under no-referrer browsers send "Origin: null" on
+	// same-origin form POSTs, which authorize rejects, breaking every HTML form.
+	if w.Code != 200 || w.Body.String() != "ok\n" || !strings.Contains(w.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") || w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Referrer-Policy") != "same-origin" {
 		t.Fatalf("health response=%#v", w)
 	}
 	form := buildForm(server)

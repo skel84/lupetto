@@ -425,7 +425,9 @@ func (s *Server) safe(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "no-referrer")
+		// same-origin, not no-referrer: no-referrer makes browsers send
+		// "Origin: null" on same-origin form POSTs, which authorize rejects.
+		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("Cache-Control", "no-store")
 		if s.loopback && !loopbackHost(r.Host) {
 			http.Error(w, "non-loopback Host rejected for loopback listener", http.StatusForbidden)
