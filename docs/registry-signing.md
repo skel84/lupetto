@@ -17,7 +17,7 @@ Keep keys, signing configuration, and passwords outside the repository, shell hi
 
 ## Configuration and upfront errors
 
-Only `build` accepts these inputs:
+`build` accepts all inputs below. Read-only [`status`](../README.md#compare-published-images-with-wolfi) accepts only registry/repository flags and environment inputs, requires both, and ignores signing inputs; it reuses the same registry validation, Docker-config-only authentication, loopback-only HTTP guard, and sanitized diagnostics.
 
 | Flag | Environment input | Meaning |
 | --- | --- | --- |

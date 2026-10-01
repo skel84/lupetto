@@ -285,6 +285,513 @@ Both discovery documents decoded as `kind: discover`, `version: 1`, architecture
 
 Scoped annotation/epoch/installed-reader/discovery regressions passed. Independent source review found no correctness defect; its newline-consistency suggestion was applied and tested. On the exact staged source tree exported above, `go test ./...` and `go test -race ./...` both passed (`cmd/lupetto`, `internal/build`, `internal/wolfi`; fixture packages have no tests). The same owned registry is retained temporarily for checkpoint 2, then removed; this proof does not exercise production authentication/TLS, other architectures, historical rebuildability, or any dashboard.
 
+## Registry status (checkpoint 2)
+
+Observed 2026-10-01 on darwin/amd64 → linux/amd64, Go 1.27.1 and apko 1.4.5, using the same owned anonymous `registry:3` at `127.0.0.1:54985` as checkpoint 1. A throwaway `DOCKER_CONFIG` contained only `{}` and Docker loading was disabled with an unreachable `DOCKER_HOST`. No existing credentials, signing inputs, non-loopback publication, or remote mutation were used. The integrated CLI was built with `go build -o <temporary>/lupetto ./cmd/lupetto`.
+
+The products file used in the actual run was:
+
+```yaml
+version: 1
+products:
+  - package: busybox-static
+    selectors: ["1", "1.37", "99"]
+  - package: openssl
+    selectors: ["3.6"]
+  - package: valkey
+    selectors: ["9.1"]
+```
+
+Actual command forms (the older BusyBox publication was the checkpoint-1 command above) were:
+
+```bash
+<temporary>/lupetto-cp1 build openssl --apk-version 3.6.1-r3 \
+  --no-load --json --registry 127.0.0.1:54985 --repository tests/status/images
+<temporary>/lupetto status --products <temporary>/products.yaml \
+  --registry 127.0.0.1:54985 --repository tests/status/images --json
+<temporary>/lupetto build busybox-static 1 --no-load --json \
+  --registry 127.0.0.1:54985 --repository tests/status/images
+<temporary>/lupetto status --products <temporary>/products.yaml \
+  --registry 127.0.0.1:54985 --repository tests/status/images --json
+<temporary>/lupetto status --products <temporary>/products.yaml \
+  --registry 127.0.0.1:54985 --repository tests/status/images
+```
+
+All five completed commands exited 0. Before the latest selector build, BusyBox tracks `1`/`1.37` were `update-available` with installed `1.37.0-r56`; OpenSSL `3.6` was `update-available`; `busybox-static 99` was an isolated unavailable-selector `error`, and `valkey 9.1` was `not-built`. Publishing the latest selector resolved `busybox-static@1.38.0-r2`, workspace `image-2587130907`, digest `sha256:f6df53c7e981f592d40826c74dfa231884d3c27c34e4bfcd4e29a1a538ebd386`, with publication verified and loading skipped. Its real manifest carried the six annotations with created `2026-10-01T15:22:15Z`; the shared-registry extraction preserved publication readback. Broad track `1` then became `current`, while `1.37` still selected its older matching image and remained `update-available`.
+
+OpenSSL's older image was retained in `image-3669020712` and published with verified digest `sha256:9731a9b4169fedd82ef6ee54f13344c72e109afca98f758d4d5589429a6c7017`. Independent Python HTTP GETs fetched each newest manifest/layer by digest, rehashed the compressed blobs, extracted `usr/lib/apk/db/installed`, and matched the complete reported installed identity lists (three APKs for BusyBox, nine for OpenSSL). Independently fetched index records and secdb entries matched all reported outdated identities and exact missing-fix IDs. OpenSSL had four missing-fix groups (`3.6.2-r0`, `3.6.3-r0`, `3.6.3-r4`, `3.6.3-r5`), all available before selected `3.6.5-r1` and `reachableByTrack: true`. The index also showed `libcrypto3`/`libssl3` updates, but the feed did not advertise those exact subpackage names; no origin mapping was invented. The exact `busybox-static` package was absent from the security feed, explaining its empty fix set despite newer indexed revisions.
+
+The first live status attempt exited 1 because the security feed contained an unparseable `opa-envoy` fixed-version key `1.1.0-r1-r0`; a temporary probe using the pinned apko version comparator independently confirmed that this was the only unparseable nonzero key. The user approved explicit unevaluated-fix reporting rather than guessed ordering. The completed runs report `security.unevaluatedFixCount: 1` with IDs `CVE-2025-22866` / `GHSA-3whm-j4xm-rv8x`; human output contains the warning and an `UNEVALUATED` column. None of these tracked images install that package, so their issue arrays are empty; hermetic coverage exercises an installed affected package. The feed's exact SHA-256 was independently recomputed as `53698b27fcd59e79ab46862ab0a6ebd591af373ab322628e500ed867167e31a3`.
+
+Complete real status JSON after publishing the latest BusyBox image follows (reformatted only; loopback target and public facts contain no secrets):
+
+```json
+{
+  "version": 1,
+  "kind": "status",
+  "computedAt": "2026-10-01T15:22:23.943739Z",
+  "architecture": "x86_64",
+  "registry": "127.0.0.1:54985",
+  "repository": "tests/status/images",
+  "indexSHA256": "267936aa59d7ea43ec91ae2482e539eb7e73f09684bc5648cd31018648b2b015",
+  "security": {
+    "url": "https://packages.wolfi.dev/os/security.json",
+    "sha256": "53698b27fcd59e79ab46862ab0a6ebd591af373ab322628e500ed867167e31a3",
+    "unsigned": true,
+    "fixedOnly": true,
+    "wolfiOnly": true,
+    "unevaluatedFixCount": 1,
+    "unevaluatedFixes": [
+      {
+        "name": "opa-envoy",
+        "fixedVersion": "1.1.0-r1-r0",
+        "ids": [
+          "CVE-2025-22866",
+          "GHSA-3whm-j4xm-rv8x"
+        ]
+      }
+    ]
+  },
+  "tracks": [
+    {
+      "package": "busybox-static",
+      "selector": "1",
+      "state": "current",
+      "latest": {
+        "name": "busybox-static",
+        "version": "1.38.0-r2",
+        "architecture": "x86_64"
+      },
+      "repository": "127.0.0.1:54985/tests/status/images/busybox-static",
+      "images": [
+        {
+          "digest": "sha256:f6df53c7e981f592d40826c74dfa231884d3c27c34e4bfcd4e29a1a538ebd386",
+          "tags": [
+            "1.38.0-r2-amd64-build-2587130907"
+          ],
+          "name": "busybox-static",
+          "version": "1.38.0-r2",
+          "architecture": "x86_64",
+          "created": "2026-10-01T15:22:15Z",
+          "annotations": {
+            "lupetto.apk.architecture": "x86_64",
+            "lupetto.apk.name": "busybox-static",
+            "lupetto.apk.version": "1.38.0-r2",
+            "lupetto.index.sha256": "267936aa59d7ea43ec91ae2482e539eb7e73f09684bc5648cd31018648b2b015",
+            "org.opencontainers.image.created": "2026-10-01T15:22:15Z",
+            "org.opencontainers.image.version": "1.38.0-r2"
+          }
+        },
+        {
+          "digest": "sha256:51ff7537f57c5386d302626fecfa04363b38effd38c9abe59db12f69b8c4c111",
+          "tags": [
+            "1.37.0-r56-amd64-build-2154979337"
+          ],
+          "name": "busybox-static",
+          "version": "1.37.0-r56",
+          "architecture": "x86_64",
+          "created": "2026-10-01T14:59:31Z",
+          "annotations": {
+            "lupetto.apk.architecture": "x86_64",
+            "lupetto.apk.name": "busybox-static",
+            "lupetto.apk.version": "1.37.0-r56",
+            "lupetto.index.sha256": "4ef1cfe0f53a73cf245e0cfbadb53252b004f8f0f74ae858ec0666a8feef6887",
+            "org.opencontainers.image.created": "2026-10-01T14:59:31Z",
+            "org.opencontainers.image.version": "1.37.0-r56"
+          }
+        }
+      ],
+      "newest": {
+        "digest": "sha256:f6df53c7e981f592d40826c74dfa231884d3c27c34e4bfcd4e29a1a538ebd386",
+        "tags": [
+          "1.38.0-r2-amd64-build-2587130907"
+        ],
+        "name": "busybox-static",
+        "version": "1.38.0-r2",
+        "architecture": "x86_64",
+        "created": "2026-10-01T15:22:15Z",
+        "annotations": {
+          "lupetto.apk.architecture": "x86_64",
+          "lupetto.apk.name": "busybox-static",
+          "lupetto.apk.version": "1.38.0-r2",
+          "lupetto.index.sha256": "267936aa59d7ea43ec91ae2482e539eb7e73f09684bc5648cd31018648b2b015",
+          "org.opencontainers.image.created": "2026-10-01T15:22:15Z",
+          "org.opencontainers.image.version": "1.38.0-r2"
+        }
+      },
+      "installed": [
+        {
+          "name": "busybox-static",
+          "version": "1.38.0-r2",
+          "architecture": "x86_64"
+        },
+        {
+          "name": "ca-certificates-bundle",
+          "version": "20260909-r2",
+          "architecture": "x86_64"
+        },
+        {
+          "name": "wolfi-baselayout",
+          "version": "20230201-r30",
+          "architecture": "x86_64"
+        }
+      ],
+      "outdated": [],
+      "missingFixes": [],
+      "unevaluatedFixes": [],
+      "artifactCount": 0,
+      "unidentifiedCount": 0
+    },
+    {
+      "package": "busybox-static",
+      "selector": "1.37",
+      "state": "update-available",
+      "latest": {
+        "name": "busybox-static",
+        "version": "1.37.0-r61",
+        "architecture": "x86_64"
+      },
+      "repository": "127.0.0.1:54985/tests/status/images/busybox-static",
+      "images": [
+        {
+          "digest": "sha256:51ff7537f57c5386d302626fecfa04363b38effd38c9abe59db12f69b8c4c111",
+          "tags": [
+            "1.37.0-r56-amd64-build-2154979337"
+          ],
+          "name": "busybox-static",
+          "version": "1.37.0-r56",
+          "architecture": "x86_64",
+          "created": "2026-10-01T14:59:31Z",
+          "annotations": {
+            "lupetto.apk.architecture": "x86_64",
+            "lupetto.apk.name": "busybox-static",
+            "lupetto.apk.version": "1.37.0-r56",
+            "lupetto.index.sha256": "4ef1cfe0f53a73cf245e0cfbadb53252b004f8f0f74ae858ec0666a8feef6887",
+            "org.opencontainers.image.created": "2026-10-01T14:59:31Z",
+            "org.opencontainers.image.version": "1.37.0-r56"
+          }
+        }
+      ],
+      "newest": {
+        "digest": "sha256:51ff7537f57c5386d302626fecfa04363b38effd38c9abe59db12f69b8c4c111",
+        "tags": [
+          "1.37.0-r56-amd64-build-2154979337"
+        ],
+        "name": "busybox-static",
+        "version": "1.37.0-r56",
+        "architecture": "x86_64",
+        "created": "2026-10-01T14:59:31Z",
+        "annotations": {
+          "lupetto.apk.architecture": "x86_64",
+          "lupetto.apk.name": "busybox-static",
+          "lupetto.apk.version": "1.37.0-r56",
+          "lupetto.index.sha256": "4ef1cfe0f53a73cf245e0cfbadb53252b004f8f0f74ae858ec0666a8feef6887",
+          "org.opencontainers.image.created": "2026-10-01T14:59:31Z",
+          "org.opencontainers.image.version": "1.37.0-r56"
+        }
+      },
+      "installed": [
+        {
+          "name": "busybox-static",
+          "version": "1.37.0-r56",
+          "architecture": "x86_64"
+        },
+        {
+          "name": "ca-certificates-bundle",
+          "version": "20260909-r1",
+          "architecture": "x86_64"
+        },
+        {
+          "name": "wolfi-baselayout",
+          "version": "20230201-r30",
+          "architecture": "x86_64"
+        }
+      ],
+      "outdated": [
+        {
+          "name": "busybox-static",
+          "architecture": "x86_64",
+          "installedVersion": "1.37.0-r56",
+          "latestVersion": "1.38.0-r2"
+        },
+        {
+          "name": "ca-certificates-bundle",
+          "architecture": "x86_64",
+          "installedVersion": "20260909-r1",
+          "latestVersion": "20260909-r2"
+        }
+      ],
+      "missingFixes": [],
+      "unevaluatedFixes": [],
+      "artifactCount": 0,
+      "unidentifiedCount": 0
+    },
+    {
+      "package": "busybox-static",
+      "selector": "99",
+      "state": "error",
+      "error": "unavailable index version for track",
+      "images": [],
+      "installed": [],
+      "outdated": [],
+      "missingFixes": [],
+      "unevaluatedFixes": [],
+      "artifactCount": 0,
+      "unidentifiedCount": 0
+    },
+    {
+      "package": "openssl",
+      "selector": "3.6",
+      "state": "update-available",
+      "latest": {
+        "name": "openssl",
+        "version": "3.6.5-r1",
+        "architecture": "x86_64"
+      },
+      "repository": "127.0.0.1:54985/tests/status/images/openssl",
+      "images": [
+        {
+          "digest": "sha256:9731a9b4169fedd82ef6ee54f13344c72e109afca98f758d4d5589429a6c7017",
+          "tags": [
+            "3.6.1-r3-amd64-build-3669020712"
+          ],
+          "name": "openssl",
+          "version": "3.6.1-r3",
+          "architecture": "x86_64",
+          "created": "2026-10-01T15:09:28Z",
+          "annotations": {
+            "lupetto.apk.architecture": "x86_64",
+            "lupetto.apk.name": "openssl",
+            "lupetto.apk.version": "3.6.1-r3",
+            "lupetto.index.sha256": "1d7b49278270a61616f535ece217004f33b80adce58bf8d0809279bfaa0f0e62",
+            "org.opencontainers.image.created": "2026-10-01T15:09:28Z",
+            "org.opencontainers.image.version": "3.6.1-r3"
+          }
+        }
+      ],
+      "newest": {
+        "digest": "sha256:9731a9b4169fedd82ef6ee54f13344c72e109afca98f758d4d5589429a6c7017",
+        "tags": [
+          "3.6.1-r3-amd64-build-3669020712"
+        ],
+        "name": "openssl",
+        "version": "3.6.1-r3",
+        "architecture": "x86_64",
+        "created": "2026-10-01T15:09:28Z",
+        "annotations": {
+          "lupetto.apk.architecture": "x86_64",
+          "lupetto.apk.name": "openssl",
+          "lupetto.apk.version": "3.6.1-r3",
+          "lupetto.index.sha256": "1d7b49278270a61616f535ece217004f33b80adce58bf8d0809279bfaa0f0e62",
+          "org.opencontainers.image.created": "2026-10-01T15:09:28Z",
+          "org.opencontainers.image.version": "3.6.1-r3"
+        }
+      },
+      "installed": [
+        {
+          "name": "ca-certificates-bundle",
+          "version": "20260909-r1",
+          "architecture": "x86_64"
+        },
+        {
+          "name": "glibc-2.44",
+          "version": "2.44-r7",
+          "architecture": "x86_64"
+        },
+        {
+          "name": "glibc-2.44-locale-posix",
+          "version": "2.44-r7",
+          "architecture": "x86_64"
+        },
+        {
+          "name": "ld-linux-2.44",
+          "version": "2.44-r7",
+          "architecture": "x86_64"
+        },
+        {
+          "name": "libcrypto3",
+          "version": "3.6.1-r3",
+          "architecture": "x86_64"
+        },
+        {
+          "name": "libgcc",
+          "version": "16.2.0-r1",
+          "architecture": "x86_64"
+        },
+        {
+          "name": "libssl3",
+          "version": "3.6.1-r3",
+          "architecture": "x86_64"
+        },
+        {
+          "name": "openssl",
+          "version": "3.6.1-r3",
+          "architecture": "x86_64"
+        },
+        {
+          "name": "wolfi-baselayout",
+          "version": "20230201-r30",
+          "architecture": "x86_64"
+        }
+      ],
+      "outdated": [
+        {
+          "name": "ca-certificates-bundle",
+          "architecture": "x86_64",
+          "installedVersion": "20260909-r1",
+          "latestVersion": "20260909-r2"
+        },
+        {
+          "name": "libcrypto3",
+          "architecture": "x86_64",
+          "installedVersion": "3.6.1-r3",
+          "latestVersion": "3.6.5-r1"
+        },
+        {
+          "name": "libssl3",
+          "architecture": "x86_64",
+          "installedVersion": "3.6.1-r3",
+          "latestVersion": "3.6.5-r1"
+        },
+        {
+          "name": "openssl",
+          "architecture": "x86_64",
+          "installedVersion": "3.6.1-r3",
+          "latestVersion": "3.6.5-r1"
+        }
+      ],
+      "missingFixes": [
+        {
+          "name": "openssl",
+          "architecture": "x86_64",
+          "installedVersion": "3.6.1-r3",
+          "fixedVersion": "3.6.2-r0",
+          "availableVersion": "3.6.5-r1",
+          "ids": [
+            "CVE-2026-28386",
+            "CVE-2026-28387",
+            "CVE-2026-28388",
+            "CVE-2026-28389",
+            "CVE-2026-28390",
+            "CVE-2026-31789",
+            "CVE-2026-31790",
+            "GHSA-7x88-9hgc-69gf",
+            "GHSA-fgpp-q3px-3xhc",
+            "GHSA-h2cc-wx97-xp8v",
+            "GHSA-j79m-9jxq-788r",
+            "GHSA-q457-vx59-3fqg",
+            "GHSA-rpg5-467j-c25q",
+            "GHSA-vgxx-5xj5-q97x"
+          ],
+          "reachableByTrack": true
+        },
+        {
+          "name": "openssl",
+          "architecture": "x86_64",
+          "installedVersion": "3.6.1-r3",
+          "fixedVersion": "3.6.3-r0",
+          "availableVersion": "3.6.5-r1",
+          "ids": [
+            "CVE-2026-34180",
+            "CVE-2026-34181",
+            "CVE-2026-34182",
+            "CVE-2026-34183",
+            "CVE-2026-35188",
+            "CVE-2026-42764",
+            "CVE-2026-42765",
+            "CVE-2026-42766",
+            "CVE-2026-42767",
+            "CVE-2026-42768",
+            "CVE-2026-42769",
+            "CVE-2026-42770",
+            "CVE-2026-45445",
+            "CVE-2026-45446",
+            "CVE-2026-45447",
+            "CVE-2026-7383",
+            "CVE-2026-9076",
+            "GHSA-3c8f-qq7h-7qv6",
+            "GHSA-3cxm-476w-ghm2",
+            "GHSA-4jgc-cj59-f9mm",
+            "GHSA-58mv-qqmv-gqgv",
+            "GHSA-5m8f-m8jv-3rp3",
+            "GHSA-5pg7-f6xv-j6m4",
+            "GHSA-7phf-qpm5-q6p3",
+            "GHSA-f5vx-f6jp-89j6",
+            "GHSA-f684-cpcq-j565",
+            "GHSA-f9v2-4w9p-2cwc",
+            "GHSA-gxhg-7jx8-m22j",
+            "GHSA-q98x-73c3-57gj",
+            "GHSA-rpj2-p5pj-r33v",
+            "GHSA-v446-xwfm-x7mr",
+            "GHSA-vc8w-w49c-4jgj",
+            "GHSA-vm8w-j6fw-jc7r",
+            "GHSA-w853-v86g-gv7j"
+          ],
+          "reachableByTrack": true
+        },
+        {
+          "name": "openssl",
+          "architecture": "x86_64",
+          "installedVersion": "3.6.1-r3",
+          "fixedVersion": "3.6.3-r4",
+          "availableVersion": "3.6.5-r1",
+          "ids": [
+            "CVE-2026-54876",
+            "GHSA-5cfw-78wc-wvjq"
+          ],
+          "reachableByTrack": true
+        },
+        {
+          "name": "openssl",
+          "architecture": "x86_64",
+          "installedVersion": "3.6.1-r3",
+          "fixedVersion": "3.6.3-r5",
+          "availableVersion": "3.6.5-r1",
+          "ids": [
+            "CVE-2026-14456",
+            "GHSA-9x89-v382-mjh7"
+          ],
+          "reachableByTrack": true
+        }
+      ],
+      "unevaluatedFixes": [],
+      "artifactCount": 0,
+      "unidentifiedCount": 0
+    },
+    {
+      "package": "valkey",
+      "selector": "9.1",
+      "state": "not-built",
+      "latest": {
+        "name": "valkey-9.1",
+        "version": "9.1.2-r1",
+        "architecture": "x86_64"
+      },
+      "repository": "127.0.0.1:54985/tests/status/images/valkey-9.1",
+      "images": [],
+      "installed": [],
+      "outdated": [],
+      "missingFixes": [],
+      "unevaluatedFixes": [],
+      "artifactCount": 0,
+      "unidentifiedCount": 0
+    }
+  ]
+}
+```
+
+The human run produced the same five states and counts (BusyBox `1`: 0 outdated/0 fix groups; BusyBox `1.37`: 2/0; OpenSSL `3.6`: 4/4; unavailable/unbuilt tracks: 0/0). A further `status --json` run exited 0, retained the same installed sets, and did not rewrite the three digest-keyed cache files. Independent permission checks found the cache directory mode 0700 and each record mode 0600; hermetic tests additionally prove cached runs issue no layer reads. Fresh index checksums changed between requests (`267936aa…b015` for recorded JSON and `dfe112e2…cc5c` for the independent follow-up/human run), while independently checked package/fix facts agreed. This is not an atomic upstream index/feed snapshot.
+
+A separate attempted older `nginx@1.28.1-r1` build composed its image but exited 1 during the existing SPDX validation, with publication not attempted and retained workspace `image-556573540`. Independent lock/SPDX inspection found apko's `libstdc%2B%2B` purls, which the pre-existing validator does not URL-decode before name comparison. That unrelated validator behavior was not changed; OpenSSL supplied the real missing-fix proof instead. Indexed APK metadata still does not guarantee a successful validated build.
+
+Hermetic coverage uses `internal/build/buildtest`'s authenticated in-process registry and `wolfitest` signed index fixtures: annotation classification; modern/legacy Cosign-like artifact and unannotated counts; selector/provider isolation; APK-version/created/digest ordering; all states; exact package/architecture comparison; secdb zero and fix availability; reachability; malformed-key warning/affected-track reporting; digest/config/layer tampering; bounded multilayer overlays and whiteouts; private cache reuse/corruption/failures; HTTP guard/authentication/sanitized 401 detail; redirected blob reads above 4 MiB; cancellation and global failures. The CLI parser/output tests cover independent flag/environment precedence, ignored signing environment inputs, exit-0 track errors, exit-1 global errors, exit-2/no-stdout invocation errors, help dispatch, human warnings and output failures. Independent follow-up source review found no concrete remaining defect.
+
+Final integrated gates before the checkpoint-2 commit: `go test ./...` and `go test -race ./...` passed for `cmd/lupetto`, `internal/build`, `internal/registry`, `internal/status`, and `internal/wolfi` (fixture packages have no tests). `go run ./cmd/lupetto --help` exited 0 and listed status with its read-only/version/exit contract. `go list -f '{{join .Imports "\n"}}' ./internal/status ./internal/registry` confirmed status imports only shared Wolfi/registry code and registry imports no in-module packages. Relative links/anchors across all eight Markdown files passed; `bash -n` passed for 21 Bash-fenced blocks (syntax only, not production execution), and the complete JSON embedded above was parsed and required to equal the actual observed status document.
+
+The owned `docker stop <owned-name>` exited 0; because the registry was started with `--rm`, subsequent `docker container inspect <owned-name>` exited 1 and confirmed its removal. No credentials or private keys were created. Public temporary scenario logs and private user-cache workspaces/cache records remain outside the checkout. No Git push or registry/tag cleanup outside this disposable owned registry was performed.
+
+Limitations: production registry TLS/authentication, non-loopback registries, other hosts/architectures and a real redirected external-storage registry were not exercised. The real registry was anonymous; authenticated behavior is covered hermetically and prior publication evidence. Gzip/uncompressed OCI/Docker layers are supported; zstd installed-layer extraction reports a track error. Status is not a signature report, vulnerability scan, future dependency solver, historical archive, or dashboard. The feed is unsigned and fixed-only, and exact subpackage matching can leave coverage gaps; consumers must inspect unreachable/unevaluated warnings even for `current` tracks.
+
 ## Selection and snapshots
 
 Persistent catalog import/history checks in this section are deferred. Exercise the existing live-index selectors and retained per-build provenance for publication/signing without requiring a catalog database; retaining an index alone does not establish historical APK availability.

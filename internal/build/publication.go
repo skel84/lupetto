@@ -3,160 +3,56 @@ package build
 import (
 	"bufio"
 	"bytes"
-	"cmp"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
-	"strings"
-	"syscall"
 
-	"github.com/docker/cli/cli/config"
-	dockercredentials "github.com/docker/cli/cli/config/credentials"
-	dockertypes "github.com/docker/cli/cli/config/types"
-	helpercredentials "github.com/docker/docker-credential-helpers/credentials"
-	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/layout"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
-	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/go-containerregistry/pkg/v1/types"
+	"lupetto/internal/registry"
 	"lupetto/internal/wolfi"
 )
 
-const maxRegistryMetadataBytes = 4 << 20
+const maxRegistryMetadataBytes = registry.MaxMetadataBytes
 
 type PublicationOutcome struct {
 	Status, Reference, PushedDigest, ImmutableReference string
 	Verified                                            bool
 }
 
-// Only safe, stage-specific text enters this type. Registry bodies, URLs,
-// subprocess output, argument strings, and credential-helper diagnostics are
-// never wrapped; detail is a fixed classification chosen by Lupetto.
-type publicationStageError struct {
-	stage, detail string
-	cause         error
-}
-
-func (e *publicationStageError) Error() string {
-	if e.cause != nil {
-		return e.stage + " canceled: " + e.cause.Error()
-	}
-	if e.detail != "" {
-		return e.stage + " failed (" + e.detail + ")"
-	}
-	return e.stage + " failed"
-}
-
-func (e *publicationStageError) Unwrap() error { return e.cause }
+type publicationStageError = registry.StageError
 
 func stageCancellation(ctx context.Context, err error) error {
-	if ctx != nil && ctx.Err() != nil {
-		return ctx.Err()
-	}
-	if errors.Is(err, context.Canceled) {
-		return context.Canceled
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return context.DeadlineExceeded
-	}
-	return nil
+	return registry.StageCancellation(ctx, err)
 }
 
 func safeStageError(ctx context.Context, stage string, err error) error {
-	return &publicationStageError{stage: stage, cause: stageCancellation(ctx, err)}
+	return registry.SafeStageError(ctx, stage, err)
 }
 
 var (
-	errPlainHTTPRefused        = errors.New("plain HTTP refused for non-loopback registry")
-	errRegistrySchemeRefused   = errors.New("unsupported registry URL scheme")
-	errRegistryContentMismatch = errors.New("registry content mismatch")
-	errUnsupportedLayer        = errors.New("unsupported layer compression")
-	// Registry-supplied codes are arbitrary strings; only these known OCI
-	// distribution error constants are ever reported.
-	knownRegistryCodes = map[transport.ErrorCode]bool{
-		transport.BlobUnknownErrorCode: true, transport.BlobUploadInvalidErrorCode: true,
-		transport.BlobUploadUnknownErrorCode: true, transport.DigestInvalidErrorCode: true,
-		transport.ManifestBlobUnknownErrorCode: true, transport.ManifestInvalidErrorCode: true,
-		transport.ManifestUnknownErrorCode: true, transport.ManifestUnverifiedErrorCode: true,
-		transport.NameInvalidErrorCode: true, transport.NameUnknownErrorCode: true,
-		transport.SizeInvalidErrorCode: true, transport.TagInvalidErrorCode: true,
-		transport.UnauthorizedErrorCode: true, transport.DeniedErrorCode: true,
-		transport.UnsupportedErrorCode: true, transport.TooManyRequestsErrorCode: true,
-		transport.UnknownErrorCode: true, transport.UnavailableErrorCode: true,
-	}
+	errPlainHTTPRefused        = registry.ErrPlainHTTPRefused
+	errRegistrySchemeRefused   = registry.ErrSchemeRefused
+	errRegistryContentMismatch = registry.ErrContentMismatch
+	errUnsupportedLayer        = registry.ErrUnsupportedLayer
 )
 
-// registryStageError reports the stage plus, at most, a fixed classification,
-// an HTTP status, and registry error codes from the known OCI constants.
 func registryStageError(ctx context.Context, stage string, err error) error {
-	if cause := stageCancellation(ctx, err); cause != nil {
-		return &publicationStageError{stage: stage, cause: cause}
-	}
-	return &publicationStageError{stage: stage, detail: registryErrorDetail(err)}
+	return registry.SafeError(ctx, stage, err)
 }
 
 func registryErrorDetail(err error) string {
-	if err == nil {
-		return ""
-	}
-	if errors.Is(err, errPlainHTTPRefused) {
-		return "plain HTTP refused for non-loopback registry"
-	}
-	if errors.Is(err, errRegistrySchemeRefused) {
-		return "unsupported registry URL scheme refused"
-	}
-	if errors.Is(err, errRegistryContentMismatch) {
-		return "content mismatch"
-	}
-	if errors.Is(err, errUnsupportedLayer) {
-		return "unsupported layer compression"
-	}
-	var registryErr *transport.Error
-	if errors.As(err, &registryErr) {
-		detail := fmt.Sprintf("HTTP %d", registryErr.StatusCode)
-		var codes []string
-		seen := make(map[string]bool)
-		for _, diagnostic := range registryErr.Errors {
-			code := string(diagnostic.Code)
-			if !knownRegistryCodes[diagnostic.Code] || seen[code] || len(codes) == 8 {
-				continue
-			}
-			seen[code] = true
-			codes = append(codes, code)
-		}
-		if len(codes) != 0 {
-			detail += "; " + strings.Join(codes, ",")
-		}
-		return detail
-	}
-	var verification *tls.CertificateVerificationError
-	var unknownAuthority x509.UnknownAuthorityError
-	var hostname x509.HostnameError
-	var invalid x509.CertificateInvalidError
-	if errors.As(err, &verification) || errors.As(err, &unknownAuthority) || errors.As(err, &hostname) || errors.As(err, &invalid) {
-		return "TLS verification failed"
-	}
-	var dns *net.DNSError
-	var op *net.OpError
-	if errors.As(err, &dns) || errors.Is(err, syscall.ECONNREFUSED) || (errors.As(err, &op) && op.Op == "dial") {
-		return "registry unreachable"
-	}
-	return ""
+	return registry.ErrorDetail(err)
 }
 
 type boundedIdentityOutput struct {
@@ -188,155 +84,13 @@ func (r contextReader) Read(data []byte) (int, error) {
 	return r.reader.Read(data)
 }
 
-// loopbackHTTPOnly is the innermost registry transport. It applies to every
-// request, including ping fallbacks, token-realm requests, and redirects:
-// plain HTTP is sent only to localhost or a loopback IP literal.
 type loopbackHTTPOnly struct{ base http.RoundTripper }
 
 func (t loopbackHTTPOnly) RoundTrip(req *http.Request) (*http.Response, error) {
-	refuse := func(err error) (*http.Response, error) {
-		if req.Body != nil {
-			_ = req.Body.Close()
-		}
-		return nil, err
-	}
-	if req.URL == nil {
-		return refuse(errRegistrySchemeRefused)
-	}
-	switch {
-	case strings.EqualFold(req.URL.Scheme, "https"):
-	case strings.EqualFold(req.URL.Scheme, "http"):
-		if !loopbackHost(req.URL.Hostname()) {
-			return refuse(errPlainHTTPRefused)
-		}
-	default:
-		return refuse(errRegistrySchemeRefused)
-	}
-	return t.base.RoundTrip(req)
+	return registry.GuardTransport(t.base).RoundTrip(req)
 }
 
-// dockerConfigKeychain reads only Docker's client configuration (DOCKER_CONFIG
-// or ~/.docker/config.json, including credsStore/credHelpers). Unlike
-// authn.DefaultKeychain it never falls back to Podman/containers auth files.
-// The lookup mirrors go-containerregistry v0.22.1 authn/keychain.go.
-type dockerConfigKeychain struct{}
-
-var _ authn.ContextKeychain = dockerConfigKeychain{}
-
-var credentialHelperName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-
-const maxCredentialHelperBytes = 64 << 10
-
-type boundedCredentialOutput struct {
-	data     []byte
-	overflow bool
-}
-
-func (w *boundedCredentialOutput) Write(data []byte) (int, error) {
-	if !w.overflow {
-		if len(data) > maxCredentialHelperBytes-len(w.data) {
-			w.data = nil
-			w.overflow = true
-		} else {
-			w.data = append(w.data, data...)
-		}
-	}
-	return len(data), nil
-}
-
-func credentialHelperAuth(ctx context.Context, helper, key string) (dockertypes.AuthConfig, bool, error) {
-	var cfg dockertypes.AuthConfig
-	if !credentialHelperName.MatchString(helper) {
-		return cfg, false, errors.New("Docker credential helper name is invalid")
-	}
-	cmd := exec.CommandContext(ctx, "docker-credential-"+helper, "get")
-	cmd.Stdin = strings.NewReader(key)
-	// A nil Stderr discards diagnostics; never inherit or replace os.Stderr.
-	var stdout boundedCredentialOutput
-	cmd.Stdout = &stdout
-	err := cmd.Run()
-	if ctx.Err() != nil {
-		return cfg, false, ctx.Err()
-	}
-	if stdout.overflow {
-		return cfg, false, errors.New("Docker credential helper output exceeded limit")
-	}
-	if err != nil {
-		if helpercredentials.IsErrCredentialsNotFoundMessage(string(stdout.data)) {
-			return cfg, false, nil
-		}
-		return cfg, false, errors.New("Docker credential helper failed")
-	}
-	var creds helpercredentials.Credentials
-	if err := json.NewDecoder(bytes.NewReader(stdout.data)).Decode(&creds); err != nil {
-		return cfg, false, errors.New("Docker credential helper response is invalid")
-	}
-	if creds.Username == "<token>" {
-		cfg.IdentityToken = creds.Secret
-	} else {
-		cfg.Username, cfg.Password = creds.Username, creds.Secret
-	}
-	cfg.ServerAddress = key
-	return cfg, true, nil
-}
-
-func (k dockerConfigKeychain) Resolve(target authn.Resource) (authn.Authenticator, error) {
-	return k.ResolveContext(context.Background(), target)
-}
-
-func (dockerConfigKeychain) ResolveContext(ctx context.Context, target authn.Resource) (authn.Authenticator, error) {
-	cf, err := config.Load(os.Getenv("DOCKER_CONFIG"))
-	if err != nil {
-		return nil, err
-	}
-	// Construct the file store explicitly: GetAuthConfig can select the unsafe
-	// native helper store (and can print DOCKER_AUTH_CONFIG diagnostics).
-	fileStore := dockercredentials.NewFileStore(cf)
-	var cfg, empty dockertypes.AuthConfig
-	for _, key := range []string{target.String(), target.RegistryStr()} {
-		if key == name.DefaultRegistry {
-			key = authn.DefaultAuthKey
-		}
-		helper := cf.CredentialsStore
-		if key != "" {
-			if configured, present := cf.CredentialHelpers[key]; present {
-				helper = configured
-			}
-		}
-		cfg, err = fileStore.Get(key)
-		if helper != "" {
-			var helperCfg dockertypes.AuthConfig
-			var found bool
-			helperCfg, found, err = credentialHelperAuth(ctx, helper, key)
-			if err == nil && !found {
-				cfg = empty
-				continue
-			}
-			// Like Docker's native store, start with the file entry and replace
-			// the helper-owned fields. Auth and RegistryToken affect authn and
-			// must survive; Email is harmless and ignored by authn.
-			cfg.Username, cfg.Password = helperCfg.Username, helperCfg.Password
-			cfg.IdentityToken, cfg.ServerAddress = helperCfg.IdentityToken, helperCfg.ServerAddress
-		}
-		if err != nil {
-			return nil, err
-		}
-		cfg.ServerAddress = ""
-		if cfg != empty {
-			break
-		}
-	}
-	if cfg == empty {
-		return authn.Anonymous, nil
-	}
-	return authn.FromConfig(authn.AuthConfig{
-		Username:      cfg.Username,
-		Password:      cfg.Password,
-		Auth:          cfg.Auth,
-		IdentityToken: cfg.IdentityToken,
-		RegistryToken: cfg.RegistryToken,
-	}), nil
-}
+type dockerConfigKeychain = registry.DockerConfigKeychain
 
 // publicationSource is the single validated image from the apko layout. Raw
 // manifest and config bytes are checksum-verified local blobs; readback is
@@ -441,16 +195,7 @@ func publishOCIImage(ctx context.Context, services Services, result Result, opts
 	if source.manifestDigest != result.ImageDigest {
 		return fail("publication source", errRegistryContentMismatch)
 	}
-	keychain := services.RegistryKeychain
-	if keychain == nil {
-		keychain = dockerConfigKeychain{}
-	}
-	options := []remote.Option{
-		remote.WithContext(ctx),
-		remote.WithAuthFromKeychain(keychain),
-		remote.WithTransport(loopbackHTTPOnly{base: cmp.Or(services.RegistryTransport, remote.DefaultTransport)}),
-		remote.WithUserAgent("lupetto"),
-	}
+	options := registry.ClientOptions(ctx, services.RegistryTransport, services.RegistryKeychain)
 
 	buildStage(ctx, "Pushing OCI image to registry")
 	if err := ctx.Err(); err != nil {

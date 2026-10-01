@@ -29,12 +29,15 @@ The commands below are implemented. `build` loads into local Docker by default (
 ```text
 lupetto discover <package-or-provider>
 lupetto discover --json [<package-or-provider>]
+lupetto status --products <file> [--registry <authority> --repository <prefix>] [--json]
 lupetto build <package-or-provider> <dotted-numeric-selector> [--no-load] [--json] [--registry <authority> --repository <prefix>] [--cosign-key <key> [--cosign-signing-config <file>] [--cosign-allow-http[=true|false]]]
 lupetto build <package-or-provider> --apk-version <exact-apk-version> [--no-load] [--json] [--registry <authority> --repository <prefix>] [--cosign-key <key> [--cosign-signing-config <file>] [--cosign-allow-http[=true|false]]]
 lupetto sbom <package-or-provider> --apk-version <exact-apk-version> [--json]
 ```
 
 An exact APK version includes the packaging revision, such as `-rN`. Selecting an upstream version alone does not distinguish its packaging revisions.
+
+`status` compares tracked published images with the signed live index and the unsigned Wolfi security-fix feed; its separate `kind: status`, version-1 JSON document contains per-track facts and errors. It is read-only and not a vulnerability scan. Products-file tracking, exit semantics, and security limitations are defined in the [operator guide](../README.md#compare-published-images-with-wolfi).
 
 Where behavior is specified:
 

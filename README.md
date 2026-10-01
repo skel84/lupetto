@@ -1,6 +1,6 @@
 # Lupetto
 
-Lupetto is a standalone CLI for discovering Wolfi APK versions, selecting an exact package revision, composing an OCI image with apko, and retaining validated SPDX and build evidence. `build` loads the image into Docker by default and can push the validated image directly to a compatible OCI registry. Optional Cosign signing and SPDX attestation extend that same build pipeline; see the [registry, signing, and verification guide](docs/registry-signing.md).
+Lupetto is a standalone CLI for discovering Wolfi APK versions, selecting an exact package revision, composing an OCI image with apko, and retaining validated SPDX and build evidence. `build` loads the image into Docker by default and can push the validated image directly to a compatible OCI registry. `status` compares tracked published images with the current signed Wolfi index and known security fixes. Optional Cosign signing and SPDX attestation extend that same build pipeline; see the [registry, signing, and verification guide](docs/registry-signing.md).
 
 The CLI does not require Explorer or a database. Persistent SQLite catalog ingestion, historical snapshot queries, Explorer, and runnable service recipes are deferred, not implemented commands. These images contain packages; installing PostgreSQL or nginx does **not** establish a configured, runnable service.
 
@@ -20,6 +20,7 @@ Go installs `lupetto` in `GOBIN`, or otherwise in the `bin` directory of `GOPATH
 | --- | --- |
 | `help`, `doctor` | Installed CLI; `doctor` checks executable availability. |
 | `discover` | Access to the public Wolfi index/key; no apko, Docker, or Cosign invocation. |
+| `status` | Access to the public Wolfi index/key/security feed, a configured registry/repository and Docker client credentials when needed, writable user cache; no apko, Docker daemon, or Cosign invocation. |
 | `build --no-load`, `sbom` | Native **apko 1.4.5**, access to the public Wolfi repository, writable user cache. |
 | Default `build` | The above plus Docker on `PATH` and a running local Linux daemon (for loading). |
 | Publication | An authorized compatible registry/repository and credentials in Docker's client configuration. Docker itself is not needed with `--no-load`. |
@@ -65,6 +66,66 @@ lupetto discover --json
 ```
 
 The optional `package` field is the requested name/provider and is omitted for all-packages browsing. `indexSHA256` identifies the signed archive, not its decompressed contents. A successful empty all-packages result has `packages: []`; a missing named package or index/verification failure exits 1 with stderr diagnostics and **no JSON document**. Invalid arguments exit 2 with empty stdout. Discovery documents are separate from unchanged version-6 build/SBOM records.
+
+## Compare published images with Wolfi
+
+`status` is read-only: it never builds, loads, pushes, signs, or reports signature status. It compares explicitly tracked package/provider selectors against the current verified Wolfi index and the images in the configured registry repositories.
+
+Create a products file (selectors must be quoted YAML strings):
+
+```yaml
+version: 1
+products:
+  - package: postgresql
+    selectors: ["16", "17"]
+  - package: nginx
+    selectors: ["1.30"]
+```
+
+Unknown fields, duplicate tracks, unsupported versions, empty products/selectors, and malformed package names/selectors are rejected. Products are tracking groups, **not runtime recipes**. The file is limited to 1 MiB.
+
+```bash
+lupetto status --products products.yaml \
+  --registry registry.example.invalid --repository team/lupetto/images
+
+LUPETTO_REGISTRY=registry.example.invalid LUPETTO_REPOSITORY=team/lupetto/images \
+  lupetto status --products products.yaml --json
+```
+
+These registry examples are templates requiring an authorized target. Both registry and repository are required. Each explicit flag independently overrides its matching `LUPETTO_REGISTRY` / `LUPETTO_REPOSITORY` input; duplicate/empty flags are errors. The same authority/prefix validation, Docker-config-only keychain, loopback-only HTTP guard, host TLS trust, and sanitized errors as publication apply. Signing environment inputs are ignored. See the [registry configuration guide](docs/registry-signing.md#configuration-and-upfront-errors).
+
+For every track, status resolves the newest indexed APK, lists tags in `HOST/PREFIX/<actual-APK-component>`, and reads image identity from the six [manifest annotations](#image-identity-annotations), **never from tag text**. It deduplicates by manifest digest and orders matching images by APK version, then UTC creation time; digest order breaks exact ties deterministically. Non-image artifacts (including Cosign signatures/attestations/referrer manifests) and unidentified images are counted by unique digest, not inspected for package contents. Images built before annotation support are unidentified, not guessed.
+
+The newest image's complete installed APK set is read by digest from its manifest/config/layers, with compressed and uncompressed hashes verified and layer-overlay/whiteout semantics applied. Its validated installed identities are cached by image digest under the OS user-cache `lupetto/status/installed/` directory, with private permissions. Registry tags and manifests are still read on every status run; security/index facts are fetched fresh. The cache is not a catalog or a vulnerability database.
+
+| State | Meaning |
+| --- | --- |
+| `not-built` | No identified image matches this actual APK, architecture, and selector. |
+| `update-available` | The selected index top-level APK is newer than the newest matching image. |
+| `fixes-available` | Same top-level APK version, with reachable security fixes in installed dependencies available for a rebuild. |
+| `current` | No newer top-level version or reachable fixes for this track; **not a clean vulnerability result**. |
+| `error` | This track could not be compared (unavailable/ambiguous selector, registry/image/cache failure, or newest image newer than the current index selection). Other tracks still report. |
+
+Every installed package with a newer same-name/same-architecture indexed version is listed in `outdated`. Missing fixes include CVE/GHSA IDs under fixed APK versions strictly newer than installed and available in the current index; secdb key `"0"` means not affected and is ignored. Fixes outside a top-level numeric selector remain listed, with `reachableByTrack: false`, and do **not** trigger `fixes-available`. Dependency fixes use index availability (`reachableByTrack: true`). Thus `current` may still carry unreachable top-level fixes; consumers must show those as warnings. This is an index-based comparison, not a solved future dependency lock or proof that a particular rebuild will succeed.
+
+### Status JSON contract and exits
+
+`--json` prints one indented, newline-terminated document: `kind: "status"`, `version: 1`, `computedAt` (UTC RFC 3339), `architecture`, `registry`, `repository`, `indexSHA256`, `security`, and `tracks`. `security` has `url`, `sha256`, `unsigned`, `fixedOnly`, `wolfiOnly`, `unevaluatedFixCount`, and `unevaluatedFixes`. Each track has `package`, `selector`, `state`, optional `error`, optional `latest` (`name`, `version`, `architecture`), optional `repository`, `images`, optional `newest`, `installed`, `outdated`, `missingFixes`, `unevaluatedFixes`, `artifactCount`, and `unidentifiedCount`.
+
+- Each image: `digest`, `tags`, `name`, `version`, `architecture`, `created`, `annotations`.
+- Each installed identity: `name`, `version`, `architecture`.
+- Each outdated package: `name`, `architecture`, `installedVersion`, `latestVersion`.
+- Each missing fix: `name`, `architecture`, `installedVersion`, `fixedVersion`, `availableVersion`, `ids`, `reachableByTrack`.
+- Each unevaluated fix: `name`, original `fixedVersion`, `ids`; track entries also include `installedVersion`, `architecture`.
+- Empty fact lists are arrays, not `null`; unavailable facts (`latest`/`newest`) are omitted.
+
+Exit **0** means the global comparison completed, even when tracks are outdated or have errors: inspect every track's state. Invalid invocation/configuration/products YAML exits **2**; global failures (including signed-index verification and security-feed fetch/parse failures) exit **1**. Exit 1/2 has stderr diagnostics and no partial JSON document.
+
+### Security-data limitations
+
+The feed at `https://packages.wolfi.dev/os/security.json` is fetched over HTTPS and its bytes are identified by SHA-256, but it is **not signed**. It lists **fixed vulnerabilities only**, covers Wolfi packages only, and is matched by exact installed APK name (no unproved origin/subpackage mapping). An empty result never means an image has no vulnerabilities. This is **not a vulnerability scan**, signature verification, or runtime-readiness assessment. Index and feed can change between independent requests; computed time/checksums identify the observations, not one atomic upstream snapshot. Real proof and the exercised bounds/cases are in [status verification](docs/verification.md#registry-status-checkpoint-2).
+
+An unparseable secdb fixed-version key is never sorted heuristically or silently discarded. It is excluded from evaluated comparisons but reported in the security source's `unevaluatedFixCount` / `unevaluatedFixes`, and in any track that installs that exact package. Human output shows a warning and an `UNEVALUATED` count. For example, the observed feed included `opa-envoy` key `1.1.0-r1-r0`, which the pinned APK comparator rejects. Inspect these warnings even if a track says `current`; the vulnerability entries have **not been evaluated**. Other malformed feed structure, invalid package names, duplicate packages, and exceeded bounds remain global failures.
 
 ## Build a local OCI image
 
@@ -202,4 +263,4 @@ Continue with the [registry, signing, and verification guide](docs/registry-sign
 
 The rebuild is based on the operator-documentation request for a lost implementation. The overwritten older checkout is excluded from evidence/design; no historical source or executable claims are inferred from it. [AGENTS.md](AGENTS.md) contains repository instructions for coding agents.
 
-Explorer remains an optional separate application/consumer, not a second build engine or CLI prerequisite. Its product/repository/module packaging and a public CLI integration contract are undecided. Remote Konflux execution, registry inventory, vulnerability scanning, production credential/key management, and invented service recipes are not prerequisites or implemented features.
+Explorer remains an optional separate application/consumer, not a second build engine or CLI prerequisite. Its approved dashboard design consumes the versioned CLI `status`, `discover`, and build JSON contracts; the dashboard and combined container are not implemented by these CLI checkpoints. Remote Konflux execution, unfixed-vulnerability scanning, production credential/key management, and invented service recipes remain deferred. Status is a bounded registry/security-fix comparison, not a general vulnerability scanner.

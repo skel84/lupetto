@@ -45,18 +45,20 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 func runWithBuild(ctx context.Context, args []string, stdout, stderr io.Writer, runBuild func(context.Context, cliRequest) (build.Result, error)) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, usage)
+		fmt.Fprintln(stderr, usage+statusUsage)
 		return 2
 	}
 
 	switch args[0] {
 	case "help", "-h", "--help":
-		fmt.Fprintln(stdout, usage)
+		fmt.Fprintln(stdout, usage+statusUsage)
 		return 0
 	case "doctor":
 		return runDoctor(stdout, stderr, args[1:])
 	case "discover":
 		return runDiscover(ctx, args[1:], stdout, stderr)
+	case "status":
+		return runStatus(ctx, args[1:], stdout, stderr)
 	case "build", "sbom":
 		request, err := parseBuild(args[1:])
 		if err == nil && args[0] == "sbom" && request.NoLoad {

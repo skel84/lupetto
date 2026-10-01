@@ -14,8 +14,8 @@ One local Go module contains the standalone CLI: read-only discovery from the li
 | --- | --- | --- |
 | Index access and selection | Fetch and verify the signed APKINDEX, parse it, resolve names/providers and selectors to one exact APK. | `internal/wolfi` |
 | Build pipeline | Exact request → apko config and lock → OCI layout → installed-package and SPDX validation → optional load, publication, signing, attestation → version-6 record. | `internal/build` |
-| CLI | Parse arguments, render progress, print human or `--json` output, `doctor`, `discover`. | `cmd/lupetto` |
-| Status | Compare products-file tracks with the index, registry images (by annotation), and Wolfi security fixes; read-only. | Planned (`lupetto status`) |
+| CLI | Parse arguments, render progress, print human or `--json` output, `doctor`, `discover`, `status`. | `cmd/lupetto` |
+| Status | Compare products-file tracks with the index, registry images (by annotation), and Wolfi security fixes; read-only. | `internal/status` |
 | Catalog | Import snapshots, retain provenance, query versions, resolve selectors historically. | Deferred |
 | Explorer | Dashboard: render `status`/`discover` JSON, launch `lupetto build` jobs. | Planned (`cmd/lupetto-explorer`) |
 
@@ -28,15 +28,19 @@ cmd/lupetto/          arguments, terminal progress (implements build.Reporter), 
 internal/build/       pipeline: apko, validation, Docker load, OCI publication, Cosign, records, workflow failures
 internal/build/buildtest/   shared test fixtures (OCI layouts, in-process registry, signing helpers)
 internal/wolfi/       signed index fetch/verification, parsing, selection, discovery ordering
+internal/registry/    shared registry settings/naming, Docker-config-only authentication, loopback HTTP guard, sanitized errors
+internal/status/      strict products YAML, registry/index/security comparison, digest-keyed installed-package cache
 internal/wolfi/wolfitest/   shared test fixtures (signed index generation)
 
 cmd/lupetto ──▶ internal/build ──▶ internal/wolfi
       └──────────────────────────────▶ internal/wolfi
+      └────────▶ internal/status ──▶ internal/wolfi, internal/registry
+                 internal/build ──▶ internal/registry
 ```
 
-- `internal/wolfi` imports nothing else from the module; `internal/build` imports only `internal/wolfi`. Neither imports terminal rendering: the pipeline reports progress through a small `Reporter` carried in the context, and the CLI supplies the renderer.
-- `cmd/lupetto` makes no apko, Docker, Cosign, or registry calls itself; `doctor` only checks `PATH`.
-- Both packages are module-internal. This is not a public Go API and does not decide Explorer packaging.
+- `internal/wolfi` imports nothing else from the module and owns the shared installed-APK-database parser; `internal/registry` likewise imports no in-module packages. `internal/build` and `internal/status` consume those shared boundaries independently, and status never imports the build pipeline.
+- `cmd/lupetto` makes no apko, Docker, Cosign, or registry calls itself; `doctor` only checks `PATH`. The CLI owns status table/JSON presentation, not comparison logic.
+- These packages are module-internal. This is not a public Go API and does not decide Explorer packaging.
 
 ## Application and dependency boundaries
 
