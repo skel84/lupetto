@@ -198,7 +198,7 @@ The newline-terminated version-1 document has:
 - `docker`: `available`, optional `reason`, `images`. Each image: `id`, `tags`, `created`, `size` (bytes), `identityKnown`, `identitySource` (`build-record|readable-tag|unknown`), optional `identity: {name, version, architecture}` (Wolfi architecture).
 - Empty `builds`, `docker.images`, and `tags` are arrays, not `null`. Unsupported versions never include a parsed `record`.
 
-For Explorer containers, local Docker inventory requires both the Docker CLI and an explicitly mounted Docker socket. **The socket grants host-root-equivalent control** even though this command is read-only; access is opt-in, not a requirement for history. The current combined container does not include the Docker CLI or mount a socket by default. See [inventory evidence](docs/verification.md#local-inventory-redesign-round).
+For Explorer containers, local Docker inventory requires both the bundled Docker CLI and an explicitly mounted Docker socket. **The socket grants host-root-equivalent control** even though inventory is read-only; access is opt-in, not a requirement for retained build history. The default combined-container run has no socket and reports Docker unavailable. See the [container guide](#combined-container) and [inventory evidence](docs/verification.md#local-inventory-redesign-round).
 
 ## Build a local OCI image
 
@@ -381,7 +381,7 @@ Responses set CSP `default-src 'self'; frame-ancestors 'none'`, `X-Content-Type-
 
 ### Combined container
 
-Build the verified **linux/amd64** image from this checkout. The multi-stage `Containerfile` uses Go 1.27.1 with CGO disabled, a digest-pinned Wolfi base, exact Wolfi `apko=1.4.5-r0`, upstream Cosign **v3.1.3** checked against a pinned SHA-256, and CA certificates. It embeds the Explorer templates/static assets present at build time; no image is published by this command.
+Build the verified **linux/amd64** image from this checkout. The multi-stage `Containerfile` uses Go 1.27.1 with CGO disabled, a digest-pinned Wolfi base, exact Wolfi `apko=1.4.5-r0` and `docker-cli=28.5.0-r0`, upstream Cosign **v3.1.3** checked against a pinned SHA-256, and CA certificates. It embeds the Explorer templates/static assets present at build time; no image is published by this command.
 
 ```bash
 docker build --platform linux/amd64 -f Containerfile -t lupetto-explorer:local .
@@ -389,7 +389,7 @@ docker run --rm --name lupetto-explorer \
   --cap-drop=ALL --security-opt=no-new-privileges \
   -p 127.0.0.1:8080:8080 \
   --mount type=volume,src=lupetto-cache,dst=/var/cache/lupetto \
-  --mount "type=bind,src=$PWD/products.yaml,dst=/etc/lupetto/products.yaml,readonly" \
+  --mount "type=bind,src=$PWD/products,dst=/etc/lupetto/products" \
   --mount "type=bind,src=$HOME/.docker/config.json,dst=/etc/lupetto/docker/config.json,readonly" \
   -e DOCKER_CONFIG=/etc/lupetto/docker \
   -e LUPETTO_REGISTRY=registry.example.invalid \
@@ -397,19 +397,31 @@ docker run --rm --name lupetto-explorer \
   lupetto-explorer:local
 ```
 
-This is an operator template: create a [products file](#compare-published-images-with-wolfi), replace the generic registry/repository with an authorized HTTPS target, and mount only the intended Docker config file. `DOCKER_CONFIG` names its **directory**, not the file. Credential helpers referenced by that file must also exist in the container; this image does not bundle vendor-specific helpers. Mounted files must be readable by UID/GID **65532:65532**. An empty new Docker named volume inherits the image's cache ownership; a pre-existing volume or bind-mounted cache must already be writable by that UID/GID.
+This is an operator template: create a `products/` directory containing a [products file](#compare-published-images-with-wolfi) named `products.yaml`, replace the generic registry/repository with an authorized HTTPS target, and mount only the intended Docker config file. `DOCKER_CONFIG` names its **directory**, not the file. Credential helpers referenced by that file must also exist in the container; this image does not bundle vendor-specific helpers. Mounted files must be readable by UID/GID **65532:65532**. An empty new Docker named volume inherits the image's cache ownership; a pre-existing volume or bind-mounted cache must already be writable by that UID/GID.
 
-The entrypoint is `lupetto-explorer`, with default arguments `--listen 0.0.0.0:8080 --products /etc/lupetto/products.yaml`; **builds remain disabled**. Container arguments replace all default arguments, so to opt in supply all required defaults again:
+For dashboard tracking edits, both `products/` and `products/products.yaml` must be writable by UID/GID 65532 (on Linux, for example, `sudo chown -R 65532:65532 products`, after placing the intended file there). Mount the **directory**, not a single file: `lupetto products` writes a temporary file alongside the original and atomically renames it. A single-file bind mount cannot be replaced by that rename. Add `,readonly` to the directory mount for deliberate read-only tracking; viewing still works and an attempted edit shows the dashboard's read-only/writable-directory message.
+
+The entrypoint is `lupetto-explorer`, with default arguments `--listen 0.0.0.0:8080 --products /etc/lupetto/products/products.yaml`; **builds remain disabled**. Container arguments replace all default arguments, so to opt in supply all required defaults again:
 
 ```bash
 # Append these arguments after the image name in the docker run command above:
---listen 0.0.0.0:8080 --products /etc/lupetto/products.yaml --enable-builds
+--listen 0.0.0.0:8080 --products /etc/lupetto/products/products.yaml --enable-builds
 ```
 
 The example exposes the port only on host loopback. Binding the server to `0.0.0.0` inside the container is necessary for port forwarding, **not authentication**; protect any other exposure with an operator-controlled network boundary/authenticating ingress. Configure `--allowed-host` for an ingress's external authority as described [above](#explorer-http-security), and preserve that Host through the proxy. Do not expose a build-enabled instance to an untrusted network. `/healthz` reports process liveness, not registry/status health.
 
-No Docker daemon, socket, privileged mode, or extra capabilities are needed: real non-root builds/push/readback succeeded with **all capabilities dropped** and `no-new-privileges`. Explorer always uses `--no-load`. Consequently, `docker run --rm --entrypoint lupetto lupetto-explorer:local doctor` finds apko and Cosign but exits **1** solely because Docker is intentionally absent; that is expected for this image, not proof that image-only builds fail. For CLI use override the entrypoint and pass `--no-load`.
+No Docker daemon, socket, privileged mode, or extra capabilities are needed for registry publication: real non-root builds/push/readback succeeded with **all capabilities dropped** and `no-new-privileges`. Publish-mode dashboard builds use `--no-load`; local-mode builds require a reachable Docker daemon and load into it. The default run has **no socket**, so Images reports **Docker unavailable**, not an empty daemon. `docker run --rm --entrypoint lupetto lupetto-explorer:local doctor` now finds apko, Docker and Cosign and exits **0**; doctor checks executable availability, not daemon connectivity. For image-only CLI use, override the entrypoint and pass `--no-load`.
 
-Cache/evidence live below `XDG_CACHE_HOME=/var/cache/lupetto` on the declared volume; `HOME=/var/cache/lupetto/home` is on the same volume. Jobs/history are still in-memory. For optional signing, additionally bind-mount the intended key file read-only (for example at `/etc/lupetto/cosign.key`), set `LUPETTO_COSIGN_KEY=/etc/lupetto/cosign.key`, and provide `COSIGN_PASSWORD` only through the process environment (`-e COSIGN_PASSWORD` passes an already-set host variable). Never put a password in image build arguments, the Containerfile, or command arguments. Signing requires the remaining [signing configuration](docs/registry-signing.md#sign-and-attest-the-verified-digest); the container check used no keys or credentials.
+**Optional host Docker access is a host-root-equivalent grant**, not a harmless read-only inventory mount. Only opt in on a trusted instance: a socket client can create privileged containers or mount host filesystems, even when Explorer itself remains UID 65532 with no capabilities. On Linux, add these options **before the image name** to the run command above, replacing the group with the socket's numeric GID:
 
-See [combined-container verification](docs/verification.md#combined-container-checkpoint-5) for base digest, image size, actual commands/outcomes, and limits. Exact APK/tool availability is fail-closed, but the live Wolfi index and unpinned APK dependency closure do not guarantee byte-identical historical rebuilds; arm64 is not supported by this recipe.
+```bash
+# Linux example: grant non-root UID 65532 access via the socket's group.
+--mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
+--group-add "$(stat -c '%g' /var/run/docker.sock)"
+```
+
+The socket must allow that group to read/write it; `--group-add` does not change socket permissions. Do not run the container as root or make the socket world-writable to work around access. Docker Desktop on macOS exposes the daemon through its Linux VM; the host CLI commonly uses `$HOME/.docker/run/docker.sock` (inspect `docker context inspect`) and `/var/run/docker.sock` may be an optional symlink. Desktop's `docker run --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock` exposes the **VM** socket, whose group/permissions need not match the macOS endpoint. Inspect its numeric GID in the VM/container and add that group if required; do not apply Linux `stat -c` to the macOS filesystem. Desktop socket mounting was exercised in the [redesign container check](docs/verification.md#combined-container-redesign-round).
+
+Cache/evidence live below `XDG_CACHE_HOME=/var/cache/lupetto` on the declared volume; `HOME=/var/cache/lupetto/home` is on the same volume. Retained CLI build records persist there and populate history after restart; live jobs/logs are in-memory. For optional signing, additionally bind-mount the intended key file read-only (for example at `/etc/lupetto/cosign.key`), set `LUPETTO_COSIGN_KEY=/etc/lupetto/cosign.key`, and provide `COSIGN_PASSWORD` only through the process environment (`-e COSIGN_PASSWORD` passes an already-set host variable). Never put a password in image build arguments, the Containerfile, or command arguments. Signing requires the remaining [signing configuration](docs/registry-signing.md#sign-and-attest-the-verified-digest); the container check used no keys or credentials.
+
+See [redesign-container verification](docs/verification.md#combined-container-redesign-round) for image size, Docker access, tracking edits and local/publish dashboard outcomes, and the [original container checkpoint](docs/verification.md#combined-container-checkpoint-5) for the pinned bases and earlier evidence. Exact APK/tool availability is fail-closed, but the live Wolfi index and unpinned APK dependency closure do not guarantee byte-identical historical rebuilds; arm64 is not supported by this recipe.

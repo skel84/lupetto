@@ -975,6 +975,88 @@ The final image's `--help` exited 0 and included the repeatable `--allowed-host`
 
 Limitations: linux/amd64 only; anonymous loopback HTTP publication, not authenticated production HTTPS/signing/transparency-log proof; no credential-helper or private-key interoperability was claimed. The image includes the upstream Cosign binary but no signing was requested. A successful BusyBox build proves the exercised apko lock/build/publication path works unprivileged, not every package selection or runtime recipe. No extra runtime privileges were required. Container UI proof here is curl/JSON plus HTML 200, not a second browser run. Live Wolfi dependency/index availability can change; exact APK pinning fails closed if removed, and the base-plus-tool recipe is not an archived, byte-reproducible dependency snapshot.
 
+### Combined container (redesign round)
+
+Observed 2026-10-01 on darwin/amd64 with Docker Desktop **4.37.2**, host Docker client/server **27.4.0** (containerd image store), targeting **linux/amd64**. This supersedes the checkpoint-5 products path, missing-Docker doctor result, and publish-only dashboard assumptions; the earlier evidence remains historical.
+
+`docker build --platform linux/amd64 -f Containerfile -t lupetto-explorer:container-redesign-check .` exited **0**. The image retains the digest-pinned Go **1.27.1** builder and Wolfi base recorded above, exact `apko=1.4.5-r0`, SHA-256-verified upstream Cosign **v3.1.3**, and adds exact signed Wolfi `docker-cli=28.5.0-r0` from `https://packages.wolfi.dev/os`. Docker 28.5.0 was deliberately selected from the available Wolfi versions and exercised against the existing 27.4.0 daemon; no daemon is installed.
+
+| Inspection | Observed result |
+| --- | --- |
+| `docker image inspect lupetto-explorer:container-redesign-check` | Image ID `sha256:1da3f097af56a0e5d5d422dfe48b11f5c27012addc3bf1976ee0b9da3be1e6eb`; **111,697,886 bytes (106.5 MiB)**, Docker-reported size, not compressed transfer size; linux/amd64. |
+| Image config | User `65532:65532`; entrypoint `/usr/local/bin/lupetto-explorer`; CMD `--listen 0.0.0.0:8080 --products /etc/lupetto/products/products.yaml`. |
+| In-container `apko version` | `GitVersion: v1.4.5`, Go 1.27.1, linux/amd64. |
+| In-container `docker --version` | `Docker version 28.5.0, build 887030f`; socket-free invocation does not require a daemon. |
+| In-container `cosign version` / `sha256sum /usr/local/bin/cosign` | `v3.1.3`, Go 1.26.4, linux/amd64; `4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71`. |
+| `docker run --rm --cap-drop=ALL --security-opt=no-new-privileges --entrypoint sh lupetto-explorer:container-redesign-check -c 'id; grep CapEff /proc/self/status; apko version; docker --version; cosign version; sha256sum /usr/local/bin/cosign; lupetto doctor'` | Exit **0**; UID/GID 65532; `CapEff: 0000000000000000`; doctor found **all three** tools. Doctor checks PATH, not daemon connectivity. |
+
+Synthetic fixtures were created outside the checkout: `<tmp>/products/products.yaml` held `version: 1` and `busybox-static` selector `"1"`, with an empty `{}` Docker config at `<tmp>/config.json`. On this Desktop bind mount, the disposable products directory/file were writable by UID 65532 (modes 0777/0666); these permissive throwaway fixture modes are **not** the Linux deployment recommendation. The README instead documents ownership by UID/GID 65532. No existing Docker credentials, signing keys, passwords or registry credentials were mounted. Every runtime container used `--cap-drop=ALL --security-opt=no-new-privileges`; none used root UID, privileged mode, or added capabilities.
+
+The default and read-only instances used the image's entrypoint/CMD, no socket, a shared fresh named cache volume, and loopback-only ports:
+
+```bash
+# CHECK_ROOT denotes the disposable directory prepared above.
+docker run -d --rm --name lupetto-redesign-default-check \
+  --cap-drop=ALL --security-opt=no-new-privileges \
+  -p 127.0.0.1:60912:8080 \
+  --mount "type=bind,src=$CHECK_ROOT/products,dst=/etc/lupetto/products" \
+  --mount "type=bind,src=$CHECK_ROOT/config.json,dst=/etc/lupetto/docker/config.json,readonly" \
+  --mount type=volume,src=lupetto-redesign-cache-check,dst=/var/cache/lupetto \
+  lupetto-explorer:container-redesign-check
+```
+
+The read-only counterpart was `lupetto-redesign-readonly-check` on `127.0.0.1:60913:8080` with `,readonly` appended to the **directory** mount. `curl --silent --show-error --max-time 30` fetched `/?format=json` (including its CSRF token) and build-detail `?format=json` routes; the real browser fetched `/images`. POSTs sent `Origin: http://127.0.0.1:<port>` and `--data-urlencode csrfToken=<token-from-JSON>` plus `package=xz` and `selector=5`.
+
+| Scenario | Observed result |
+| --- | --- |
+| Default no-socket `GET /?format=json` | `buildsEnabled: false`; inventory kind `images` v1; `docker.available: false`, reason `Docker is unreachable or image listing failed`, empty Docker images. With no registry configured, status separately reported its explicit registry/repository configuration error. |
+| `POST /products/add`, then `/products/remove` | Both **303**; actual host file gained `xz` selector `"5"`, then lost it, preserving the BusyBox track. These were CLI-owned atomic directory replacements, not in-container-only writes. |
+| Default `POST /builds` with valid CSRF/Origin and `mode=local` | **403**, builds disabled. |
+| Read-only directory `POST /products/add` | **400**; rendered `read-only file system` plus `The products file and its directory must be writable (mount the directory, not a single file)`. Host products bytes remained unchanged; read views worked. |
+| Real headless Chromium, `/images` at 1440×960 | Rendered `DOCKER Unavailable` and `Docker isn’t available` explanation, not “zero images”; screenshot inspected, no browser errors. |
+
+An initial synthetic fixture omitted `version: 1` and was correctly rejected; after correcting it, the complete successful add/remove/read-only sequence above was repeated. One immediate POST during the host's fixture rewrite also saw invalid YAML; subsequent reads and atomic CLI edits used the valid fixture. Neither fixture error is counted as a successful tracking check.
+
+For the optional socket scenarios, the owned anonymous registry and enabled dashboard shared a network namespace, so `127.0.0.1:5000` was genuinely **loopback inside the container**:
+
+```bash
+docker run -d --rm --name lupetto-redesign-registry-check \
+  -p 127.0.0.1:60914:5000 -p 127.0.0.1:60915:8080 registry:3
+docker run -d --rm --name lupetto-redesign-enabled-check \
+  --cap-drop=ALL --security-opt=no-new-privileges \
+  --network container:lupetto-redesign-registry-check \
+  --mount "type=bind,src=$CHECK_ROOT/products,dst=/etc/lupetto/products" \
+  --mount "type=bind,src=$CHECK_ROOT/config.json,dst=/etc/lupetto/docker/config.json,readonly" \
+  --mount type=volume,src=lupetto-redesign-cache-check,dst=/var/cache/lupetto \
+  --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock \
+  --group-add 0 \
+  -e LUPETTO_REGISTRY=127.0.0.1:5000 \
+  -e LUPETTO_REPOSITORY=verify/container-redesign \
+  lupetto-explorer:container-redesign-check \
+  --listen 0.0.0.0:8080 --products /etc/lupetto/products/products.yaml --enable-builds
+```
+
+Desktop's mounted **VM** socket was UID/GID **0:0**, mode **0660** (`ls -ln` / `stat -c '%g %a'` inside a throwaway container). UID 65532 without the supplementary group got permission denied from `docker version`; adding **only** `--group-add 0` made it reachable. The enabled instance remained UID/GID 65532 with supplementary group 0 and zero effective capabilities. **Socket access still grants host-root-equivalent control**; neither non-root UID nor dropped capabilities constrains the remote Docker daemon. This is an explicitly opted-in trusted smoke instance, not the default deployment.
+
+| Command / interaction | Observed result |
+| --- | --- |
+| `docker exec lupetto-redesign-enabled-check lupetto images --json` | Exit **0**, `docker.available: true`; all **16** pre-existing Lupetto Docker image IDs and all **18** tags matched host `docker image ls --format '{{json .}}' 'lupetto/*'`. |
+| Same-origin CSRF `POST /products/add`, `package=xz selector=5` | **303**; host products file updated, enabling an exact inventory join for the local build. |
+| `curl ... -H 'Origin: http://127.0.0.1:60915' --data-urlencode csrfToken=<token> --data-urlencode package=xz --data-urlencode selector=5 --data-urlencode mode=local http://127.0.0.1:60915/builds` | **303** to `/builds/1`; its `?format=json` reached `succeeded`, exit **0**, `xz@5.8.4-r0` / x86_64, version-6 result, validated SPDX, build `completed`, load `loaded`, publication/signing/attestation `skipped` despite registry environment. |
+| Host `docker image inspect lupetto/xz:5.8.4-r0-amd64 lupetto/local:build-476693960` | Both tags resolved to **the same loaded host image** `sha256:383b5f63c67036c7e1f06b6e3866b7c73fadeb35ae420c404bcf5f615d45091a`, linux/amd64. |
+| `GET /?format=json` after local build | `xz` version row joined that Docker ID with the retained successful build record; local identity source `build-record`; registry remained `not-built` (correctly distinct from local presence). |
+| Same curl build POST with `package=busybox-static selector=1 mode=publish` | **303** to `/builds/2`; JSON reached `succeeded`, exit **0**, `busybox-static@1.38.0-r2`; load `skipped`, publication `published`, `verified: true`; signing/attestation skipped. |
+| Automatic `GET /?format=json` refresh after publication | BusyBox became **`current`** with newest digest exactly `sha256:add4c6f69b7490b0aae38f5c25112447993e2f19d019b5b7064275eed677d864`, matching the build's verified immutable publication reference under `127.0.0.1:5000/verify/container-redesign/busybox-static`. No manual refresh needed. |
+| Real Chromium `/images` on the enabled container | `DOCKER Connected`; BusyBox registry version/up-to-date verdict and XZ `5.8.4-r0` in Docker / local-only verdict rendered; screenshot inspected; no browser errors. |
+
+Both builds used signed-index SHA-256 `c7a4940f7e77bed2ab706e09f45832452afb55118c0b27350d3a02eb79b5c788`. Local OCI digest was `sha256:cd6e2a2ad40a5bfc3cefa02830f66c76db5ef3a925c49459f70eb6fa2e8e815c`; local validated SPDX SHA-256 `60c4ac484f435c8e5300b2b5fa132ef1082103c7a302d0b737d3b651d289bc9b`. Published BusyBox validated SPDX SHA-256 was `ffa468517d57a0eb2a07d22da005b54612919a3baaa7f857ba595f1a7c221844`. Both `result.json` files under `/var/cache/lupetto/lupetto/builds/image-{476693960,2953465368}/` were UID/GID **65532:65532**, mode **0600**; cache root was mode **0700**.
+
+Cleanup: `docker stop` removed all four `--rm` runtime containers (default, read-only, enabled, registry); individual `docker container inspect` checks exited **1** with `No such container`. `docker volume rm lupetto-redesign-cache-check` exited **0**. `docker image rm lupetto/xz:5.8.4-r0-amd64 lupetto/local:build-476693960` exited **0**, deleting the loaded test image; inspecting its ID then exited **1**. A before/after comparison confirmed **all pre-existing Lupetto image IDs and tags were unchanged**. Only the rebuilt combined image is retained locally. No external registry/image publication, production credentials or signing were involved.
+
+Limits: linux/amd64 and this Docker Desktop/containerd-store combination only; Linux socket-GID instructions are documented but not exercised on a native Linux host. No authenticated HTTPS registry, signing/transparency-log, credential helper, macOS host-endpoint bind variant, other browser/architecture, or runtime service recipe is claimed. Live Wolfi index/dependency availability remains mutable despite exact tool pins. The browser look confirms actual container rendering, not a repeat of the full redesign interaction suite.
+
+Final gates ran **serially after container verification**: `go test ./...` passed (47.9 seconds), then `go test -race ./...` passed (34.5 seconds), all packages. No Go files changed, so no formatting rewrite was needed. README Bash syntax checks passed for all **15** fenced Bash blocks; the two new verification command blocks also passed syntax checking. All **110** relative links/anchors in the three changed guides passed validation; `git diff --check` passed. Staged whitespace/secret checks and content review were performed before the single commit. These syntax checks do not execute the generic production examples.
+
 ## Release evidence
 
 Once code exists, run the following in each implemented Go module. A CLI release requires its applicable checks, not a completed Explorer:

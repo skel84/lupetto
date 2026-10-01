@@ -18,8 +18,8 @@ RUN test "$(go env GOARCH)" = amd64 \
 
 FROM cgr.dev/chainguard/wolfi-base@sha256:d59fd2d1d21e913b12a8d56064e9aaf61f818289bd18b17132a0c4fde2358cea
 RUN echo 'https://packages.wolfi.dev/os' > /etc/apk/repositories \
-    && apk add --no-cache apko=1.4.5-r0 ca-certificates-bundle \
-    && mkdir -p /var/cache/lupetto/home /etc/lupetto/docker \
+    && apk add --no-cache apko=1.4.5-r0 docker-cli=28.5.0-r0 ca-certificates-bundle \
+    && mkdir -p /var/cache/lupetto/home /etc/lupetto/docker /etc/lupetto/products \
     && chown -R 65532:65532 /var/cache/lupetto \
     && chmod 0700 /var/cache/lupetto /var/cache/lupetto/home
 COPY --from=build /out/lupetto /out/lupetto-explorer /out/cosign /usr/local/bin/
@@ -31,4 +31,4 @@ WORKDIR /var/cache/lupetto
 VOLUME ["/var/cache/lupetto"]
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/lupetto-explorer"]
-CMD ["--listen", "0.0.0.0:8080", "--products", "/etc/lupetto/products.yaml"]
+CMD ["--listen", "0.0.0.0:8080", "--products", "/etc/lupetto/products/products.yaml"]
