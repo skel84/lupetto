@@ -23,6 +23,7 @@
 {{else if eq .Tab "compare"}}{{template "image-compare" .}}
 {{else if eq .Tab "builds"}}{{template "image-builds" .}}
 {{else}}{{template "image-overview" .}}{{end}}
+{{if or (eq .Tab "") (eq .Tab "overview") (eq .Tab "vulnerabilities")}}{{with .Status.Document}}<div class="after-list">{{template "data-note" .Security}}</div>{{end}}{{end}}
 {{template "page-end" .}}
 {{template "doc-end"}}{{end}}
 
@@ -44,7 +45,7 @@
   <section aria-labelledby="where-reg"><h3 id="where-reg">{{template "icon" "registry"}}Registry</h3><ul>
     {{- range $i, $img := $t.Images}}<li><div class="line1"><span class="ver">{{$img.Version}}</span>{{if eq $i 0}}<span class="chip accent">newest</span>{{end}}</div>
     <div class="line2">{{if not $img.Created.IsZero}}{{template "date" $img.Created}} · {{end}}{{template "short-digest" $img.Digest}}</div>{{if $img.Tags}}<div class="line2 mono">{{range $j, $tag := $img.Tags}}{{if $j}}, {{end}}{{$tag}}{{end}}</div>{{end}}</li>
-    {{- else}}<li class="none">Nothing published yet.</li>{{end}}
+    {{- else}}<li class="none">{{if eq $t.State "error"}}Registry contents could not be determined because of the error above.{{else}}Nothing published yet.{{end}}</li>{{end}}
     {{- if $t.UnidentifiedCount}}<li class="none">{{$t.UnidentifiedCount}} image{{if ne $t.UnidentifiedCount 1}}s{{end}} without Lupetto labels (not analyzed)</li>{{end}}
     {{- if $t.ArtifactCount}}<li class="none">{{$t.ArtifactCount}} other artifact{{if ne $t.ArtifactCount 1}}s{{end}} (signatures, attestations; not images)</li>{{end}}
   </ul></section>
@@ -87,7 +88,6 @@
 <td data-label="Package"><span class="mono">{{.Name}}</span></td>
 <td data-label="Installed">{{if .InstalledVersion}}<span class="ver">{{.InstalledVersion}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
 <td data-label="Feed’s fixed version"><span class="ver">{{.FixedVersion}}</span></td></tr>{{end}}</tbody></table></div>{{end}}
-{{with .Status.Document}}{{template "data-note" .Security}}{{end}}
 </div>{{end}}
 
 {{/* Root: []MissingFix. */}}

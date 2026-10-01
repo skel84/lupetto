@@ -171,7 +171,7 @@ func TestEmbeddedTemplatesRenderRepresentativeModels(t *testing.T) {
 		{"images error read-only", "images", ImagesView{BaseView: disabled, Status: StatusView{LastError: evil}, Inventory: InventoryView{Error: evil}}, []string{"couldn’t check your images", "Last comparison had errors", "Docker isn’t available", "Read-only server", "Local inventory couldn’t be read"}, nil},
 		{"images building", "images", ImagesView{BaseView: busy, Status: status, Groups: groups, Summary: summary}, []string{"Another build is running", "View progress", `data-build-running`, `<span class="count"`}, []string{`action="/builds"`}},
 		{"images disabled", "images", ImagesView{BaseView: disabled, Status: status, Groups: groups, Summary: summary}, []string{"Builds are disabled on this server", "Docker unavailable"}, nil},
-		{"image overview", "image", imageView("overview"), []string{"Overview &amp; versions", `aria-current="page">Overview`, "lupetto/openssl:3.6.0-r1-amd64", "1 image without Lupetto labels", "2 other artifacts", `class="mark latest"`, "Recent openssl builds", "/images/openssl/3.5?tab=overview"}, nil},
+		{"image overview", "image", imageView("overview"), []string{`id="about-data"`, "Overview &amp; versions", `aria-current="page">Overview`, "lupetto/openssl:3.6.0-r1-amd64", "1 image without Lupetto labels", "2 other artifacts", `class="mark latest"`, "Recent openssl builds", "/images/openssl/3.5?tab=overview"}, nil},
 		{"image vulnerabilities", "image", imageView("vulnerabilities"), []string{"Fixed by rebuilding", "Needs another version", `href="https://nvd.nist.gov/vuln/detail/CVE-2026-0001"`, `href="https://github.com/advisories/GHSA-aaaa-bbbb-cccc"`, `href="https://pkg.go.dev/vuln/GO-2026-0001"`, "nvd:cvss-v3.1", "Couldn’t be evaluated", "index has 3.6.0-r3", "sev sev-unknown", "Any new build"}, []string{"No missing fixes found"}},
 		{"image packages registry", "image", imageView("packages"), []string{"Packages read from the registry image", `<span class="ver newer">3.6.0-r2</span>`, "?tab=packages&amp;version=20260930-184410"}, []string{"Download SPDX"}},
 		{"image packages local", "image", localPackages, []string{`href="/builds/20260930-184410/spdx" download`, "Download SPDX (JSON)"}, nil},
@@ -183,7 +183,7 @@ func TestEmbeddedTemplatesRenderRepresentativeModels(t *testing.T) {
 			[]string{"Missing fixes could not be determined", "registry read failed"}, []string{"No missing fixes found", "No registry image to check"}},
 		{"catalog", "packages", PackagesView{BaseView: base, Query: "s", Packages: []PackageItem{{DiscoveredPackage: DiscoveredPackage{Name: "busybox", Version: "1", Description: evil}, DetailURL: "/catalog/busybox", Tracked: true}, {DiscoveredPackage: DiscoveredPackage{Name: "curl", Version: "8"}, DetailURL: "/catalog/curl"}}, TotalMatches: 201, Limit: 200, Document: &DiscoverDocument{Architecture: "x86_64", IndexSHA256: "abc"}},
 			[]string{"Showing the first 200 of 201", `href="/catalog/busybox"`, "Tracked", `data-package="curl"`, `id="track-dialog"`}, nil},
-		{"catalog loading", "packages", PackagesView{BaseView: base, Packages: []PackageItem{}, Limit: 200, Refreshing: true, LastError: evil}, []string{"Loading the Wolfi index", `data-poll-url="/catalog?format=json"`, "couldn’t be loaded"}, nil},
+		{"catalog loading", "packages", PackagesView{BaseView: base, Packages: []PackageItem{}, Limit: 200, Refreshing: true, LastError: evil}, []string{"Loading the Wolfi index", `data-poll-url="/catalog?format=json" data-poll-field="refreshing" data-poll-error-field="lastError" data-poll-unless-field="document"`, "couldn’t be loaded"}, nil},
 		{"catalog none", "packages", PackagesView{BaseView: base, Query: "zz", Packages: []PackageItem{}, Limit: 200, Document: &DiscoverDocument{}}, []string{"No packages match"}, nil},
 		{"catalog package", "package", PackageView{BaseView: base, Name: "cmd:curl", Document: &DiscoverDocument{Packages: []DiscoveredPackage{{Name: "curl", Version: "8.0-r1", Description: evil}}}},
 			[]string{`name="package" value="cmd:curl"`, `name="apkVersion" value="8.0-r1"`, `name="mode" value="local"`, `name="mode" value="publish"`}, nil},
@@ -221,6 +221,12 @@ func TestEmbeddedStaticAssetsServed(t *testing.T) {
 	if css.Code != 200 || !strings.Contains(css.Body.String(), "prefers-color-scheme: dark") || strings.Contains(css.Body.String(), "data-theme") {
 		t.Fatalf("%d stylesheet is not the single Pista theme", css.Code)
 	}
+	// Collapsed nav labels and repeated table headers must stay in the accessibility tree.
+	for _, hidden := range []string{".navtext { display: none", "tracks thead { display: none", "stackable thead { display: none"} {
+		if strings.Contains(css.Body.String(), hidden) {
+			t.Errorf("stylesheet removes accessible text with %q", hidden)
+		}
+	}
 }
 
 // A failed comparison must not be presented as an empty (clean) result, and
@@ -230,11 +236,28 @@ func TestEmbeddedTemplatesDistinguishTrackErrorsFromEmptyResults(t *testing.T) {
 	errorRow := ProductRow{Package: "p", Selector: "1", DetailURL: "/images/p/1", Track: Track{Package: "p", Selector: "1", State: "error", Error: "registry read failed", Newest: &image, Images: []Image{image}}, Verdict: "Unable to compare", VerdictKind: "error"}
 	cleanRow := ProductRow{Package: "q", Selector: "1", DetailURL: "/images/q/1", Track: Track{Package: "q", Selector: "1", State: "current", Newest: &image, Images: []Image{image}}, Verdict: "Up to date", VerdictKind: "ok"}
 	doc := &StatusDocument{Security: SecuritySource{Unsigned: true, FixedOnly: true, WolfiOnly: true}}
+	renderer, err := embeddedRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tab := range []string{"overview", "vulnerabilities"} {
+		var out bytes.Buffer
+		if err := renderer.Render(&out, "image", ImageView{BaseView: BaseView{CSRFToken: "tok-123"}, Status: StatusView{Document: doc}, Product: cleanRow, Tab: tab}); err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(out.String(), `id="about-data"`); n != 1 {
+			t.Errorf("%s tab renders the security-data note %d times, want 1", tab, n)
+		}
+	}
 	renderCases(t, []templateCase{
 		{"images error row", "images", ImagesView{BaseView: BaseView{CSRFToken: "tok-123"}, Status: StatusView{Document: doc}, Groups: []ProductGroup{{Package: "p", Rows: []ProductRow{errorRow}}}, Summary: ImagesSummary{All: 1}},
 			[]string{"Unknown (track error)", "registry read failed"}, []string{"None found"}},
 		{"image error overview", "image", ImageView{BaseView: BaseView{CSRFToken: "tok-123"}, Product: errorRow, Tab: "overview"},
-			[]string{"could not be determined"}, []string{"None found"}},
+			[]string{"could not be determined"}, []string{"None found", "Nothing published yet"}},
+		{"image error overview without images", "image", ImageView{BaseView: BaseView{CSRFToken: "tok-123"}, Product: ProductRow{Package: "p", Selector: "1", DetailURL: "/images/p/1", Track: Track{State: "error", Error: "registry unreachable"}}, Tab: "overview"},
+			[]string{"Registry contents could not be determined"}, []string{"Nothing published yet"}},
+		{"clean overview carries the data note", "image", ImageView{BaseView: BaseView{CSRFToken: "tok-123"}, Status: StatusView{Document: doc}, Product: cleanRow, Tab: "overview"},
+			[]string{"None found", `id="about-data"`, "isn’t a full vulnerability scan"}, nil},
 		{"clean track still qualified", "image", ImageView{BaseView: BaseView{CSRFToken: "tok-123"}, Status: StatusView{Document: doc}, Product: cleanRow, Tab: "vulnerabilities"},
 			[]string{"No missing fixes found", "What this does and doesn’t cover", "isn’t a full vulnerability scan", "The feed is not signed", "Fixed issues only", "Wolfi packages only"}, []string{"secure", "No vulnerabilities"}},
 	})

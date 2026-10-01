@@ -1102,4 +1102,13 @@ Screenshots: `/tmp/lupetto-ui-shots/*.webp` (real UI) next to `/tmp/lupetto-mock
 
 Gates on the combined backend/UI tree: `gofmt -l internal/explorer cmd` clean, `node --check internal/explorer/web/static/app.js` passed, `go test ./internal/explorer -run TestEmbedded` passed, and `go test ./... -count=1` followed by `go test -race ./... -count=1` passed (run once, serially).
 
+Frontend review follow-up (five minor findings on `6f6ab29`), re-checked in the same headless Chromium against freshly built binaries, a new owned loopback `registry:2` (one CLI-published `busybox-static 1.38.0-r2`) and a registry-unreachable instance; both Explorer instances exited 0 on SIGTERM and the registry was removed (`docker container inspect` then failed):
+
+- Catalog initial discovery failure: Explorer used a wrapper that fails only `discover --json` (synthetic message) and `exec`s the real CLI otherwise. `/catalog` issued exactly one `format=json` poll, replaced the loading state with "Loading failed … Polling stopped" plus the CLI error as text (`role="alert"`), and made no further requests or reloads over the next 16 s.
+- Error track without images (registry `127.0.0.1:1`): the overview's Registry column read "Registry contents could not be determined because of the error above." and never "Nothing published yet".
+- Overview of a clean track ("Missing fixes … None found") now carries the security-data note; the note appears exactly once on the Overview and Vulnerabilities tabs.
+- Accessibility tree (Puppeteer `accessibility.snapshot`) at 1440 px and 390 px: the main navigation links are named Images, Catalog, Builds even when their labels are visually collapsed, and both product tables expose all seven column headers while the second table's header row is visually hidden (1 px). No horizontal scroll at 390 px; no CSP violations.
+
+New template/static regressions cover the discovery-failure poll attributes, the error-track registry wording, exactly one data note on both tabs, and the absence of `display: none` on nav labels and table headers. Gates after the fixes: `gofmt -l` clean, `node --check` passed, `go test ./... -count=1` and `go test -race ./... -count=1` passed (serial, heavy slot announced).
+
 Limitations: one browser engine (Chromium), one host; no Firefox/Safari or screen-reader pass; the 1 MiB log-trim path was not re-exercised with oversized output in this round; no signing key was used, so signed/attested outputs are covered by the template test only. The container is unchanged (still listed separately in the plan).

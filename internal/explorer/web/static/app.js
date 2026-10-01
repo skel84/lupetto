@@ -39,13 +39,37 @@
     return url + (url.indexOf("?") >= 0 ? "&" : "?") + "format=json";
   }
 
-  // Reload once a JSON flag (e.g. status.refreshing) becomes false.
+  // Reload once a JSON flag (e.g. status.refreshing) becomes false. With
+  // data-poll-error-field/data-poll-unless-field, an error reported while the
+  // "unless" value is still missing (e.g. lastError with no document) stops
+  // polling and shows the error, so a failing load is not retried forever.
   function pollUntilIdle(element) {
     var url = element.getAttribute("data-poll-url");
     var path = element.getAttribute("data-poll-field");
+    var errorPath = element.getAttribute("data-poll-error-field");
+    var unlessPath = element.getAttribute("data-poll-unless-field");
     var delay = 2500;
+    function showError(message) {
+      var box = element.closest(".empty") || element;
+      box.setAttribute("role", "alert");
+      while (box.firstChild) { box.removeChild(box.firstChild); }
+      var title = document.createElement("h2");
+      title.textContent = "Loading failed";
+      var note = document.createElement("p");
+      note.textContent = "Polling stopped. Reload the page to try again.";
+      var pre = document.createElement("pre");
+      pre.className = "errtext";
+      pre.textContent = message;
+      box.appendChild(title);
+      box.appendChild(note);
+      box.appendChild(pre);
+    }
     function tick() {
       getJSON(url).then(function (data) {
+        if (errorPath && unlessPath) {
+          var error = field(data, errorPath);
+          if (error && !field(data, unlessPath)) { showError(String(error)); return; }
+        }
         if (!field(data, path)) { reload(); return; }
         delay = 2500;
         window.setTimeout(tick, delay);
