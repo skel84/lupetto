@@ -227,6 +227,8 @@ The user rejected the first dashboard UI as basic and organized around the CLI's
 
 **Deferred to a later round:** signature/attestation verification status, SBOM download from registry attestations, vulnerability trends over time, scanner-based (unfixed) vulnerabilities, end-of-life data.
 
+**Publish builds also load locally (user-approved 2026-10-01).** A dashboard "Build & publish" loads the image into local Docker as well whenever the dashboard's latest local inventory reports Docker as available. The build then omits `--no-load`, so it loads, publishes, and signs/attests (when a key is configured) in one CLI run. When Docker is unavailable or unknown, the build stays publish-only (`--no-load`), and the dashboard says so before and after the build. The CLI loads before it publishes, so a load failure fails the build before publication; the record shows that as a load failure, not a publication result. "Build locally" is unchanged: it loads only, with publication and signing suppressed. The job records whether loading was requested, and stage progress follows that, not the button that was clicked.
+
 ## Proposed design choices
 
 | ID | Proposal | Tradeoff |
