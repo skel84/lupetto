@@ -16,7 +16,7 @@
   </form>
 
   {{if .LastError}}<div class="callout callout-bad" role="alert"><p><strong>Package discovery failed.</strong>{{if .Document}} Showing the previously loaded index.{{end}}</p><pre class="error-text">{{.LastError}}</pre></div>{{end}}
-  {{if .Refreshing}}<p class="callout callout-info" role="status" data-poll-url="/packages?format=json&amp;q={{.Query}}" data-poll-field="refreshing"><span class="spinner" aria-hidden="true"></span> Loading the package index… This page reloads when it is ready; without JavaScript, reload it manually.</p>{{end}}
+  {{if and .Refreshing (not .Document)}}<p class="callout callout-info" role="status" data-poll-url="/packages?format=json&amp;q={{.Query}}" data-poll-field="refreshing" data-poll-error-field="lastError" data-poll-unless-field="document"><span class="spinner" aria-hidden="true"></span> Loading the package index… This page reloads when it is ready; without JavaScript, reload it manually.</p>{{end}}
 
   {{with .Document}}<dl class="facts">
     <div><dt>Architecture</dt><dd>{{.Architecture}}</dd></div>

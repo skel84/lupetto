@@ -21,12 +21,36 @@
   }
 
   // Reload the page once a JSON flag (e.g. status.refreshing) becomes false.
+  // With data-poll-error-field/data-poll-unless-field, a reported error while
+  // the "unless" value is still missing (e.g. lastError with no document)
+  // stops polling and shows the error instead of retrying forever.
   function pollUntilIdle(element) {
     var url = element.getAttribute("data-poll-url");
     var path = element.getAttribute("data-poll-field");
+    var errorPath = element.getAttribute("data-poll-error-field");
+    var unlessPath = element.getAttribute("data-poll-unless-field");
     var delay = 2500;
+    function showError(message) {
+      element.className = "callout callout-bad";
+      element.setAttribute("role", "alert");
+      element.textContent = "";
+      var strong = document.createElement("strong");
+      strong.textContent = "Loading failed; polling stopped. Reload the page to retry.";
+      var pre = document.createElement("pre");
+      pre.className = "error-text";
+      pre.textContent = message;
+      element.appendChild(strong);
+      element.appendChild(pre);
+    }
     function tick() {
       getJSON(url).then(function (data) {
+        if (errorPath && unlessPath) {
+          var error = field(data, errorPath);
+          if (error && !field(data, unlessPath)) {
+            showError(String(error));
+            return;
+          }
+        }
         if (!field(data, path)) {
           window.location.reload();
           return;
@@ -41,12 +65,20 @@
     window.setTimeout(tick, delay);
   }
 
+  // Keep at most this many characters of log text in the page, matching the
+  // server's retained 1 MiB stderr tail; older text is dropped with a marker.
+  var LOG_LIMIT = 1 << 20;
+
   // Live job log: append chunks from the absolute stderr offset until done.
   function streamLog(log) {
     var url = log.getAttribute("data-log-url");
     var offset = Number(log.getAttribute("data-log-offset")) || 0;
     var status = document.getElementById("log-status");
     var delay = 1500;
+    var total = 0;
+    Array.prototype.forEach.call(log.childNodes, function (node) {
+      if (node.nodeType === 3) { total += node.length; }
+    });
 
     function setStatus(text) {
       if (status) { status.textContent = text; }
@@ -54,11 +86,37 @@
     function nearBottom() {
       return log.scrollHeight - log.scrollTop - log.clientHeight < 40;
     }
+    function marker(text) {
+      var span = document.createElement("span");
+      span.className = "log-marker";
+      span.textContent = text;
+      return span;
+    }
     function appendMarker() {
-      var marker = document.createElement("span");
-      marker.className = "log-marker";
-      marker.textContent = "\n[earlier output discarded]\n";
-      log.appendChild(marker);
+      log.appendChild(marker("\n[earlier output discarded]\n"));
+    }
+    // Drop the oldest text (and any markers inside it) beyond LOG_LIMIT.
+    function trim() {
+      if (total <= LOG_LIMIT) { return; }
+      while (total > LOG_LIMIT && log.firstChild) {
+        var first = log.firstChild;
+        if (first.nodeType !== 3) {
+          log.removeChild(first);
+          continue;
+        }
+        var excess = total - LOG_LIMIT;
+        if (first.length <= excess) {
+          total -= first.length;
+          log.removeChild(first);
+        } else {
+          first.deleteData(0, excess);
+          total -= excess;
+        }
+      }
+      while (log.firstChild && log.firstChild.nodeType !== 3) {
+        log.removeChild(log.firstChild);
+      }
+      log.insertBefore(marker("[earlier output discarded]\n"), log.firstChild);
     }
     function tick() {
       getJSON(url + "?offset=" + encodeURIComponent(String(offset))).then(function (chunk) {
@@ -68,6 +126,8 @@
         }
         if (chunk.text) {
           log.appendChild(document.createTextNode(chunk.text));
+          total += chunk.text.length;
+          trim();
         }
         if (typeof chunk.nextOffset === "number") {
           offset = chunk.nextOffset;
@@ -91,14 +151,16 @@
     window.setTimeout(tick, delay);
   }
 
-  // Only one build runs at a time: disable build buttons while one is running.
+  // Only one build runs at a time: disable build buttons while one is running
+  // and restore them once the server reports no running build.
   function guardBuildForms(forms) {
-    getJSON("/jobs?format=json").then(function (data) {
-      if (!data || !data.running) { return; }
-      var running = (data.jobs || []).filter(function (job) { return job.state === "running"; })[0];
+    var guarded = false;
+    function setBusy(running) {
       forms.forEach(function (form) {
         var button = form.querySelector("button[type=submit]");
-        if (!button) { return; }
+        if (!button || form.getAttribute("data-submitting")) { return; }
+        var old = form.querySelector(".build-busy");
+        if (old) { form.removeChild(old); }
         button.disabled = true;
         var note = document.createElement("span");
         note.className = "build-busy";
@@ -113,9 +175,37 @@
         }
         form.appendChild(note);
       });
-    }).catch(function () { /* the server still rejects concurrent builds with 409 */ });
+      guarded = true;
+    }
+    function setIdle() {
+      forms.forEach(function (form) {
+        if (form.getAttribute("data-submitting")) { return; }
+        var button = form.querySelector("button[type=submit]");
+        var note = form.querySelector(".build-busy");
+        if (note) { form.removeChild(note); }
+        if (button) { button.disabled = false; }
+      });
+      guarded = false;
+    }
+    function check() {
+      getJSON("/jobs?format=json").then(function (data) {
+        if (data && data.running) {
+          var running = (data.jobs || []).filter(function (job) { return job.state === "running"; })[0];
+          setBusy(running);
+          window.setTimeout(check, 3000);
+        } else if (guarded) {
+          setIdle();
+        }
+      }).catch(function () {
+        // The server still rejects concurrent builds with 409; keep checking
+        // only while controls are disabled so they cannot stay stuck.
+        if (guarded) { window.setTimeout(check, 10000); }
+      });
+    }
+    check();
     forms.forEach(function (form) {
       form.addEventListener("submit", function () {
+        form.setAttribute("data-submitting", "true");
         var button = form.querySelector("button[type=submit]");
         if (button) {
           // Defer so the submission itself is not cancelled by disabling.

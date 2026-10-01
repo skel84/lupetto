@@ -24,7 +24,7 @@
 
   <dl class="facts">
     <div><dt>Latest in signed index</dt><dd>{{with .Track.Latest}}<code>{{.Name}} {{.Version}}</code> ({{.Architecture}}){{else}}<span class="muted">unavailable</span>{{end}}</dd></div>
-    <div><dt>Newest image</dt><dd>{{with .Track.Newest}}<code>{{.Name}} {{.Version}}</code> <code class="hash">{{.Digest}}</code>{{else}}<span class="muted">no image</span>{{end}}</dd></div>
+    <div><dt>Newest image</dt><dd>{{with .Track.Newest}}<code>{{.Name}} {{.Version}}</code> <code class="hash">{{.Digest}}</code>{{else}}{{if $.Track.Error}}<span class="warn-text">unknown (track error)</span>{{else}}<span class="muted">no image</span>{{end}}{{end}}</dd></div>
     <div><dt>Repository</dt><dd>{{if .Track.Repository}}<code>{{.Track.Repository}}</code>{{else}}<span class="muted">not reported</span>{{end}}</dd></div>
     {{with .Status.Document}}<div><dt>Status computed</dt><dd>{{if .ComputedAt.IsZero}}<span class="muted">not reported</span>{{else}}{{template "partial-time" .ComputedAt}}{{end}}</dd></div>{{end}}
   </dl>
@@ -37,7 +37,8 @@
   <section aria-labelledby="fixes-heading">
     <h2 id="fixes-heading">Missing security fixes</h2>
     {{$reachable := 0}}{{$unreachable := 0}}{{range .Track.MissingFixes}}{{if .ReachableByTrack}}{{$reachable = 1}}{{else}}{{$unreachable = 1}}{{end}}{{end}}
-    {{if not .Track.Newest}}<p class="muted">No image of this track exists, so no installed packages were compared.</p>
+    {{if .Track.Error}}{{if .Track.MissingFixes}}<p class="warn-text">⚠ The track has an error (see above); this list may be incomplete.</p>{{else}}<p class="warn-text">⚠ Unknown: the track has an error (see above), so missing fixes could not be determined. This is not an empty result.</p>{{end}}
+    {{else if not .Track.Newest}}<p class="muted">No image of this track exists, so no installed packages were compared.</p>
     {{else if not .Track.MissingFixes}}<p>No known fixed-version advisories in this unsigned, fixed-only Wolfi feed apply to the newest image's installed packages. This is not evidence that the image has no vulnerabilities.</p>
     {{end}}
     {{if eq $reachable 1}}
@@ -68,10 +69,12 @@
 
   <section aria-labelledby="outdated-heading">
     <h2 id="outdated-heading">Outdated packages</h2>
+    {{if .Track.Error}}{{if .Track.Outdated}}<p class="warn-text">⚠ The track has an error (see above); this list may be incomplete.</p>{{else}}<p class="warn-text">⚠ Unknown: the track has an error (see above), so outdated packages could not be determined.</p>{{end}}{{end}}
     {{if .Track.Outdated}}<div class="table-wrap"><table>
       <thead><tr><th scope="col">Package</th><th scope="col">Architecture</th><th scope="col">Installed</th><th scope="col">Latest in index</th></tr></thead>
       <tbody>{{range .Track.Outdated}}<tr><th scope="row">{{.Name}}</th><td>{{.Architecture}}</td><td><code>{{.InstalledVersion}}</code></td><td><code>{{.LatestVersion}}</code></td></tr>{{end}}</tbody>
     </table></div>
+    {{else if .Track.Error}}
     {{else if .Track.Newest}}<p class="muted">No installed package has a newer version in the index.</p>
     {{else}}<p class="muted">No image to compare.</p>{{end}}
   </section>
@@ -88,6 +91,7 @@
         <td>{{if .Annotations}}<details><summary>{{len .Annotations}} annotations</summary><dl class="kv">{{range $k, $v := .Annotations}}<div><dt><code>{{$k}}</code></dt><dd><code class="hash">{{$v}}</code></dd></div>{{end}}</dl></details>{{else}}<span class="muted">none</span>{{end}}</td>
       </tr>{{end}}</tbody>
     </table></div>
+    {{else if .Track.Error}}<p class="warn-text">⚠ No images listed; the track error (see above) may have prevented reading the registry. This does not establish that no image exists.</p>
     {{else}}<p class="muted">No identified images for this track in the registry.</p>{{end}}
     {{if or (gt .Track.UnidentifiedCount 0) (gt .Track.ArtifactCount 0)}}<p class="muted small">Not shown:{{if gt .Track.UnidentifiedCount 0}} {{.Track.UnidentifiedCount}} unidentified image manifest{{if ne .Track.UnidentifiedCount 1}}s{{end}} (no Lupetto identity annotations);{{end}}{{if gt .Track.ArtifactCount 0}} {{.Track.ArtifactCount}} non-image artifact{{if ne .Track.ArtifactCount 1}}s{{end}} (for example signatures or attestations).{{end}} These are not errors.</p>{{end}}
   </section>
@@ -101,6 +105,7 @@
         <tbody>{{range .Track.Installed}}<tr><th scope="row">{{.Name}}</th><td><code>{{.Version}}</code></td><td>{{.Architecture}}</td></tr>{{end}}</tbody>
       </table></div>
     </details>
+    {{else if .Track.Error}}<p class="warn-text">⚠ Unknown: the track error (see above) may have prevented reading the installed package set.</p>
     {{else}}<p class="muted">No installed package set (no image, or it could not be read).</p>{{end}}
   </section>
 </main>

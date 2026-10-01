@@ -113,3 +113,49 @@ func TestEmbeddedStaticAssetsServed(t *testing.T) {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
 }
+
+// A failed comparison must not be presented as an empty (clean) result.
+func TestEmbeddedTemplatesDistinguishTrackErrorsFromEmptyResults(t *testing.T) {
+	renderer, err := embeddedRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	image := Image{Digest: "sha256:" + strings.Repeat("b", 64), Version: "1.0-r0"}
+	cases := []struct {
+		name, template string
+		model          any
+		want, absent   []string
+	}{
+		{"track error with newest image", "track", TrackView{Track: Track{Package: "p", Selector: "1", State: "error", Error: "registry read failed", Newest: &image, Images: []Image{image}}},
+			[]string{"missing fixes could not be determined", "outdated packages could not be determined", "prevented reading the installed package set"},
+			[]string{"No known fixed-version advisories", "No installed package has a newer version", "No installed package set (no image"}},
+		{"track error without images", "track", TrackView{Track: Track{Package: "p", Selector: "1", State: "error", Error: "index unavailable"}},
+			[]string{"does not establish that no image exists", "unknown (track error)"},
+			[]string{"No image of this track exists", "No identified images for this track", "No image to compare"}},
+		{"overview error row", "overview", OverviewView{Status: StatusView{Document: &StatusDocument{}}, Tracks: []TrackSummary{{Track: Track{Package: "p", Selector: "1", State: "error", Error: "boom"}, DetailURL: "/tracks/p/1"}}},
+			[]string{"unknown (track error)", `<span class="warn-text">unknown</span>`},
+			[]string{"no image to compare", "> reachable"}},
+		{"packages initial failure polling stops", "packages", PackagesView{Packages: []PackageItem{}, Limit: 200, Refreshing: true, LastError: "discover failed"},
+			[]string{`data-poll-error-field="lastError" data-poll-unless-field="document"`, "discover failed"}, nil},
+		{"packages background refresh with document", "packages", PackagesView{Packages: []PackageItem{}, Limit: 200, Refreshing: true, Document: &DiscoverDocument{}},
+			nil, []string{"data-poll-url", "Loading the package index"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := renderer.Render(&out, tc.template, tc.model); err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("missing %q", want)
+				}
+			}
+			for _, absent := range tc.absent {
+				if strings.Contains(out.String(), absent) {
+					t.Errorf("unexpected %q", absent)
+				}
+			}
+		})
+	}
+}
