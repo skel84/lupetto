@@ -18,6 +18,8 @@ func TestHelpAndInvalidFlags(t *testing.T) {
 		{[]string{"--products", "products.yaml", "--refresh-interval", "0"}, 2, "must be positive"},
 		{[]string{"--products", "products.yaml", "--listen", "invalid"}, 2, "invalid --listen"},
 		{[]string{"--products", "products.yaml", "--lupetto-binary", "/nonexistent/lupetto"}, 2, "configured lupetto binary"},
+		{[]string{"--products", "products.yaml", "--allowed-host", "*"}, 2, "invalid --allowed-host"},
+		{[]string{"--products", "products.yaml", "--allowed-host", "example.invalid", "--allowed-host", "[::1]:8080", "--lupetto-binary", "/nonexistent/lupetto"}, 2, "configured lupetto binary"},
 		{[]string{"extra"}, 2, "unexpected positional"},
 		{[]string{"--registry", "127.0.0.1:5000"}, 2, "flag provided but not defined"},
 	} {

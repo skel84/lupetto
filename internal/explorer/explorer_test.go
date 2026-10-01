@@ -280,7 +280,6 @@ func TestStartupIntervalAndPostBuildRefresh(t *testing.T) {
 		data, _ := os.ReadFile(calls)
 		return strings.Count(string(data), "status|") >= 2 && strings.Contains(string(data), "discover|--json")
 	})
-	server.config.RefreshInterval = time.Hour // Existing ticker stays unchanged; stop checks below use separate server.
 	if _, err := server.jobs.start(BuildRequest{Package: "busybox-static", Selector: "1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -399,13 +398,13 @@ func TestRequestSafety(t *testing.T) {
 			})
 		}
 	}
-	for _, host := range []string{"localhost:8080", "127.0.0.2:8080", "[::1]:8080"} {
-		if !loopbackHost(host) {
-			t.Errorf("loopback %q rejected", host)
+	for _, host := range []string{"localhost:8080", "127.0.0.1:8080", "[::1]:8080"} {
+		if !server.hostAllowed(host) {
+			t.Errorf("default host %q rejected", host)
 		}
 	}
-	for _, host := range []string{"localhost.evil:8080", "127.0.0.1.evil:8080", "example.invalid", "192.168.1.2:8080"} {
-		if loopbackHost(host) {
+	for _, host := range []string{"localhost.evil:8080", "127.0.0.1.evil:8080", "example.invalid", "192.168.1.2:8080", "127.0.0.2:8080"} {
+		if server.hostAllowed(host) {
 			t.Errorf("host %q allowed", host)
 		}
 	}

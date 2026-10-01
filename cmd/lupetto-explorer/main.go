@@ -22,6 +22,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("lupetto-explorer", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.StringVar(&config.Listen, "listen", config.Listen, "HTTP listen address (no login; protect non-loopback access)")
+	flags.Func("allowed-host", "allowed HTTP host or host:port (repeatable; replaces defaults localhost, 127.0.0.1, [::1] at any port)", func(value string) error {
+		config.AllowedHosts = append(config.AllowedHosts, value)
+		return nil
+	})
 	flags.StringVar(&config.Products, "products", "", "required CLI products YAML file")
 	flags.StringVar(&config.LupettoBinary, "lupetto-binary", config.LupettoBinary, "configured CLI executable (resolved on PATH)")
 	flags.BoolVar(&config.EnableBuilds, "enable-builds", false, "enable one-at-a-time CLI build execution")

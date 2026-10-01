@@ -22,6 +22,7 @@ const PackageResultLimit = 200
 
 type Config struct {
 	Listen          string
+	AllowedHosts    []string
 	Products        string
 	LupettoBinary   string
 	EnableBuilds    bool
@@ -38,7 +39,7 @@ type Server struct {
 	cli           *CLI
 	renderer      Renderer
 	token         string
-	loopback      bool
+	allowedHosts  []hostRule
 	status        statusCache
 	discovery     discoveryCache
 	discoverSlots chan struct{}
@@ -60,9 +61,13 @@ func New(config Config) (*Server, error) {
 	if config.RefreshInterval <= 0 {
 		return nil, errors.New("--refresh-interval must be positive")
 	}
-	host, _, err := net.SplitHostPort(config.Listen)
+	_, _, err := net.SplitHostPort(config.Listen)
 	if err != nil {
 		return nil, fmt.Errorf("invalid --listen: %w", err)
+	}
+	allowedHosts, err := parseAllowedHosts(config.AllowedHosts)
+	if err != nil {
+		return nil, err
 	}
 	cli, err := NewCLI(config.LupettoBinary)
 	if err != nil {
@@ -80,7 +85,7 @@ func New(config Config) (*Server, error) {
 		return nil, fmt.Errorf("create CSRF token: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{config: config, cli: cli, renderer: renderer, token: hex.EncodeToString(entropy[:]), loopback: isLoopback(host), discoverSlots: make(chan struct{}, 4), ctx: ctx, cancel: cancel}
+	s := &Server{config: config, cli: cli, renderer: renderer, token: hex.EncodeToString(entropy[:]), allowedHosts: allowedHosts, discoverSlots: make(chan struct{}, 4), ctx: ctx, cancel: cancel}
 	s.jobs = jobRunner{cli: cli, ctx: ctx, enabled: config.EnableBuilds, limit: HistoryLimit, logBytes: defaultLogBytes, afterFinish: s.refreshAfterBuild}
 	s.handler = s.safe(s.routes())
 	return s, nil
@@ -407,20 +412,6 @@ func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, "/jobs/"+r.PathValue("id"), http.StatusSeeOther)
 }
-func isLoopback(host string) bool {
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
-func loopbackHost(authority string) bool {
-	host, _, err := net.SplitHostPort(authority)
-	if err != nil {
-		host = authority
-	}
-	return isLoopback(strings.Trim(host, "[]"))
-}
 func (s *Server) safe(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'")
@@ -429,8 +420,8 @@ func (s *Server) safe(next http.Handler) http.Handler {
 		// "Origin: null" on same-origin form POSTs, which authorize rejects.
 		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("Cache-Control", "no-store")
-		if s.loopback && !loopbackHost(r.Host) {
-			http.Error(w, "non-loopback Host rejected for loopback listener", http.StatusForbidden)
+		if !s.hostAllowed(r.Host) {
+			http.Error(w, "Host is not allowed; configure --allowed-host for the intended external hostname", http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)

@@ -41,7 +41,11 @@ Consequences:
 - No third-party origins of any kind (fonts, CDNs, analytics, images) and no `data:` images, because `default-src 'self'` applies. `fetch`/XHR is allowed to the same origin only.
 - The page cannot be framed.
 - Every string in every model can come from the CLI, a registry or a package index, so treat all of them as untrusted. Rely on `html/template` contextual escaping and never bypass it (the server never provides `template.HTML`). In JavaScript, insert text with `textContent`, never `innerHTML`.
-- When the listener is a loopback address (the default is `127.0.0.1:8080`), any request whose `Host` is not loopback is rejected with `403`.
+- **Host allowlist on every request.** Before any route, token or Origin check, the request `Host` must match an `--allowed-host` rule; otherwise the server returns a plain-text `403` (`Host is not allowed; configure --allowed-host for the intended external hostname`) with no model data and no CSRF token. This applies on every listener address, including `0.0.0.0` (for example a container reached through docker or `kubectl port-forward` loopback forwarding).
+  - With no `--allowed-host` flags, the defaults are exactly `localhost`, `127.0.0.1` and `[::1]`, each at any valid port.
+  - The flag is repeatable, and explicit values **replace** the defaults. A hostname without a port allows any port; `host:port` requires that exact numeric port string, and a request `Host` with no port does not match it. IPv6 literals must be bracketed (`[2001:db8::1]:9443`). DNS names compare case-insensitively with a trailing dot ignored; IP addresses are normalized.
+  - An ingress deployment must list its external hostname (and optionally `localhost` for probes). The allowlist is checked against `Host` only; forwarded headers are never consulted.
+  - The allowlist is a DNS-rebinding guard, not authentication. Explorer has no login; access control is the network boundary.
 
 ## Common model: `BaseView`
 
@@ -192,14 +196,15 @@ All POSTs share these rules:
 - The body must be `application/x-www-form-urlencoded`, which is the default for an HTML `<form method="post">`. **Multipart bodies are not parsed**: a `FormData` body sent with `fetch` fails CSRF. Use `URLSearchParams` instead.
 - The body is limited to 8 KiB.
 - Include `csrfToken` **in the body**. A token in the query string is ignored. Each field must appear exactly once; a duplicated field counts as empty.
+- The request `Host` must pass the allowlist (see [Security constraints](#security-constraints-for-ui-authors)); an unlisted `Host` is rejected with `403` before the token or Origin is examined, even if both are valid.
 - The request must be same-origin. If `Origin` is present, its scheme must be `http` or `https` and its authority must exactly equal the request `Host`, including any port (no path, query or userinfo). Either scheme is accepted so a TLS-terminating ingress that forwards plain HTTP works; no forwarded headers (`X-Forwarded-*`, `Forwarded`) are trusted. Without `Origin`, `Sec-Fetch-Site: same-origin` is required. Any `Sec-Fetch-Site` other than `same-origin` is rejected. Ordinary same-origin form posts from browsers satisfy this because the server sends `Referrer-Policy: same-origin`: under `no-referrer`, browsers send `Origin: null` on form posts, and `Origin: null` is always rejected (do not set a stricter referrer policy in templates). `same-origin` still sends no referrer to any other origin.
 - Success returns `303 See Other`. Failures return plain-text errors (not templates). A JavaScript caller should display the response text.
 
 | Action | Fields | Success | Errors |
 | --- | --- | --- | --- |
-| `POST /status/refresh` | `csrfToken` | 303 → `/`. The refresh is asynchronous; if one is already running, no new run starts. | 403 origin/CSRF; 400 bad form |
-| `POST /builds` | `csrfToken`, `package`, and **exactly one** non-empty `selector` or `apkVersion` | 303 → `/jobs/{id}` | 400 validation; 403 builds disabled or origin/CSRF; 409 a build is already running; 503 shutting down |
-| `POST /jobs/{id}/cancel` | `csrfToken` | 303 → `/jobs/{id}` | 404 unknown job; 409 job no longer running; 403 origin/CSRF |
+| `POST /status/refresh` | `csrfToken` | 303 → `/`. The refresh is asynchronous; if one is already running, no new run starts. | 403 Host not allowed, origin or CSRF; 400 bad form |
+| `POST /builds` | `csrfToken`, `package`, and **exactly one** non-empty `selector` or `apkVersion` | 303 → `/jobs/{id}` | 400 validation; 403 Host not allowed, builds disabled, or origin/CSRF; 409 a build is already running; 503 shutting down |
+| `POST /jobs/{id}/cancel` | `csrfToken` | 303 → `/jobs/{id}` | 404 unknown job; 409 job no longer running; 403 Host not allowed or origin/CSRF |
 
 ### `POST /builds`
 
