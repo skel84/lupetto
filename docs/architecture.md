@@ -4,11 +4,11 @@
 
 This document describes ownership and execution boundaries: what lives where and which way dependencies point. It does not restate operator contracts; those are owned by the [operator guide](../README.md) (build, loading, evidence, records) and the [registry/signing guide](registry-signing.md) (publication, signing, verification), with rationale in [decisions](decisions.md). It records the current rebuild, not recovered historical source structure.
 
-One local Go module contains the standalone CLI: read-only discovery from the live signed Wolfi index, one exact-build pipeline with apko composition and SPDX/lock validation, default Docker loading, and optional direct registry publication, Cosign signing, and SPDX attestation. Persistent catalog ingestion, Explorer, and runnable service recipes are deferred.
+One local Go module contains the standalone CLI and optional Explorer backend. The CLI provides read-only signed-index discovery and registry/security comparison plus one exact-build pipeline with apko composition, SPDX/lock validation, optional Docker loading, direct registry publication, and Cosign signing/attestation. Persistent catalog ingestion, HTML dashboard UI, combined-container verification, and runnable service recipes are deferred.
 
 ## Components
 
-`lupetto` and `lupetto-explorer` (the registry-comparison dashboard) are separate programs in this repository and Go module, shipped together in one container image. The CLI is independently useful; Explorer is an optional consumer that integrates only through the CLI's JSON output. See the [dashboard decision](decisions.md#registry-comparison-dashboard-user-approved-2026-10-01).
+`lupetto` and `lupetto-explorer` are separate programs in this repository and Go module, intended to ship together in one future container image. The CLI is independently useful; Explorer is an optional consumer that integrates only through CLI JSON. See the [dashboard decision](decisions.md#registry-comparison-dashboard-user-approved-2026-10-01).
 
 | Component | Responsibility | Status |
 | --- | --- | --- |
@@ -17,9 +17,9 @@ One local Go module contains the standalone CLI: read-only discovery from the li
 | CLI | Parse arguments, render progress, print human or `--json` output, `doctor`, `discover`, `status`. | `cmd/lupetto` |
 | Status | Compare products-file tracks with the index, registry images (by annotation), and Wolfi security fixes; read-only. | `internal/status` |
 | Catalog | Import snapshots, retain provenance, query versions, resolve selectors historically. | Deferred |
-| Explorer | Dashboard: render `status`/`discover` JSON, launch `lupetto build` jobs. | Planned (`cmd/lupetto-explorer`) |
+| Explorer | CLI-only adapter, cached comparison/discovery, safe HTTP routes and Go rendering seam, single supervised build with bounded live stderr and history. | Backend implemented (`cmd/lupetto-explorer`, `internal/explorer`); templates/assets and container deferred. |
 
-For Explorer, prefer `net/http`, server-rendered HTML, and small amounts of JavaScript over a separately deployed frontend, and SQLite for catalog queries—not a distributed job service. Keep boundaries explicit without a plugin framework or a service per component.
+Explorer uses `net/http`, `html/template`, embedded assets, and in-memory caches/jobs without a database or distributed job service. The optional historical catalog remains separate and deferred. The [UI rendering contract](../internal/explorer/web/CONTRACT.md) defines the seam for the next checkpoint.
 
 ## Source layout and dependency direction
 
@@ -31,16 +31,21 @@ internal/wolfi/       signed index fetch/verification, parsing, selection, disco
 internal/registry/    shared registry settings/naming, Docker-config-only authentication, loopback HTTP guard, sanitized errors
 internal/status/      strict products YAML, registry/index/security comparison, digest-keyed installed-package cache
 internal/wolfi/wolfitest/   shared test fixtures (signed index generation)
+cmd/lupetto-explorer/ flags, signal-aware HTTP/CLI shutdown
+internal/explorer/    own JSON decoding/view models, subprocess adapter, caches, job runner, HTTP safety/rendering seam
+internal/explorer/web/ embedded templates/static assets (placeholders at backend checkpoint), UI contract
 
 cmd/lupetto ──▶ internal/build ──▶ internal/wolfi
       └──────────────────────────────▶ internal/wolfi
       └────────▶ internal/status ──▶ internal/wolfi, internal/registry
                  internal/build ──▶ internal/registry
+
+cmd/lupetto-explorer ──▶ internal/explorer ──(argv + JSON)──▶ lupetto executable
 ```
 
 - `internal/wolfi` imports nothing else from the module and owns the shared installed-APK-database parser; `internal/registry` likewise imports no in-module packages. `internal/build` and `internal/status` consume those shared boundaries independently, and status never imports the build pipeline.
 - `cmd/lupetto` makes no apko, Docker, Cosign, or registry calls itself; `doctor` only checks `PATH`. The CLI owns status table/JSON presentation, not comparison logic.
-- These packages are module-internal. This is not a public Go API and does not decide Explorer packaging.
+- These packages are module-internal, not a public Go API. Explorer defines its own JSON decoding types and imports none of `internal/build`, `internal/wolfi`, `internal/status`, `internal/registry`, or `cmd/lupetto`; its `go list -deps` boundary test also verifies the CLI never imports Explorer.
 
 ## Application and dependency boundaries
 
@@ -52,15 +57,14 @@ These hold regardless of future packaging:
 
 ```text
 Explorer UI → CLI adapter → lupetto executable → build/publish/sign
-     │
-     └─────→ catalog/evidence access
+     └─────→ cached status/discovery documents from the CLI
 
 lupetto has no dependency on Explorer
 ```
 
 ### Integration contracts
 
-The CLI's machine-readable result is the version-6 record printed by `--json` and retained as `result.json`/`failure.json` ([format](../README.md#results-records-and---json)). Before Explorer launches builds, it still needs explicit rules for supported CLI/record versions, cancellation, concurrency, and incompatible-version handling. Never parse human progress or summary text.
+Explorer requires kind `status` / `discover`, version 1, and the version-6 build record printed by `--json` ([format](../README.md#results-records-and---json)); mismatches are explicit incompatible-CLI errors. Stdout is bounded JSON, not progress. Builds pass argument arrays with `--no-load --json`, inherit operator settings only through environment, and never import comparison/build internals. One build runs at a time, with a 1 MiB stderr tail and 50 in-memory jobs. SIGTERM asks the signal-aware CLI to cancel; a five-second deadline kills an unresponsive CLI. Records preserve partial stage outcomes and cancellation has no rollback.
 
 Catalog access is a separate decision. A colocated, UI-independent catalog package would not make its Go API or SQLite schema a supported external interface, and Explorer must not write build state through private tables. Before extracting Explorer, choose a versioned query/export contract or a deliberately supported shared library/schema, behind an Explorer-side adapter. Keep the local CLI execution model; do not add an HTTP build API, plugin system, or queue service in anticipation.
 
@@ -108,9 +112,9 @@ The deferred catalog/Explorer design owns SQLite catalog data and immutable down
 
 ## Explorer boundary
 
-Recommended initial deployment: local-only, build execution disabled unless explicitly enabled. Listen defaults and non-loopback access policy remain open decisions.
+Implemented defaults: `127.0.0.1:8080`, builds disabled unless explicitly enabled, no login, no persistence. Non-loopback use requires an operator-controlled authenticating network boundary. A TLS-terminating ingress must preserve the external Host; Explorer accepts either HTTP/HTTPS Origin on that exact authority and does not trust forwarded headers.
 
-Build-enabled Explorer executes tools with the operator's credentials: protect build-triggering requests from cross-origin abuse, validate selections server-side, and escape package metadata as untrusted HTML. Start with bounded local execution rather than a queue; define cancellation, concurrency limits, and restart behavior before enabling builds.
+POST-only refresh/build/cancel require a per-process CSRF form token and same-origin browser headers. Loopback listeners reject non-loopback Host values against DNS rebinding. `html/template` escaping, self-only CSP with frame rejection, nosniff/referrer controls, bounded forms/output, and server timeouts apply. Status refreshes single-flight at startup/interval/manual/after-build, retaining last-good facts separately from errors; cached discovery supports bounded package browsing. JSON read views allow server verification before templates exist. See [server evidence](verification.md#explorer-server-checkpoint-3); the UI and container remain separate unchecked checkpoints.
 
 ## Upstream references
 

@@ -2,7 +2,7 @@
 
 Lupetto is a standalone CLI for discovering Wolfi APK versions, selecting an exact package revision, composing an OCI image with apko, and retaining validated SPDX and build evidence. `build` loads the image into Docker by default and can push the validated image directly to a compatible OCI registry. `status` compares tracked published images with the current signed Wolfi index and known security fixes. Optional Cosign signing and SPDX attestation extend that same build pipeline; see the [registry, signing, and verification guide](docs/registry-signing.md).
 
-The CLI does not require Explorer or a database. Persistent SQLite catalog ingestion, historical snapshot queries, Explorer, and runnable service recipes are deferred, not implemented commands. These images contain packages; installing PostgreSQL or nginx does **not** establish a configured, runnable service.
+The CLI does not require Explorer or a database. The optional `lupetto-explorer` backend is implemented; its HTML dashboard and combined container remain separate checkpoints. Persistent SQLite catalog ingestion, historical snapshot queries, and runnable service recipes are deferred, not implemented commands. These images contain packages; installing PostgreSQL or nginx does **not** establish a configured, runnable service.
 
 This guide describes the current CLI/source contract. The [verification record](docs/verification.md) distinguishes observed interoperability from source behavior and unexercised scenarios. In particular, local HTTP/offline signing is not production HTTPS/transparency-log proof; production commands in the detailed guide are explicitly templates.
 
@@ -246,7 +246,7 @@ Every `build` and `sbom` run that passes argument validation produces one **vers
 - Load references are intended names when loading is skipped; `readableReferenceConfirmed: false` with `loaded` means the readable tag could not be confirmed.
 - Publication workflows keep `failure.error` to a sanitized stage message; local-only workflows record the detailed local error (capped at 8 KiB).
 
-The schema changes only with a new `version`; version 3–5 records from earlier releases are not migrated. Explorer compatibility rules (supported versions, cancellation, concurrency) are still undecided.
+The schema changes only with a new `version`; version 3–5 records from earlier releases are not migrated. Explorer accepts only this version-6 build record and kind `status` / `discover`, version-1 documents; incompatible versions are explicit errors.
 
 ## Publish, sign, and verify
 
@@ -265,4 +265,40 @@ Continue with the [registry, signing, and verification guide](docs/registry-sign
 
 The rebuild is based on the operator-documentation request for a lost implementation. The overwritten older checkout is excluded from evidence/design; no historical source or executable claims are inferred from it. [AGENTS.md](AGENTS.md) contains repository instructions for coding agents.
 
-Explorer remains an optional separate application/consumer, not a second build engine or CLI prerequisite. Its approved dashboard design consumes the versioned CLI `status`, `discover`, and build JSON contracts; the dashboard and combined container are not implemented by these CLI checkpoints. Remote Konflux execution, unfixed-vulnerability scanning, production credential/key management, and invented service recipes remain deferred. Status is a bounded registry/security-fix comparison, not a general vulnerability scanner.
+Explorer remains an optional separate application/consumer, not a second build engine or CLI prerequisite. Its backend consumes only the versioned CLI `status`, `discover`, and build JSON contracts. Remote Konflux execution, unfixed-vulnerability scanning, production credential/key management, and invented service recipes remain deferred. Status is a bounded registry/security-fix comparison, not a general vulnerability scanner.
+
+## Optional Explorer server
+
+Install the separately runnable backend from this checkout:
+
+```bash
+go install ./cmd/lupetto-explorer
+lupetto-explorer --help
+lupetto-explorer --products products.yaml --lupetto-binary lupetto
+```
+
+| Flag | Default / behavior |
+| --- | --- |
+| `--listen` | `127.0.0.1:8080` |
+| `--products` | Required path to the CLI products YAML file above. |
+| `--lupetto-binary` | `lupetto`, resolved on `PATH`; an explicit executable path is accepted. |
+| `--enable-builds` | `false`; enables one CLI build at a time, not a queue. |
+| `--refresh-interval` | `15m`; positive Go duration for background status and package-catalog refresh. |
+
+Explorer passes no registry, repository, credentials, keys, or passwords as arguments. The CLI inherits only the server process environment, including `LUPETTO_REGISTRY`, `LUPETTO_REPOSITORY`, `LUPETTO_COSIGN_KEY`, optional signing configuration/HTTP consent, `COSIGN_PASSWORD`, and `DOCKER_CONFIG`. Use the existing [registry/signing configuration guide](docs/registry-signing.md#configuration-and-upfront-errors); Explorer performs no login and never logs the environment. Read-only operation needs no signing key. To publish UI-triggered builds, configure registry/repository before starting Explorer with `--enable-builds`.
+
+**Server-only checkpoint:** embedded HTML templates and static assets are intentionally placeholders. Page routes currently return an explicit template-missing HTTP 500; append `?format=json` to a read route to inspect its exported view model. Routes are `/`, `/tracks/{package}/{selector}`, `/packages?q=substring`, `/packages/{name}`, `/jobs`, and `/jobs/{id}`. `/healthz` means process up, not healthy comparison data. The [rendering contract](internal/explorer/web/CONTRACT.md) specifies template names, models, forms, and log polling for the separate UI checkpoint.
+
+Status runs at startup, on the interval, after each completed build, and on `POST /status/refresh`. Refresh is single-flight; last good facts, computed-at, latest error, and in-progress state are kept separately. A build finishing during an older refresh schedules another comparison, so its new image is not hidden behind an earlier observation. The cached package browser filters name/description case-insensitively and returns at most 200 entries; named version pages execute CLI discovery. At most four named discovery processes run concurrently.
+
+Build forms submit `package` and exactly one of `selector` (dotted numeric) or `apkVersion` (exact `-rN` revision) to `POST /builds`. Explorer invokes an argv array, never a shell: `lupetto build <package> <selector> --no-load --json`, or the exact-version equivalent. Builds disabled returns 403; another running job returns 409. Job stdout is parsed as a version-6 record, including partial failures; stderr is available from `GET /jobs/{id}/logs?offset=<byte-position>` as `{offset,nextOffset,text,truncated,done}` JSON. Poll with the previous `nextOffset`; show truncation when old output was dropped. Each log keeps a 1 MiB tail, JSON documents are limited to 32 MiB, and the last 50 jobs are retained **only in memory, lost on restart**. The CLI retains its own workspaces/records; Explorer adds no database or durable SBOM download.
+
+`POST /jobs/{id}/cancel` sends SIGTERM, which the CLI handles through context cancellation; after five seconds Explorer kills an unresponsive CLI. SIGINT/SIGTERM to Explorer cancels the active job/background work, waits, and gracefully drains HTTP. Cancellation is best-effort, can retain a failure record, and does not roll back images/tags/signatures; a CLI that actually completes successfully remains successful even if a cancel request raced its final record.
+
+### Explorer HTTP security
+
+**No login or user isolation.** Protect access with an operator-controlled network boundary (local connection, port-forward, or authenticating ingress). Builds are off by default and listening defaults to loopback; do not expose a build-enabled instance unauthenticated to an untrusted network.
+
+Refresh/build/cancel are POST-only, require the per-process hidden form field `csrfToken` (not a query parameter), and check `Origin` or `Sec-Fetch-Site: same-origin`. An Origin must use `http` or `https` and its host and explicit port must exactly equal the request Host; either scheme is accepted to support TLS-terminating ingress forwarding plain HTTP. No `X-Forwarded-*` headers are trusted: an ingress must preserve the external Host and enforce authentication itself. For a loopback listener, a non-loopback Host is rejected to prevent DNS rebinding. CSRF/origin checks are not authentication.
+
+Responses set CSP `default-src 'self'; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, and `Referrer-Policy: no-referrer`; embedded `html/template` rendering escapes CLI metadata. Server read/header/write/idle timeouts and request/output limits are set. The dashboard must keep unsigned/fixed-only/Wolfi-only feed limitations and unreachable/unevaluated-fix warnings visible, including on `current` tracks. This server checkpoint was exercised by curl with a real loopback publication/status run; real-browser UI and combined-container execution remain unverified. See [Explorer server evidence](docs/verification.md#explorer-server-checkpoint-3).
