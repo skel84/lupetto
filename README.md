@@ -145,6 +145,34 @@ A missing file is an error unless **`add --create`** explicitly permits creation
 
 `--json` returns one document with `kind: "products"`, `version: 1`, `products: [{package, selectors: [...]}, ...]`, `changed`, and `message`. Lists are arrays, including an empty products list. Human output is a compact package/selector table plus the message. Invalid invocation or products YAML exits **2**; filesystem failures exit **1**; both report stderr diagnostics without JSON. Successful no-ops exit **0**. See [products evidence](docs/verification.md#products-management-redesign-round).
 
+## Inventory local images and build history
+
+```bash
+lupetto images
+lupetto images --json
+DOCKER_HOST=unix:///tmp/no-docker-daemon.sock lupetto images --json
+```
+
+`images` reads retained `result.json` **and** `failure.json` under the OS user cache's `lupetto/builds/`, newest record modification time first. Version-6 records preserve command, outcome/failure stage, request, exact selection, local OCI manifest digest, and separate load/publication/signing/attestation outcomes. Older/unknown versions are listed as `unsupported` without interpreting their fields; malformed/unreadable records are listed explicitly, not silently omitted. `buildTime` comes from the retained apko configuration's actual UTC creation annotation when available; `recordedAt` is the record file's modification time, not an invented build timestamp.
+
+Validated local SPDX is reported with path/checksum and `present: true` only if the current regular file remains inside its workspace and its bytes still match the record's validated checksum. A deleted, changed, unreadable, oversized or outside-workspace document has `present: false` and a reason. This is retained, checksum-checked evidence, not a new SPDX validation or durable storage guarantee; deleting a workspace removes that history/evidence.
+
+Docker access is optional and read-only: the command inherits the existing Docker environment/context and uses only `docker image ls` and `docker image inspect`, without starting a daemon or changing images/tags/contexts. Inventory includes `lupetto/` tags only, grouped by full image ID, with creation time and byte size. Exact APK identity is derived first from matching version-6 record image IDs; without such a record, one unambiguous literal readable tag can supply it. Conflicting identities, unique-only tags, and SHA-256 fallback names remain unknown. Readable tags are mutable names, not immutable build associations.
+
+Missing/unreachable Docker returns **exit 0** with `docker.available: false` and a reason, while retaining build history. An available daemon with no Lupetto images returns `available: true, images: []`; these cases must not be conflated. A global history/cancellation failure exits **1**, invalid arguments exit **2**, both without JSON. Scans are bounded at 10,000 workspace directory entries, 1,000 retained records, 1 MiB per record/config, 32 MiB per SPDX, and 1,000 Docker images; Docker subprocess output is capped at 4 MiB per command and the inventory has a 10-second Docker deadline. Exceeded global history counts fail explicitly rather than return silently truncated history.
+
+### Images JSON contract
+
+The newline-terminated version-1 document has:
+
+- `kind: "images"`, `version: 1`, `computedAt` (UTC RFC 3339), `builds`, `docker`.
+- Each `builds` entry: `workspace`, `recordPath`, `recordVersion`, `status` (`supported|unsupported|invalid|unreadable`), optional `error`, `recordedAt`, optional `buildTime`, optional `record` (the **unchanged complete version-6 build document** described [below](#results-records-and---json)), `spdx`.
+- `spdx`: `present`, optional `path`, `sha256`, `reason`. `path`/`sha256` retain validated record facts even when the current file is absent; only `present: true` confirms checksum-matching bytes now.
+- `docker`: `available`, optional `reason`, `images`. Each image: `id`, `tags`, `created`, `size` (bytes), `identityKnown`, `identitySource` (`build-record|readable-tag|unknown`), optional `identity: {name, version, architecture}` (Wolfi architecture).
+- Empty `builds`, `docker.images`, and `tags` are arrays, not `null`. Unsupported versions never include a parsed `record`.
+
+For Explorer containers, local Docker inventory requires both the Docker CLI and an explicitly mounted Docker socket. **The socket grants host-root-equivalent control** even though this command is read-only; access is opt-in, not a requirement for history. The current combined container does not include the Docker CLI or mount a socket by default. See [inventory evidence](docs/verification.md#local-inventory-redesign-round).
+
 ## Build a local OCI image
 
 For a local-only session, clear publication/signing environment settings described in the [configuration table](docs/registry-signing.md#configuration-and-upfront-errors). Otherwise environment configuration can request additional stages.
