@@ -51,7 +51,7 @@
   </ul></section>
   <section aria-labelledby="where-dock"><h3 id="where-dock">{{template "icon" "local"}}Local Docker</h3><ul>
     {{- $any := false}}{{range .Product.Versions}}{{range .LocalImages}}{{$any = true}}<li><div class="line1"><span class="ver">{{with .Identity}}{{.Version}}{{end}}</span></div>{{range $j, $tag := .Tags}}{{if eq $j 0}}<div class="line2 mono">{{$tag}}</div>{{end}}{{end}}<div class="line2">{{if not .Created.IsZero}}{{template "date" .Created}} · {{end}}image {{template "short-digest" .ID}}</div></li>{{end}}{{end}}
-    {{- if not $any}}<li class="none">{{if eq .Shell.DockerState "unavailable"}}Docker isn’t available.{{else}}No images in local Docker.{{end}}</li>{{end}}
+    {{- if not $any}}<li class="none">{{if eq .Shell.DockerState "available"}}No images in local Docker.{{else}}Local Docker state unknown or unavailable{{with .Shell.DockerReason}}: {{.}}{{end}}.{{end}}</li>{{end}}
   </ul></section>
   <section aria-labelledby="where-builds"><h3 id="where-builds">{{template "icon" "record"}}Recent {{$p.Package}} builds</h3><ul>
     {{- range $i, $b := .Builds}}{{if lt $i 3}}<li><div class="line1">{{template "build-state" $b.State}}<a class="ver" href="{{$b.DetailURL}}">{{if $b.Version}}{{$b.Version}}{{else}}{{$b.ID}}{{end}}</a></div><div class="line2">{{if not $b.StartedAt.IsZero}}{{template "date" $b.StartedAt}} · {{end}}{{template "build-result" $b}}</div></li>{{end}}

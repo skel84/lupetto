@@ -43,7 +43,7 @@
     <tbody>{{range $r := $g.Rows}}<tr>
   <td class="lead" data-label="Version"><a class="sel" href="{{$r.DetailURL}}">{{$r.Selector}}</a><span class="sel-sub">{{with $r.Track.Latest}}{{.Name}}{{else}}—{{end}}</span></td>
   <td data-label="Registry">{{template "where-registry" $r.Track}}</td>
-  <td data-label="Local">{{if eq $.Shell.DockerState "unavailable"}}<span class="where-line">{{template "icon" "plug"}}<span class="none">Docker unavailable</span></span>{{end}}{{template "where-local" $r}}</td>
+  <td data-label="Local">{{if ne $.Shell.DockerState "available"}}<span class="where-line">{{template "icon" "plug"}}<span class="none">{{if eq $.Shell.DockerState "unavailable"}}Docker unavailable{{else}}Docker state unknown{{end}}</span></span>{{end}}{{template "where-local" $r}}</td>
   <td data-label="Latest in Wolfi">{{with $r.Track.Latest}}<span class="ver">{{.Version}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
   <td class="wide" data-label="Missing fixes"><span class="sevset">{{if eq $r.Track.State "error"}}<span class="none">Unknown (track error)</span>{{else if $r.Track.Newest}}{{template "sev-counts" $r.Severity}}{{if $r.UnreachableCount}}<span class="extra">{{template "icon" "error"}}{{$r.UnreachableCount}} need another version</span>{{end}}{{else}}<span class="none">No registry image</span>{{end}}</span></td>
   <td class="wide" data-label="Verdict">{{template "verdict" $r}}</td>

@@ -61,7 +61,7 @@ ShellView { Registry, RegistryState, DockerState, DockerReason string; RunningBu
             StatusComputedAt time.Time; StatusRefreshing bool; IndexSHA256, FeedSHA256, Architecture string }
 ```
 
-- `Registry` is the configured `host/repository` ("" = not configured). `RegistryState` is the result of the last status comparison, not a separate health check: `ready` (comparison without errors), `error` (`Status.LastError` or any track error), or `unknown`/`""` (not compared yet). `DockerState` is `available`, `unavailable` (show `DockerReason`), or `""` (not known yet).
+- `Registry` is the configured `host/repository` ("" = not configured). `RegistryState` is the result of the last status comparison, not a separate health check: `ready` (comparison without errors), `error` (`Status.LastError` or any track error), or `unknown`/`""` (not compared yet). `DockerState` is `available`, `unavailable` (show `DockerReason`), or `""` (not known yet, e.g. `lupetto images` failed before any successful load). Only `available` may be presented as "no images in local Docker"; any other value reads "Local Docker state unknown or unavailable".
 - `RunningBuild` is non-nil while a build runs. Only one build runs at a time: render every build control disabled with "Another build is running", show the nav count and a link to the running build.
 - `StatusComputedAt` can be zero (no successful check yet). The footer offers `POST /status/refresh` ("Check now").
 
