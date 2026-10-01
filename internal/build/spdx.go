@@ -108,17 +108,38 @@ func validateSPDX(lockPath, spdxPath, arch string) (string, error) {
 }
 
 func parseAPKRef(ref, arch string) (apkIdentity, string, error) {
-	body, ok := strings.CutPrefix(ref, "pkg:apk/wolfi/")
+	body, ok := strings.CutPrefix(ref, "pkg:apk/")
 	if !ok {
 		return apkIdentity{}, "", fmt.Errorf("not a Wolfi APK purl")
 	}
+	rawNamespace, body, found := strings.Cut(body, "/")
+	namespace, err := url.PathUnescape(rawNamespace)
+	if !found || err != nil || namespace != "wolfi" {
+		return apkIdentity{}, "", fmt.Errorf("not a Wolfi APK purl")
+	}
 	path, query, ok := strings.Cut(body, "?")
-	name, version, found := strings.Cut(path, "@")
-	if !ok || !found || !wolfi.PackageNamePattern.MatchString(name) || version == "" || strings.ContainsAny(version, "/@#?") {
+	rawName, rawVersion, found := strings.Cut(path, "@")
+	name, nameErr := url.PathUnescape(rawName)
+	version, versionErr := url.PathUnescape(rawVersion)
+	if !ok || !found || nameErr != nil || versionErr != nil || !wolfi.PackageNamePattern.MatchString(name) || version == "" || strings.ContainsAny(version, "/@#?") {
 		return apkIdentity{}, "", fmt.Errorf("malformed Wolfi APK purl")
 	}
-	values, err := url.ParseQuery(query)
-	if err != nil || len(values) != 2 || len(values["arch"]) != 1 || values.Get("arch") != arch {
+	if strings.Contains(query, ";") {
+		return apkIdentity{}, "", fmt.Errorf("malformed APK purl qualifiers: %q", ref)
+	}
+	// Purl percent-encoding is not HTML form encoding: a literal '+' must
+	// remain '+', including in qualifier values. Split before decoding so
+	// encoded delimiters cannot change the component boundaries.
+	values := url.Values{}
+	for _, qualifier := range strings.Split(query, "&") {
+		key, rawValue, found := strings.Cut(qualifier, "=")
+		value, err := url.PathUnescape(rawValue)
+		if !found || err != nil {
+			return apkIdentity{}, "", fmt.Errorf("malformed APK purl qualifiers: %q", ref)
+		}
+		values[key] = append(values[key], value)
+	}
+	if len(values) != 2 || len(values["arch"]) != 1 || values.Get("arch") != arch {
 		return apkIdentity{}, "", fmt.Errorf("APK purl architecture mismatch: %q (target %s)", ref, arch)
 	}
 	kind := "distro"

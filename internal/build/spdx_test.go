@@ -77,10 +77,94 @@ func TestValidateSPDXRejectsMalformedReferences(t *testing.T) {
 		"pkg:apk/wolfi/pkg@1-r0?arch=x86_64&arch=x86_64&distro=wolfi",
 		"pkg:apk/wolfi/pkg@1-r0?arch=x86_64&distro=other",
 		"pkg:apk/wolfi/pkg@1-r0?arch=x86_64&distro=wolfi&unknown=x",
+		"pkg:apk/wolfi/pkg@1-r0?arch=x86_64&origin=source;other",
+		"pkg:apk/wolf%/pkg@1-r0?arch=x86_64&distro=wolfi",
+		"pkg:apk/wolfi/libstdc%2G%2B@1-r0?arch=x86_64&distro=wolfi",
+		"pkg:apk/wolfi/pkg@1%2-r0?arch=x86_64&distro=wolfi",
+		"pkg:apk/wolfi/pkg@1-r0?arch=x86%ZZ64&distro=wolfi",
+		"pkg:apk/wolfi/pkg@1-r0?arch=x86_64&distro=wolf%",
+		"pkg:apk/wolfi/pkg@1-r0?arch=x86_64&origin=source%",
+		"pkg:apk/wolfi/pkg@1%40-r0?arch=x86_64&distro=wolfi",
+		"pkg:apk/wolfi/pkg@1-r0?arch=x86_64&distro=%57olfi",
 		"pkg:apk/wolfi/pkg@1-r0",
 	} {
 		if _, _, err := parseAPKRef(ref, "x86_64"); err == nil {
 			t.Errorf("accepted %q", ref)
 		}
+	}
+}
+
+func TestParseAPKRefPercentEncoding(t *testing.T) {
+	for _, tc := range []struct {
+		name, ref, arch, packageName, version, kind string
+	}{
+		{"encoded plus", "pkg:apk/wolfi/libstdc%2B%2b@15.2.0-r1?arch=x86_64&distro=wolfi", "x86_64", "libstdc++", "15.2.0-r1", "distro"},
+		{"literal plus", "pkg:apk/wolfi/libstdc++@15.2.0-r1?arch=x86_64&origin=gcc++", "x86_64", "libstdc++", "15.2.0-r1", "origin"},
+		{"encoded version", "pkg:apk/wolfi/pkg@1%2E2%2Btest%2Dr1?arch=x86_64&distro=wolfi", "x86_64", "pkg", "1.2+test-r1", "distro"},
+		{"encoded namespace and qualifiers", "pkg:apk/%77olfi/pkg@1-r0?arch=x86%5F64&distro=%77olfi", "x86_64", "pkg", "1-r0", "distro"},
+		{"encoded origin", "pkg:apk/wolfi/pkg@1-r0?arch=x86_64&origin=gcc%2B%2B", "x86_64", "pkg", "1-r0", "origin"},
+		{"literal qualifier plus", "pkg:apk/wolfi/pkg@1-r0?arch=x86+64&distro=wolfi", "x86+64", "pkg", "1-r0", "distro"},
+		{"decode once", "pkg:apk/wolfi/pkg@1%252B-r0?arch=x86_64&distro=wolfi", "x86_64", "pkg", "1%2B-r0", "distro"},
+		{"preserve name case", "pkg:apk/wolfi/Libstdc%2B%2B@1-r0?arch=x86_64&distro=wolfi", "x86_64", "Libstdc++", "1-r0", "distro"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id, kind, err := parseAPKRef(tc.ref, tc.arch)
+			want := apkIdentity{tc.packageName, tc.version, tc.arch}
+			if err != nil || id != want || kind != tc.kind {
+				t.Fatalf("identity=%+v kind=%q err=%v; want %+v kind=%q", id, kind, err, want, tc.kind)
+			}
+		})
+	}
+}
+
+func TestValidateSPDXPercentEncodedIdentities(t *testing.T) {
+	for _, tc := range []struct {
+		name, packageName, version, refName, refVersion string
+		valid                                           bool
+	}{
+		{"encoded plus", "libstdc++", "15.2.0-r1", "libstdc%2B%2B", "15.2.0-r1", true},
+		{"encoded version", "pkg", "1.2+test-r1", "pkg", "1%2E2%2Btest%2Dr1", true},
+		{"mismatched decoded name", "libstdc++", "15.2.0-r1", "libstdc%2B", "15.2.0-r1", false},
+		{"case mismatch", "libstdc++", "15.2.0-r1", "Libstdc%2B%2B", "15.2.0-r1", false},
+		{"malformed name", "libstdc++", "15.2.0-r1", "libstdc%2G%2B", "15.2.0-r1", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			lockPath := filepath.Join(dir, "lock.json")
+			spdxPath := filepath.Join(dir, "sbom.spdx.json")
+			lock, err := json.Marshal(map[string]any{"contents": map[string]any{"packages": []any{
+				map[string]string{"name": tc.packageName, "version": tc.version, "architecture": "x86_64"},
+			}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var packages []any
+			for _, qualifier := range []string{"distro=%77olfi", "origin=source%2B%2B"} {
+				packages = append(packages, map[string]any{
+					"SPDXID": "SPDXRef-Package-apk-" + qualifier, "name": tc.packageName, "versionInfo": tc.version,
+					"externalRefs": []any{map[string]string{
+						"referenceType": "purl", "referenceLocator": "pkg:apk/%77olfi/" + tc.refName + "@" + tc.refVersion + "?arch=x86%5F64&" + qualifier,
+					}},
+				})
+			}
+			doc, err := json.Marshal(map[string]any{"SPDXID": "SPDXRef-DOCUMENT", "spdxVersion": "SPDX-2.3", "packages": packages})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(lockPath, lock, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(spdxPath, doc, 0600); err != nil {
+				t.Fatal(err)
+			}
+			digest, err := validateSPDX(lockPath, spdxPath, "x86_64")
+			if tc.valid {
+				if err != nil || digest != wolfi.SHA256Hex(doc) {
+					t.Fatalf("digest=%q err=%v", digest, err)
+				}
+			} else if err == nil || digest != "" {
+				t.Fatalf("accepted mismatched or malformed identity: digest=%q", digest)
+			}
+		})
 	}
 }
