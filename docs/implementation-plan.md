@@ -91,6 +91,16 @@ Resume when there is a concrete catalog/history or Explorer need. These items ar
 
 ## Explorer workstream
 
+### 4a. Registry-comparison dashboard (user-approved 2026-10-01)
+
+Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-approved-2026-10-01). Each checkpoint is committed separately with its evidence. Items in section 4 that this resolves are completed through these items, not separately.
+
+- [ ] Add the image identity annotations to every build, move the installed-APK-database reader to a package `status` can share, and add `discover --json` (named and all-packages forms).
+- [ ] Implement `lupetto status --products <file> [--json]`: products file parsing, per-track index resolution, registry image listing by annotation, installed package sets cached by digest, outdated packages, missing security fixes from Wolfi's security feed, and per-track states; exercise against an isolated loopback registry with real builds.
+- [ ] Implement `lupetto-explorer` server: CLI adapter with exact document-version checks, background status cache with refresh, single build job with live log, cancellation, CSRF/same-origin protection, builds disabled by default.
+- [ ] Implement the dashboard pages (overview, track detail, package browser, jobs) and verify them in a real browser against a real status/build run.
+- [ ] Build one non-root container image with `lupetto`, `lupetto-explorer`, apko 1.4.5, Cosign v3.1.3; verify that an unprivileged in-container build publishes to an isolated registry and the dashboard shows it.
+
 ### 4. Add Explorer as an optional application
 
 - [ ] Decide Explorer product/repository/module packaging without introducing a CLI dependency on Explorer.

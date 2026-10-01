@@ -55,15 +55,13 @@ Output-directory flags, an Explorer compatibility contract, and runtime image re
 
 Both selector forms enter the same exact-build pipeline. A major selector may resolve differently after a snapshot changes; retain the resolution used for each build.
 
-## Explorer scope
+## Dashboard (Explorer) scope
 
-Restore package/version browsing, local image availability, exact direct builds, generated SBOM downloads, package metadata, recipe history, and snapshot provenance.
+The user-approved [registry-comparison dashboard](decisions.md#registry-comparison-dashboard-user-approved-2026-10-01) is the first Explorer target: compare images published to a registry with the latest signed-index versions, show known security fixes those images are missing, browse index packages, and build images from the UI. It is a separate `lupetto-explorer` program that integrates only through the CLI's JSON output and runs as one container without a database. Kubernetes and Tekton/Konflux compatibility is the long-term direction, not current scope.
 
-The specification also names Products and package-series browsing. Their meanings must be defined before implementation: a grouping label and a runtime image recipe are different concepts. Deferring them during implementation does not remove them from the full compatibility target.
+Restoring package metadata, recipe history, snapshot provenance, durable SBOM downloads, and local Docker image availability remains in the full compatibility target. The specification also names Products and package series; the dashboard's products file defines tracked package/selector groupings only, not runtime recipes.
 
-Proposed Explorer flags are `--enable-builds`, `--lupetto-binary`, and `--build-directory`, plus the registry/signing settings above. Database/listen flag spellings, defaults, and other environment equivalents are unknown. Do not invent historical values.
-
-Local Docker availability is not registry availability. Do not imply that the UI displays registry contents, vulnerability findings, signature status, or remote jobs.
+Local Docker availability is not registry availability. Missing security fixes are not a vulnerability scan, and signature status is not shown.
 
 ## Evidence distinctions
 
@@ -78,7 +76,7 @@ These are not interchangeable or automatically synchronized. Signature validity 
 
 ## Non-goals and security boundary
 
-Remote Konflux execution, policy enforcement, registry-discovery UI, vulnerability scanning, source-package builds, and production credential/key management are outside this local rebuild.
+Remote Konflux/Tekton execution (until a later checkpoint), policy enforcement, full vulnerability scanning (the dashboard reports only known fixed vulnerabilities from Wolfi's security feed), source-package builds, and production credential/key management are outside this local rebuild.
 
 HTTP registry access is local-development only. Production use requires HTTPS, least-privilege registry credentials, and protected signing keys. Keyless/KMS interoperability and production key management are not established by upstream Cosign support. See the [operator security boundaries](registry-signing.md).
 

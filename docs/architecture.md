@@ -8,15 +8,16 @@ One local Go module contains the standalone CLI: read-only discovery from the li
 
 ## Components
 
-`lupetto` and a future `lupetto-explorer` are separate applications. The CLI is independently useful; Explorer is an optional consumer. Whether they share a repository, Go module, release, or product identity remains open.
+`lupetto` and `lupetto-explorer` (the registry-comparison dashboard) are separate programs in this repository and Go module, shipped together in one container image. The CLI is independently useful; Explorer is an optional consumer that integrates only through the CLI's JSON output. See the [dashboard decision](decisions.md#registry-comparison-dashboard-user-approved-2026-10-01).
 
 | Component | Responsibility | Status |
 | --- | --- | --- |
 | Index access and selection | Fetch and verify the signed APKINDEX, parse it, resolve names/providers and selectors to one exact APK. | `internal/wolfi` |
 | Build pipeline | Exact request → apko config and lock → OCI layout → installed-package and SPDX validation → optional load, publication, signing, attestation → version-6 record. | `internal/build` |
 | CLI | Parse arguments, render progress, print human or `--json` output, `doctor`, `discover`. | `cmd/lupetto` |
+| Status | Compare products-file tracks with the index, registry images (by annotation), and Wolfi security fixes; read-only. | Planned (`lupetto status`) |
 | Catalog | Import snapshots, retain provenance, query versions, resolve selectors historically. | Deferred |
-| Explorer | Browse catalog/evidence and launch the configured CLI for builds. | Deferred |
+| Explorer | Dashboard: render `status`/`discover` JSON, launch `lupetto build` jobs. | Planned (`cmd/lupetto-explorer`) |
 
 For Explorer, prefer `net/http`, server-rendered HTML, and small amounts of JavaScript over a separately deployed frontend, and SQLite for catalog queries—not a distributed job service. Keep boundaries explicit without a plugin framework or a service per component.
 

@@ -13,7 +13,7 @@ Status vocabulary:
 | ID | Decision | Reason |
 | --- | --- | --- |
 | C1 | Exclude the overwritten checkout completely. | It is not the lost implementation and must not supply presumed behavior. |
-| C2 | Restore the local apko-based image workflow, not remote Konflux execution. | This is the workflow described by the operator request. |
+| C2 | Restore the local apko-based image workflow first. Tekton/Konflux compatibility is the long-term deployment target (user-approved 2026-10-01), not current scope. | The operator request describes a local workflow; the dashboard direction adds Kubernetes as a later target. |
 | C3 | Preserve exact APK selection and major-selector compatibility targets. | Both command forms are explicitly named; convenience selection must resolve to an exact build request. |
 | C4 | Keep generic OCI publication and digest-bound signed SPDX attestations. | No registry vendor is required; unsigned attachment is not equivalent evidence. |
 | C5 | Separate specification, proposals, and verified behavior. | No surviving implementation of the lost tool is available in this workspace. |
@@ -138,6 +138,62 @@ The user approved replacing the Docker publication sequence, allowing `--no-load
 - **`--json`** on `build` and `sbom` prints exactly that version-6 document to stdout on success and on post-validation failure, instead of the human summary; stderr progress is unchanged. Invocation errors (exit 2) print nothing to stdout. Changing the document's meaning requires a new version. This is the CLI's machine-readable result; Explorer compatibility rules (supported versions, cancellation, concurrency) remain an [open Explorer decision](#before-explorer).
 - **Package layout.** Move signed-index access and selection to `internal/wolfi`, and the exact-build pipeline (composition, validation, loading, publication, signing, records) to `internal/build`; `cmd/lupetto` keeps argument parsing, terminal progress, and output. Both are module-internal; this does not settle Explorer packaging or create a public Go API.
 
+## Registry-comparison dashboard (user-approved 2026-10-01)
+
+The user approved a dashboard that compares the images Lupetto has published to a registry with the latest versions in the signed Wolfi index, shows known security fixes those images are missing, and builds new images from the UI. It must run as one container with no database; Kubernetes and Tekton/Konflux compatibility is the long-term direction. This supersedes the scope non-goals "registry-discovery UI" and "vulnerability scanning" (replaced by the bounded security-fix comparison below) and the rule that the UI must not display registry contents. It resolves several [Explorer open decisions](#before-explorer).
+
+**Boundary.** The dashboard is a separate program, `lupetto-explorer` (`cmd/lupetto-explorer`), in this repository and Go module, shipped in one container image with the CLI. It imports no `internal/build` or `internal/wolfi` code: it obtains every index, registry, and security fact through `lupetto … --json` and builds through `lupetto build`. The comparison logic lives in the CLI so it also works from scripts and future Tekton tasks.
+
+**Image identity annotations.** Every image Lupetto builds carries manifest annotations recording what it contains, so the registry can be read back without parsing tags (tags may use SHA-256 fallbacks):
+
+| Annotation | Value |
+| --- | --- |
+| `org.opencontainers.image.version` | exact APK version, e.g. `17.10-r1` |
+| `org.opencontainers.image.created` | build time, RFC 3339 UTC |
+| `lupetto.apk.name` | actual resolved APK name, e.g. `postgresql-17` |
+| `lupetto.apk.version` | exact APK version |
+| `lupetto.apk.architecture` | APK architecture, e.g. `x86_64` |
+| `lupetto.index.sha256` | SHA-256 of the signed APKINDEX archive used |
+
+The `lupetto.` prefix is provisional until a public module/domain identity is chosen; changing it requires a status-output version bump. Images without these annotations (built before this change) are reported as unidentified, not guessed from tags.
+
+**Products file.** A YAML file (`version: 1`) lists the tracked products, each a package name or provider plus one or more dotted numeric selectors; each pair is one *track*:
+
+```yaml
+version: 1
+products:
+  - package: postgresql
+    selectors: ["16", "17"]
+  - package: nginx
+    selectors: ["1.30"]
+```
+
+Unknown fields are rejected. Registry and repository settings are not in this file; they keep the existing `--registry`/`--repository` flags and `LUPETTO_*` environment precedence. Products here are grouping/tracking only, not runtime recipes.
+
+**`lupetto discover --json`.** `discover --json <name>` prints the existing discovery result as a versioned JSON document. `discover --json` without a name lists every package name in the verified index with its latest version and description, for browsing. Human output is unchanged.
+
+**`lupetto status`.** `lupetto status --products <file> [--registry … --repository …] [--json]` reads the verified signed index, the registry, and the Wolfi security feed, and reports per track:
+
+- the newest index APK for the selector (or an unavailable/ambiguous error for that track only; other tracks still report);
+- the images in `HOST/PREFIX/<component>` for that APK name whose annotations match the selector: digest, tags, version, created time; non-image artifacts and unidentified images are counted, not parsed further;
+- the newest built image (highest APK version, then newest created time) and its full installed package set, read from the image's `usr/lib/apk/db/installed` through digest-addressed registry reads and cached by digest (images are immutable);
+- packages in that image with newer versions in the index, and **missing security fixes**: for each installed package, CVE/GHSA IDs listed in the security feed under a fixed version that is newer than the installed version and available in the index;
+- a state: `not-built`, `update-available` (newer top-level version), `fixes-available` (same top-level version, but a rebuild would pick up security fixes), `current`, or `error`.
+
+Registry reads reuse the publication keychain, loopback-only HTTP guard, and sanitized errors. `status` is read-only: no build, push, or signing. The JSON document is versioned (`version: 1`) and is the dashboard's contract.
+
+**Security data source.** Wolfi's `https://packages.wolfi.dev/os/security.json` (secdb format), fetched over HTTPS and identified by its SHA-256 in the status output. It is APK-version-aware, unlike NVD, whose product matching is unreliable for distribution packages. Limitations, shown in the UI and docs: the feed is not signed; it lists **fixed** vulnerabilities only, so an empty result does not mean an image has no vulnerabilities; it covers Wolfi packages only. This is not a vulnerability scan.
+
+**Dashboard behavior.** Pages are rendered by the Go server (`html/template`, embedded assets, minimal JavaScript). Pages: overview of tracks and states, track detail (images, outdated packages, missing fixes), package browser (from `discover --json`), and build jobs (live log, result record). Status is computed in the background and cached with a manual refresh; the page shows when it was computed.
+
+- Flags: `--listen` (default `127.0.0.1:8080`), `--products`, `--lupetto-binary` (default `lupetto` on `PATH`), `--enable-builds` (default off). Registry, repository, and Cosign settings reach the CLI through the inherited `LUPETTO_*` and `COSIGN_PASSWORD` environment, never arguments.
+- Builds run `lupetto build <package> <selector-or---apk-version> --no-load --json` with publication (and signing when a key is configured). Only one build runs at a time; others are rejected while one runs. Builds can be cancelled. Job history is in memory and lost on restart; workspaces and records stay in the cache directory.
+- No login. Build-triggering requests are POST only, require a per-process CSRF token and a same-origin check, and are validated server-side. Access control is the operator's network boundary (port-forward or an authenticating ingress). Read-only use needs no Cosign key.
+
+**Container.** One image containing `lupetto`, `lupetto-explorer`, apko 1.4.5, Cosign v3.1.3, and CA certificates; non-root; cache directory on a mounted volume; Docker config and Cosign key mounted as files. No Docker daemon or socket. That apko builds work unprivileged inside the container must be verified, not assumed.
+
+**Deferred.** Tekton task/PipelineRun execution, multi-architecture images, a database, multi-user authentication, unfixed-vulnerability scanning, and image deletion/retention.
+
 ## Proposed design choices
 
 | ID | Proposal | Tradeoff |
@@ -170,15 +226,10 @@ The current Go/module, apko invocation, host-target mapping, repository trust, a
 
 ### Before Explorer
 
-- Colocated application or separate product; repository/module ownership and release packaging. This decision does not block the standalone CLI.
-- CLI request/result compatibility contract, including format versions and unsupported-version behavior.
-- Catalog access boundary: UI-independent shared package initially, or supported query/export interface; any shared schema needs explicit ownership/versioning.
-- Database/listen flags, defaults, and supported environment equivalents.
-- CLI result consumption, build cancellation/concurrency, and restart behavior.
-- Safe local HTTP controls and policy for non-loopback access.
-- Exact definition of Products and package series.
+- Resolved for the registry-comparison dashboard: same repository and module, separate `lupetto-explorer` binary, CLI-only integration, products definition, listen/build flags, job concurrency and restart behavior, and HTTP controls. See [the dashboard decision](#registry-comparison-dashboard-user-approved-2026-10-01).
+- Supported-CLI-version handling: the dashboard requires exact record/status/discover document versions and reports any other version as incompatible.
 - Recipe-history source and association to packages; an APKINDEX alone must not be assumed to contain recipe history.
-- Durable immutable SBOM storage/download behavior and local image identity matching.
+- Durable immutable SBOM storage/download in the dashboard; persistent catalog/snapshot history.
 
 ## Recording a resolved decision
 
