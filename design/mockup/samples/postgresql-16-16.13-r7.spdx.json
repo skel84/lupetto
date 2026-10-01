@@ -1,0 +1,387 @@
+{
+  "SPDX-ID": "SPDXRef-DOCUMENT",
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "name": "sbom-postgresql-16-16.13-r7 (SAMPLE \u2014 mockup data, not a real SBOM)",
+  "documentNamespace": "https://example.invalid/lupetto-mockup/postgresql-16-16.13-r7",
+  "creationInfo": {
+    "created": "2026-09-24T09:02:00Z",
+    "creators": [
+      "Tool: apko (sample)"
+    ]
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-bash",
+      "name": "bash",
+      "versionInfo": "5.3-r12",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/bash@5.3-r12?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-busybox",
+      "name": "busybox",
+      "versionInfo": "1.38.0-r1",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/busybox@1.38.0-r1?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-ca-certificates-bundle",
+      "name": "ca-certificates-bundle",
+      "versionInfo": "20260909-r1",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/ca-certificates-bundle@20260909-r1?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-glibc",
+      "name": "glibc",
+      "versionInfo": "2.43-r10",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/glibc@2.43-r10?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-glibc-locale-posix",
+      "name": "glibc-locale-posix",
+      "versionInfo": "2.43-r10",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/glibc-locale-posix@2.43-r10?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-icu-data-full",
+      "name": "icu-data-full",
+      "versionInfo": "75.1-r40",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/icu-data-full@75.1-r40?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-icu-libs",
+      "name": "icu-libs",
+      "versionInfo": "75.1-r40",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/icu-libs@75.1-r40?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-keyutils-libs",
+      "name": "keyutils-libs",
+      "versionInfo": "1.6.3-r38",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/keyutils-libs@1.6.3-r38?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-krb5-libs",
+      "name": "krb5-libs",
+      "versionInfo": "1.22.1-r2",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/krb5-libs@1.22.1-r2?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-ld-linux",
+      "name": "ld-linux",
+      "versionInfo": "2.43-r10",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/ld-linux@2.43-r10?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libcom_err",
+      "name": "libcom_err",
+      "versionInfo": "1.47.3-r1",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/libcom_err@1.47.3-r1?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libcrypto3",
+      "name": "libcrypto3",
+      "versionInfo": "3.6.3-r4",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/libcrypto3@3.6.3-r4?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libedit",
+      "name": "libedit",
+      "versionInfo": "3.1-r18",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/libedit@3.1-r18?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libgcc",
+      "name": "libgcc",
+      "versionInfo": "16.2.0-r0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/libgcc@16.2.0-r0?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libldap",
+      "name": "libldap",
+      "versionInfo": "2.6.10-r3",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/libldap@2.6.10-r3?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libncursesw6",
+      "name": "libncursesw6",
+      "versionInfo": "6.5.20260704-r0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/libncursesw6@6.5.20260704-r0?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libssl3",
+      "name": "libssl3",
+      "versionInfo": "3.6.3-r4",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/libssl3@3.6.3-r4?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libuuid",
+      "name": "libuuid",
+      "versionInfo": "2.42.2-r0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/libuuid@2.42.2-r0?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libverto",
+      "name": "libverto",
+      "versionInfo": "0.3.2-r7",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/libverto@0.3.2-r7?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libxml2",
+      "name": "libxml2",
+      "versionInfo": "2.15.2-r1",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/libxml2@2.15.2-r1?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-ncurses-terminfo-base",
+      "name": "ncurses-terminfo-base",
+      "versionInfo": "6.5.20260704-r0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/ncurses-terminfo-base@6.5.20260704-r0?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-openssl-config",
+      "name": "openssl-config",
+      "versionInfo": "3.3.0-r5",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/openssl-config@3.3.0-r5?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-postgresql-16",
+      "name": "postgresql-16",
+      "versionInfo": "16.13-r7",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/postgresql-16@16.13-r7?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-postgresql-16-client",
+      "name": "postgresql-16-client",
+      "versionInfo": "16.13-r7",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/postgresql-16-client@16.13-r7?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-postgresql-16-contrib",
+      "name": "postgresql-16-contrib",
+      "versionInfo": "16.13-r7",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/postgresql-16-contrib@16.13-r7?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-postgresql-16-oci-entrypoint",
+      "name": "postgresql-16-oci-entrypoint",
+      "versionInfo": "16.13-r7",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/postgresql-16-oci-entrypoint@16.13-r7?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-readline",
+      "name": "readline",
+      "versionInfo": "8.3-r2",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/readline@8.3-r2?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-su-exec",
+      "name": "su-exec",
+      "versionInfo": "0.3-r4",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/su-exec@0.3-r4?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-tzdata",
+      "name": "tzdata",
+      "versionInfo": "2026d-r0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/tzdata@2026d-r0?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-wolfi-baselayout",
+      "name": "wolfi-baselayout",
+      "versionInfo": "20230201-r30",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/wolfi-baselayout@20230201-r30?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-zlib",
+      "name": "zlib",
+      "versionInfo": "1.3.2-r0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/zlib@1.3.2-r0?arch=x86_64"
+        }
+      ]
+    }
+  ]
+}

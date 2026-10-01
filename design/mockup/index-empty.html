@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en" data-theme="a" data-mode="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'">
+<title>Images · Lupetto (mockup)</title>
+<link rel="stylesheet" href="assets/styles.css">
+<script src="assets/mockup.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="mockbar" role="region" aria-label="Mockup controls">
+  <strong>Sample data</strong><span class="hide-sm">Design mockup — not the product UI. Data is illustrative.</span>
+  <span class="spacer"></span>
+  <span class="seg" aria-label="Visual direction">Direction:
+    <a href="?theme=a" data-set-theme="a">A · Tana</a><a href="?theme=b" data-set-theme="b">B · Pista</a></span>
+  <span class="seg" aria-label="Color mode">Mode:
+    <a href="?mode=auto" data-set-mode="auto">Auto</a><a href="?mode=light" data-set-mode="light">Light</a><a href="?mode=dark" data-set-mode="dark">Dark</a></span>
+  <details><summary>All screens ▾</summary><nav class="screens" aria-label="Mockup screens"><h4>Images</h4><a href="index.html">Images (home)</a><a href="index.html?show=action">Images · needs action filter</a><a href="index-building.html">Images · a build is running</a><a href="index-empty.html">Images · nothing tracked yet</a><a href="index-error.html">Images · registry &amp; Docker unreachable</a><a href="index-readonly.html">Images · read-only server</a><h4>Image detail</h4><a href="image-postgresql.html">postgresql · overview &amp; versions</a><a href="image-postgresql-vulns-17.html">postgresql 17 · vulnerabilities</a><a href="image-postgresql-packages-17.html">postgresql 17 · packages / SBOM</a><a href="image-postgresql-compare.html">postgresql · compare</a><a href="image-postgresql-builds.html">postgresql · builds</a><a href="image-nginx.html">nginx · rebuild for fixes</a><a href="image-openssl-vulns-3.5.html">openssl 3.5 · fixes need another version</a><a href="image-valkey.html">valkey · local only + version not found</a><a href="image-busybox-static.html">busybox-static · never built</a><h4>Catalog</h4><a href="catalog.html">Catalog</a><a href="catalog.html?q=postgres">Catalog · search “postgres”</a><a href="catalog-postgresql.html">Catalog · postgresql family</a><h4>Builds</h4><a href="builds.html">Builds</a><a href="build-20261001-210214-nginx-stable.html">Build · running</a><a href="build-20260930-184410-openssl.html">Build · partial failure</a><a href="build-20260929-161502-busybox-static.html">Build · failed</a><a href="build-20260922-070405-postgresql-16.html">Build · succeeded</a><a href="build-start-postgresql-17.html">Build · just started</a><h4>Dialogs</h4><a href="track.html">Track a product (no-JS page)</a><a href="index.html#track">Track a product (dialog on Images)</a></nav></details>
+</div>
+<div class="shell">
+<header class="topbar">
+  <div class="masthead">
+    <a class="brand" href="index.html"><svg class="logo only-a" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><circle class="bgc" cx="16" cy="16" r="16"/><path class="fg" d="M7.2 6.5c.5-.4 1.2-.3 1.6.2l3.6 4.3h7.2l3.6-4.3c.4-.5 1.1-.6 1.6-.2.3.2.5.6.4 1l-1 10.3c-.1.6-.3 1.1-.7 1.6l-5.9 6.3c-.8.9-2.2.9-3 0l-5.9-6.3c-.4-.5-.6-1-.7-1.6L6.8 7.5c-.1-.4.1-.8.4-1Z"/><circle class="eye" cx="12.6" cy="15.6" r="1.35"/><circle class="eye" cx="19.4" cy="15.6" r="1.35"/><path class="eye" d="M14.6 20.4h2.8L16 22.2z"/></svg><svg class="logo only-b" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path class="ln2" d="M1 1h30v30H1z"/><path class="ln" d="M6.5 6 12 11.5h8L25.5 6l-1.2 11.5L16 26.5l-8.3-9z"/><path class="ln" d="M11.5 15.5h3M17.5 15.5h3"/></svg><span><span class="word">Lupetto</span><br class="only-a"><span class="tagline only-a">Wolfi images, kept current</span></span></a>
+    <nav class="mainnav" aria-label="Main"><a href="index.html" aria-current="page"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M12 3 3 7.5l9 4.5 9-4.5z"/><path d="M12 3 3 7.5l9 4.5 9-4.5z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg><span class="navtext">Images</span></a><a href="catalog.html"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect class="duo" x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg><span class="navtext">Catalog</span></a><a href="builds.html"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M4 15h16v5H4z"/><path d="M4 15h16v5H4z"/><path d="M7 15V9h10v6"/><path d="M9.5 9V4h5v5"/></svg><span class="navtext">Builds</span></a></nav>
+    <div class="envbar" aria-label="Connections"><span class="env-item"><span class="dot " aria-hidden="true"></span><span><span class="env-label">Registry</span> <span class="only-a">·</span> registry.example.com/team/lupetto</span></span><span class="env-item"><span class="dot " aria-hidden="true"></span><span><span class="env-label">Docker</span> <span class="only-a">·</span> Connected</span></span><span class="env-item"><span class="dot " aria-hidden="true"></span><span><span class="env-label">Builds</span> <span class="only-a">·</span> Enabled</span></span></div>
+  </div>
+</header>
+<div class="main-col">
+<main id="main" class="content">
+<div class="banner ok flash" data-flash="tracked" hidden role="status"><svg class="i i-lg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle class="duo" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.8 2.8L16.3 9.5"/></svg><div class="body"><p><strong>Now tracking <span data-flash-text></span>.</strong> Its status appears after the next check (about a minute).</p></div></div>
+<div class="page-head">
+  <div class="titles"><h1>Images</h1><p class="lede">Nothing tracked yet.</p></div>
+  <div class="actions"><a class="btn primary" href="track.html" data-opens="track-dialog"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>Track a product</a></div>
+</div>
+
+
+<div class="empty">
+  <span class="art"><svg class="i i-xl" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M12 3 3 7.5l9 4.5 9-4.5z"/><path d="M12 3 3 7.5l9 4.5 9-4.5z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg></span>
+  <h2>No products tracked yet</h2>
+  <p>Track a Wolfi package and the versions you care about. Lupetto then shows what’s in your registry and local Docker, and tells you when to build, update, or rebuild for security fixes.</p>
+  <div class="actions"><a class="btn primary" href="track.html" data-opens="track-dialog"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>Track a product</a><a class="btn" href="catalog.html" ><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect class="duo" x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>Browse the catalog</a></div>
+  <p class="small">Popular: <a href="catalog-postgresql.html">postgresql</a> · <a href="catalog.html?q=nginx">nginx</a> · <a href="catalog.html?q=valkey">valkey</a> · <a href="catalog.html?q=caddy">caddy</a></p>
+</div>
+<div class="stack after-list" id="about"></div>
+</main>
+<footer class="foot">
+  <span>Status checked 21:00 UTC (4 min ago) · <a href="index-empty.html">Check now</a></span>
+  <span>Wolfi index <span class="mono">bad5600da4ee</span> · signature verified</span>
+  <span>Security feed <span class="mono">163ee313794e</span> · fetched 20:58 UTC</span>
+  <span>x86_64 · Lupetto CLI 0.6 (sample)</span>
+</footer>
+</div>
+</div>
+<dialog id="track-dialog" aria-labelledby="track-title"><div class="sheet-head dialog-head">
+    <div><h2 id="track-title">Track a product</h2><p class="muted small">Lupetto will watch these versions and tell you when to build, update, or rebuild.</p></div>
+    <a class="iconbtn" href="index.html" data-closes aria-label="Close"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/></svg></a>
+  </div>
+  <form method="get" action="index.html">
+  <div class="sheet-body">
+    <div class="field">
+      <label for="track-package-d">Wolfi package</label>
+      <input class="input" id="track-package-d" name="package" value="postgresql" list="pkg-suggest" autocomplete="off">
+      <datalist id="pkg-suggest"><option value="postgresql"><option value="nginx"><option value="valkey"><option value="redis-operator"><option value="caddy"><option value="haproxy"><option value="traefik"></datalist>
+      <span class="help">A package name or a provider, as listed in the <a href="catalog.html">catalog</a>.</span>
+    </div>
+    <fieldset class="field">
+      <legend>Versions to track</legend>
+      <div class="choice-list"><label class="choice"><input type="checkbox" name="selector" value="18" checked>
+  <span class="main">postgresql 18</span><span class="side"><span class="ver">18.6-r4</span><br>Newest major</span>
+  <span class="sub mono">postgresql-18</span></label><label class="choice"><input type="checkbox" name="selector" value="17" checked disabled>
+  <span class="main">postgresql 17</span><span class="side"><span class="ver">17.10-r1</span><br>Already tracked</span>
+  <span class="sub mono">postgresql-17</span></label><label class="choice"><input type="checkbox" name="selector" value="16" checked disabled>
+  <span class="main">postgresql 16</span><span class="side"><span class="ver">16.14-r1</span><br>Already tracked</span>
+  <span class="sub mono">postgresql-16</span></label><label class="choice"><input type="checkbox" name="selector" value="15">
+  <span class="main">postgresql 15</span><span class="side"><span class="ver">15.6-r5</span><br>Only 1 release in the index</span>
+  <span class="sub mono">postgresql-15</span></label><label class="choice"><input type="checkbox" name="selector" value="14">
+  <span class="main">postgresql 14</span><span class="side"><span class="ver">14.11-r6</span><br>Only 1 release in the index</span>
+  <span class="sub mono">postgresql-14</span></label></div>
+    </fieldset>
+    <div class="field">
+      <label for="track-custom-d">Or a more specific version <span class="muted">(optional)</span></label>
+      <input class="input mono" id="track-custom-d" name="custom" placeholder="e.g. 17.10" inputmode="decimal">
+      <span class="help">Lupetto always builds the newest release matching what you enter: “17” follows every 17.x, “17.10” stays on 17.10.x.</span>
+    </div>
+    <div class="preview" aria-live="polite"><strong>Will add</strong><ul><li>postgresql <strong>18</strong> → <span class="mono">postgresql-18 18.6-r4</span> (not built yet)</li></ul></div>
+  </div>
+  <div class="sheet-foot">
+    <span class="left">Saved to products.yaml on the server.</span>
+    <a class="btn" href="index.html" data-closes>Cancel</a>
+    <button class="btn primary" type="submit" name="tracked" value="postgresql 18"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M6.5 3.5h11v17L12 16.5l-5.5 4z"/><path d="M6.5 3.5h11v17L12 16.5l-5.5 4z"/><path d="M12 7v6M9 10h6"/></svg>Track 1 version</button>
+  </div>
+  </form></dialog>
+</body>
+</html>

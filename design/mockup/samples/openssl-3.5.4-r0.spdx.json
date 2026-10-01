@@ -1,0 +1,147 @@
+{
+  "SPDX-ID": "SPDXRef-DOCUMENT",
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "name": "sbom-openssl-3.5.4-r0 (SAMPLE \u2014 mockup data, not a real SBOM)",
+  "documentNamespace": "https://example.invalid/lupetto-mockup/openssl-3.5.4-r0",
+  "creationInfo": {
+    "created": "2026-09-24T09:02:00Z",
+    "creators": [
+      "Tool: apko (sample)"
+    ]
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package-ca-certificates-bundle",
+      "name": "ca-certificates-bundle",
+      "versionInfo": "20260909-r2",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/ca-certificates-bundle@20260909-r2?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-glibc",
+      "name": "glibc",
+      "versionInfo": "2.43-r12",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/glibc@2.43-r12?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-glibc-locale-posix",
+      "name": "glibc-locale-posix",
+      "versionInfo": "2.43-r12",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/glibc-locale-posix@2.43-r12?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-ld-linux",
+      "name": "ld-linux",
+      "versionInfo": "2.43-r12",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/ld-linux@2.43-r12?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libcrypto3",
+      "name": "libcrypto3",
+      "versionInfo": "3.5.4-r0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/libcrypto3@3.5.4-r0?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libgcc",
+      "name": "libgcc",
+      "versionInfo": "16.2.0-r1",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/libgcc@16.2.0-r1?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-libssl3",
+      "name": "libssl3",
+      "versionInfo": "3.5.4-r0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/libssl3@3.5.4-r0?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-openssl",
+      "name": "openssl",
+      "versionInfo": "3.5.4-r0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/openssl@3.5.4-r0?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-openssl-config",
+      "name": "openssl-config",
+      "versionInfo": "3.3.0-r5",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/openssl-config@3.3.0-r5?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-wolfi-baselayout",
+      "name": "wolfi-baselayout",
+      "versionInfo": "20230201-r30",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/wolfi-baselayout@20230201-r30?arch=x86_64"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-Package-zlib",
+      "name": "zlib",
+      "versionInfo": "1.3.2.1_rc20260601-r0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:apk/wolfi/zlib@1.3.2.1_rc20260601-r0?arch=x86_64"
+        }
+      ]
+    }
+  ]
+}

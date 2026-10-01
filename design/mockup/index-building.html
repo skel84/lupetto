@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en" data-theme="a" data-mode="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'">
+<title>Images · Lupetto (mockup)</title>
+<link rel="stylesheet" href="assets/styles.css">
+<script src="assets/mockup.js"></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="mockbar" role="region" aria-label="Mockup controls">
+  <strong>Sample data</strong><span class="hide-sm">Design mockup — not the product UI. Data is illustrative.</span>
+  <span class="spacer"></span>
+  <span class="seg" aria-label="Visual direction">Direction:
+    <a href="?theme=a" data-set-theme="a">A · Tana</a><a href="?theme=b" data-set-theme="b">B · Pista</a></span>
+  <span class="seg" aria-label="Color mode">Mode:
+    <a href="?mode=auto" data-set-mode="auto">Auto</a><a href="?mode=light" data-set-mode="light">Light</a><a href="?mode=dark" data-set-mode="dark">Dark</a></span>
+  <details><summary>All screens ▾</summary><nav class="screens" aria-label="Mockup screens"><h4>Images</h4><a href="index.html">Images (home)</a><a href="index.html?show=action">Images · needs action filter</a><a href="index-building.html">Images · a build is running</a><a href="index-empty.html">Images · nothing tracked yet</a><a href="index-error.html">Images · registry &amp; Docker unreachable</a><a href="index-readonly.html">Images · read-only server</a><h4>Image detail</h4><a href="image-postgresql.html">postgresql · overview &amp; versions</a><a href="image-postgresql-vulns-17.html">postgresql 17 · vulnerabilities</a><a href="image-postgresql-packages-17.html">postgresql 17 · packages / SBOM</a><a href="image-postgresql-compare.html">postgresql · compare</a><a href="image-postgresql-builds.html">postgresql · builds</a><a href="image-nginx.html">nginx · rebuild for fixes</a><a href="image-openssl-vulns-3.5.html">openssl 3.5 · fixes need another version</a><a href="image-valkey.html">valkey · local only + version not found</a><a href="image-busybox-static.html">busybox-static · never built</a><h4>Catalog</h4><a href="catalog.html">Catalog</a><a href="catalog.html?q=postgres">Catalog · search “postgres”</a><a href="catalog-postgresql.html">Catalog · postgresql family</a><h4>Builds</h4><a href="builds.html">Builds</a><a href="build-20261001-210214-nginx-stable.html">Build · running</a><a href="build-20260930-184410-openssl.html">Build · partial failure</a><a href="build-20260929-161502-busybox-static.html">Build · failed</a><a href="build-20260922-070405-postgresql-16.html">Build · succeeded</a><a href="build-start-postgresql-17.html">Build · just started</a><h4>Dialogs</h4><a href="track.html">Track a product (no-JS page)</a><a href="index.html#track">Track a product (dialog on Images)</a></nav></details>
+</div>
+<div class="shell">
+<header class="topbar">
+  <div class="masthead">
+    <a class="brand" href="index.html"><svg class="logo only-a" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><circle class="bgc" cx="16" cy="16" r="16"/><path class="fg" d="M7.2 6.5c.5-.4 1.2-.3 1.6.2l3.6 4.3h7.2l3.6-4.3c.4-.5 1.1-.6 1.6-.2.3.2.5.6.4 1l-1 10.3c-.1.6-.3 1.1-.7 1.6l-5.9 6.3c-.8.9-2.2.9-3 0l-5.9-6.3c-.4-.5-.6-1-.7-1.6L6.8 7.5c-.1-.4.1-.8.4-1Z"/><circle class="eye" cx="12.6" cy="15.6" r="1.35"/><circle class="eye" cx="19.4" cy="15.6" r="1.35"/><path class="eye" d="M14.6 20.4h2.8L16 22.2z"/></svg><svg class="logo only-b" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path class="ln2" d="M1 1h30v30H1z"/><path class="ln" d="M6.5 6 12 11.5h8L25.5 6l-1.2 11.5L16 26.5l-8.3-9z"/><path class="ln" d="M11.5 15.5h3M17.5 15.5h3"/></svg><span><span class="word">Lupetto</span><br class="only-a"><span class="tagline only-a">Wolfi images, kept current</span></span></a>
+    <nav class="mainnav" aria-label="Main"><a href="index.html" aria-current="page"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M12 3 3 7.5l9 4.5 9-4.5z"/><path d="M12 3 3 7.5l9 4.5 9-4.5z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg><span class="navtext">Images</span></a><a href="catalog.html"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect class="duo" x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg><span class="navtext">Catalog</span></a><a href="builds.html"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M4 15h16v5H4z"/><path d="M4 15h16v5H4z"/><path d="M7 15V9h10v6"/><path d="M9.5 9V4h5v5"/></svg><span class="navtext">Builds</span><span class="count" title="1 build running">1</span></a></nav>
+    <div class="envbar" aria-label="Connections"><span class="env-item"><span class="dot " aria-hidden="true"></span><span><span class="env-label">Registry</span> <span class="only-a">·</span> registry.example.com/team/lupetto</span></span><span class="env-item"><span class="dot " aria-hidden="true"></span><span><span class="env-label">Docker</span> <span class="only-a">·</span> Connected</span></span><span class="env-item"><span class="dot " aria-hidden="true"></span><span><span class="env-label">Builds</span> <span class="only-a">·</span> Enabled</span></span></div>
+  </div>
+</header>
+<div class="main-col">
+<main id="main" class="content">
+<div class="banner info"><svg class="i i-lg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5" stroke-dasharray="38 16"/><path d="M12 8v4l2.5 1.5"/></svg><div class="body">
+  <p><strong>Building nginx 1.30 (1.30.2-r0)</strong> — publishing to the registry. One build runs at a time; other builds can start when it finishes.</p>
+  <div class="actions"><a class="btn small" href="build-20261001-210214-nginx-stable.html">View progress</a></div></div></div><div class="banner ok flash" data-flash="tracked" hidden role="status"><svg class="i i-lg" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle class="duo" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.8 2.8L16.3 9.5"/></svg><div class="body"><p><strong>Now tracking <span data-flash-text></span>.</strong> Its status appears after the next check (about a minute).</p></div></div>
+<div class="page-head">
+  <div class="titles"><h1>Images</h1><p class="lede">5 products · 8 tracked versions · comparing <span class="mono">registry.example.com/team/lupetto</span> with the Wolfi index</p></div>
+  <div class="actions"><a class="btn primary" href="track.html" data-opens="track-dialog"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>Track a product</a></div>
+</div>
+<div class="summary-strip">
+  <a href="index-building.html?show=action"><span class="ico v-update"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle class="duo" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><path d="M12 16.5v-9M8 11l4-4 4 4"/></svg></span><span><span class="n">5</span><br><span class="t">need action</span></span></a>
+  <a href="index-building.html?show=current"><span class="ico v-ok"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle class="duo" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.8 2.8L16.3 9.5"/></svg></span><span><span class="n">3</span><br><span class="t">up to date</span></span></a>
+  <a href="index-building.html?show=notbuilt"><span class="ico v-notbuilt"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5" stroke-dasharray="3.2 3"/><path d="M12 8.5v7M8.5 12h7"/></svg></span><span><span class="n">2</span><br><span class="t">not in registry</span></span></a>
+  <a href="image-postgresql-vulns-17.html"><span class="ico sev-critical"><svg class="i only-a" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 1.5h8L22.5 8v8L16 22.5H8L1.5 16V8z"/></svg><svg class="i only-b" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="1" y="14" width="4.5" height="8"/><rect x="7" y="10" width="4.5" height="12"/><rect x="13" y="6" width="4.5" height="16"/><rect x="19" y="2" width="4.5" height="20"/></svg></span><span><span class="n">2</span><br><span class="t">images missing critical fixes</span></span></a>
+</div>
+<form class="toolbar" method="get" action="index-building.html" role="search" data-filter-form>
+  <label class="search"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><span class="sr-only">Search images</span><input type="search" name="q" placeholder="Search images or packages"></label>
+  <fieldset class="segmented" aria-label="Show"><legend class="sr-only">Show</legend>
+    <label><input type="radio" name="show" value="all" checked>All <span class="n">8</span></label>
+    <label><input type="radio" name="show" value="action">Needs action <span class="n">5</span></label>
+    <label><input type="radio" name="show" value="current">Up to date <span class="n">3</span></label>
+    <label><input type="radio" name="show" value="notbuilt">Not in registry <span class="n">2</span></label>
+  </fieldset>
+  <noscript><button class="btn small" type="submit">Apply</button></noscript>
+</form>
+<ul class="products" data-filter-scope><li class="product" data-filter-item data-search="postgresql A sophisticated object-relational DBMS postgresql-17 postgresql-16">
+  <div class="product-head">
+    <span class="pmark" aria-hidden="true">Pg</span>
+    <div><h2><a href="image-postgresql.html">postgresql</a></h2><p class="desc">A sophisticated object-relational DBMS</p></div>
+    <span class="meta">2 tracked versions · <a href="image-postgresql.html">Details</a></span>
+  </div>
+  <table class="tracks stackable">
+    <thead><tr><th scope="col">Version</th><th scope="col">Registry</th><th scope="col">Local</th><th scope="col">Latest in Wolfi</th><th scope="col">Missing fixes</th><th scope="col">Verdict</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead>
+    <tbody><tr data-filter-row data-tags="action">
+  <td class="lead" data-label="Version"><span class="sel">17</span><span class="sel-sub">postgresql-17</span></td>
+  <td data-label="Registry"><span class="where-line"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect class="duo" x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="13" width="17" height="7" rx="1.5"/><path d="M7.5 7.5h.01M7.5 16.5h.01"/></svg><span class="ver">17.9-r6</span></span><span class="verdict-sub">4 weeks ago · +1 older</span></td>
+  <td data-label="Local"><span class="where-line"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M4.5 5h15v10.5h-15z"/><path d="M4.5 5h15v10.5h-15z"/><path d="M2 19h20"/></svg><span class="ver">17.10-r0</span></span><span class="verdict-sub">in Docker · 1 week ago</span></td>
+  <td data-label="Latest in Wolfi"><span class="ver">17.10-r1</span></td>
+  <td class="wide" data-label="Missing fixes"><span class="sevset"><span class="sev sev-critical" title="1 critical"><svg class="i only-a" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 1.5h8L22.5 8v8L16 22.5H8L1.5 16V8z"/></svg><svg class="i only-b" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="1" y="14" width="4.5" height="8"/><rect x="7" y="10" width="4.5" height="12"/><rect x="13" y="6" width="4.5" height="16"/><rect x="19" y="2" width="4.5" height="20"/></svg>1<span aria-hidden="true">&nbsp;Crit</span><span class="sr-only"> critical</span></span><span class="sev sev-high" title="2 high"><svg class="i only-a" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 1.5 23 21.5H1z"/></svg><svg class="i only-b" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="1" y="14" width="4.5" height="8"/><rect x="7" y="10" width="4.5" height="12"/><rect x="13" y="6" width="4.5" height="16"/><rect class="hole" x="19" y="2" width="4.5" height="20"/></svg>2<span aria-hidden="true">&nbsp;High</span><span class="sr-only"> high</span></span><span class="sev sev-medium" title="4 medium"><svg class="i only-a" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 1 23 12 12 23 1 12z"/></svg><svg class="i only-b" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="1" y="14" width="4.5" height="8"/><rect x="7" y="10" width="4.5" height="12"/><rect class="hole" x="13" y="6" width="4.5" height="16"/><rect class="hole" x="19" y="2" width="4.5" height="20"/></svg>4<span aria-hidden="true">&nbsp;Med</span><span class="sr-only"> medium</span></span><span class="sev sev-low" title="1 low"><svg class="i only-a" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9.5"/></svg><svg class="i only-b" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="1" y="14" width="4.5" height="8"/><rect class="hole" x="7" y="10" width="4.5" height="12"/><rect class="hole" x="13" y="6" width="4.5" height="16"/><rect class="hole" x="19" y="2" width="4.5" height="20"/></svg>1<span aria-hidden="true">&nbsp;Low</span><span class="sr-only"> low</span></span><span class="sev sev-unknown" title="1 unknown"><svg class="i only-a" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle class="hole" cx="12" cy="12" r="8.5"/><path d="M10.6 15.8h2.8v2.8h-2.8zM9 9.2a3 3 0 0 1 6 .2c0 2-2.6 2.3-2.6 4.6h-2.6c0-3 2.6-3.2 2.6-4.6a.4.4 0 0 0-.8 0z"/></svg><svg class="i only-b" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect class="hole" x="1" y="14" width="4.5" height="8"/><rect class="hole" x="7" y="10" width="4.5" height="12"/><rect class="hole" x="13" y="6" width="4.5" height="16"/><rect class="hole" x="19" y="2" width="4.5" height="20"/></svg>1<span aria-hidden="true">&nbsp;Unk</span><span class="sr-only"> unknown</span></span></span></td>
+  <td class="wide" data-label="Verdict"><span class="verdict v-update"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle class="duo" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><path d="M12 16.5v-9M8 11l4-4 4 4"/></svg>Update available</span><span class="verdict-sub">17.9-r6 → 17.10-r1</span></td>
+  <td class="action" data-label=""><a class="btn primary" role="link" aria-disabled="true" title="Another build is running"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M4 15h16v5H4z"/><path d="M4 15h16v5H4z"/><path d="M7 15V9h10v6"/><path d="M9.5 9V4h5v5"/></svg>Build 17.10-r1</a><span class="btn-note">Another build is running</span></td>
+</tr><tr data-filter-row data-tags="current">
+  <td class="lead" data-label="Version"><span class="sel">16</span><span class="sel-sub">postgresql-16</span></td>
+  <td data-label="Registry"><span class="where-line"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect class="duo" x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="13" width="17" height="7" rx="1.5"/><path d="M7.5 7.5h.01M7.5 16.5h.01"/></svg><span class="ver">16.14-r1</span></span><span class="verdict-sub">9 days ago</span></td>
+  <td data-label="Local"><span class="where-line"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M4.5 5h15v10.5h-15z"/><path d="M4.5 5h15v10.5h-15z"/><path d="M2 19h20"/></svg><span class="ver">16.13-r7</span></span><span class="verdict-sub">in Docker · 6 weeks ago</span></td>
+  <td data-label="Latest in Wolfi"><span class="ver">16.14-r1</span></td>
+  <td class="wide" data-label="Missing fixes"><span class="sevset"><span class="none">None found</span></span></td>
+  <td class="wide" data-label="Verdict"><span class="verdict v-ok"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle class="duo" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.8 2.8L16.3 9.5"/></svg>Up to date</span><span class="verdict-sub">16.14-r1</span></td>
+  <td class="action" data-label=""><a class="btn quiet" href="image-postgresql.html" >Details</a></td>
+</tr></tbody>
+  </table>
+</li><li class="product" data-filter-item data-search="nginx HTTP and reverse proxy server (stable) nginx-stable">
+  <div class="product-head">
+    <span class="pmark" aria-hidden="true">Nx</span>
+    <div><h2><a href="image-nginx.html">nginx</a></h2><p class="desc">HTTP and reverse proxy server (stable)</p></div>
+    <span class="meta">1 tracked version · <a href="image-nginx.html">Details</a></span>
+  </div>
+  <table class="tracks stackable">
+    <thead><tr><th scope="col">Version</th><th scope="col">Registry</th><th scope="col">Local</th><th scope="col">Latest in Wolfi</th><th scope="col">Missing fixes</th><th scope="col">Verdict</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead>
+    <tbody><tr data-filter-row data-tags="action">
+  <td class="lead" data-label="Version"><span class="sel">1.30</span><span class="sel-sub">nginx-stable</span></td>
+  <td data-label="Registry"><span class="where-line"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect class="duo" x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="13" width="17" height="7" rx="1.5"/><path d="M7.5 7.5h.01M7.5 16.5h.01"/></svg><span class="ver">1.30.2-r0</span></span><span class="verdict-sub">3 weeks ago · +1 older</span></td>
+  <td data-label="Local"><span class="where-line"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M4.5 5h15v10.5h-15z"/><path d="M4.5 5h15v10.5h-15z"/><path d="M2 19h20"/></svg><span class="none">None</span></span></td>
+  <td data-label="Latest in Wolfi"><span class="ver">1.30.2-r0</span></td>
+  <td class="wide" data-label="Missing fixes"><span class="sevset"><span class="sev sev-critical" title="1 critical"><svg class="i only-a" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 1.5h8L22.5 8v8L16 22.5H8L1.5 16V8z"/></svg><svg class="i only-b" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="1" y="14" width="4.5" height="8"/><rect x="7" y="10" width="4.5" height="12"/><rect x="13" y="6" width="4.5" height="16"/><rect x="19" y="2" width="4.5" height="20"/></svg>1<span aria-hidden="true">&nbsp;Crit</span><span class="sr-only"> critical</span></span><span class="sev sev-high" title="1 high"><svg class="i only-a" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 1.5 23 21.5H1z"/></svg><svg class="i only-b" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="1" y="14" width="4.5" height="8"/><rect x="7" y="10" width="4.5" height="12"/><rect x="13" y="6" width="4.5" height="16"/><rect class="hole" x="19" y="2" width="4.5" height="20"/></svg>1<span aria-hidden="true">&nbsp;High</span><span class="sr-only"> high</span></span></span></td>
+  <td class="wide" data-label="Verdict"><span class="verdict v-rebuild"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19.5 11A7.5 7.5 0 0 0 6 6.6L4.5 8"/><path d="M4.5 4v4h4"/><path d="M4.5 13A7.5 7.5 0 0 0 18 17.4l1.5-1.4"/><path d="M19.5 20v-4h-4"/></svg>Rebuild for fixes</span><span class="verdict-sub">1.30.2-r0 · 2 fixes</span></td>
+  <td class="action" data-label=""><a class="btn" href="build-20261001-210214-nginx-stable.html" ><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5" stroke-dasharray="38 16"/><path d="M12 8v4l2.5 1.5"/></svg>Building · Publish</a></td>
+</tr></tbody>
+  </table>
+</li><li class="product" data-filter-item data-search="valkey Advanced key-value store valkey-9.1 —">
+  <div class="product-head">
+    <span class="pmark" aria-hidden="true">Vk</span>
+    <div><h2><a href="image-valkey.html">valkey</a></h2><p class="desc">Advanced key-value store</p></div>
+    <span class="meta">2 tracked versions · <a href="image-valkey.html">Details</a></span>
+  </div>
+  <table class="tracks stackable">
+    <thead><tr><th scope="col">Version</th><th scope="col">Registry</th><th scope="col">Local</th><th scope="col">Latest in Wolfi</th><th scope="col">Missing fixes</th><th scope="col">Verdict</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead>
+    <tbody><tr data-filter-row data-tags="action notbuilt">
+  <td class="lead" data-label="Version"><span class="sel">9.1</span><span class="sel-sub">valkey-9.1</span></td>
+  <td data-label="Registry"><span class="where-line"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect class="duo" x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="13" width="17" height="7" rx="1.5"/><path d="M7.5 7.5h.01M7.5 16.5h.01"/></svg><span class="none">Not in registry</span></span></td>
+  <td data-label="Local"><span class="where-line"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M4.5 5h15v10.5h-15z"/><path d="M4.5 5h15v10.5h-15z"/><path d="M2 19h20"/></svg><span class="ver">9.1.2-r2</span></span><span class="verdict-sub">in Docker · yesterday</span></td>
+  <td data-label="Latest in Wolfi"><span class="ver">9.1.2-r2</span></td>
+  <td class="wide" data-label="Missing fixes"><span class="sevset"><span class="none">No registry image</span></span></td>
+  <td class="wide" data-label="Verdict"><span class="verdict v-local"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 10.5a3.75 3.75 0 0 1-.5 7.5"/><path d="M12 12.5v8M9 15.5l3-3 3 3"/></svg>Not published</span><span class="verdict-sub">Local 9.1.2-r2</span></td>
+  <td class="action" data-label=""><a class="btn primary" role="link" aria-disabled="true" title="Another build is running"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 10.5a3.75 3.75 0 0 1-.5 7.5"/><path d="M12 12.5v8M9 15.5l3-3 3 3"/></svg>Build &amp; publish</a><span class="btn-note">Another build is running</span></td>
+</tr><tr data-filter-row data-tags="action">
+  <td class="lead" data-label="Version"><span class="sel">9.2</span><span class="sel-sub">—</span></td>
+  <td data-label="Registry"><span class="where-line"><span class="none">—</span></span></td>
+  <td data-label="Local"><span class="where-line"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M4.5 5h15v10.5h-15z"/><path d="M4.5 5h15v10.5h-15z"/><path d="M2 19h20"/></svg><span class="none">None</span></span></td>
+  <td data-label="Latest in Wolfi"><span class="muted">—</span></td>
+  <td class="wide" data-label="Missing fixes"><span class="sevset"><span class="none">No registry image</span></span></td>
+  <td class="wide" data-label="Verdict"><span class="verdict v-error"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M12 3.5 2.5 20h19z"/><path d="M12 3.5 2.5 20h19z"/><path d="M12 10v4.5M12 17.3v.2"/></svg>Version not found</span><span class="verdict-sub">No match in index</span></td>
+  <td class="action" data-label=""><a class="btn" href="track.html" ><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>Edit tracking</a></td>
+</tr></tbody>
+  </table>
+</li><li class="product" data-filter-item data-search="busybox-static Swiss-army knife for embedded systems (static) busybox-static">
+  <div class="product-head">
+    <span class="pmark" aria-hidden="true">Bb</span>
+    <div><h2><a href="image-busybox-static.html">busybox-static</a></h2><p class="desc">Swiss-army knife for embedded systems (static)</p></div>
+    <span class="meta">1 tracked version · <a href="image-busybox-static.html">Details</a></span>
+  </div>
+  <table class="tracks stackable">
+    <thead><tr><th scope="col">Version</th><th scope="col">Registry</th><th scope="col">Local</th><th scope="col">Latest in Wolfi</th><th scope="col">Missing fixes</th><th scope="col">Verdict</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead>
+    <tbody><tr data-filter-row data-tags="action notbuilt">
+  <td class="lead" data-label="Version"><span class="sel">1</span><span class="sel-sub">busybox-static</span></td>
+  <td data-label="Registry"><span class="where-line"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect class="duo" x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="13" width="17" height="7" rx="1.5"/><path d="M7.5 7.5h.01M7.5 16.5h.01"/></svg><span class="none">Not in registry</span></span></td>
+  <td data-label="Local"><span class="where-line"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M4.5 5h15v10.5h-15z"/><path d="M4.5 5h15v10.5h-15z"/><path d="M2 19h20"/></svg><span class="none">None</span></span></td>
+  <td data-label="Latest in Wolfi"><span class="ver">1.38.0-r2</span></td>
+  <td class="wide" data-label="Missing fixes"><span class="sevset"><span class="none">No registry image</span></span></td>
+  <td class="wide" data-label="Verdict"><span class="verdict v-notbuilt"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5" stroke-dasharray="3.2 3"/><path d="M12 8.5v7M8.5 12h7"/></svg>Not built</span><span class="verdict-sub warn">Last attempt failed 2 days ago</span></td>
+  <td class="action" data-label=""><a class="btn primary" role="link" aria-disabled="true" title="Another build is running"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M4 15h16v5H4z"/><path d="M4 15h16v5H4z"/><path d="M7 15V9h10v6"/><path d="M9.5 9V4h5v5"/></svg>Build 1.38.0-r2</a><span class="btn-note">Another build is running</span></td>
+</tr></tbody>
+  </table>
+</li><li class="product" data-filter-item data-search="openssl The OpenSSL cryptography suite openssl openssl">
+  <div class="product-head">
+    <span class="pmark" aria-hidden="true">Ssl</span>
+    <div><h2><a href="image-openssl.html">openssl</a></h2><p class="desc">The OpenSSL cryptography suite</p></div>
+    <span class="meta">2 tracked versions · <a href="image-openssl.html">Details</a></span>
+  </div>
+  <table class="tracks stackable">
+    <thead><tr><th scope="col">Version</th><th scope="col">Registry</th><th scope="col">Local</th><th scope="col">Latest in Wolfi</th><th scope="col">Missing fixes</th><th scope="col">Verdict</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead>
+    <tbody><tr data-filter-row data-tags="current">
+  <td class="lead" data-label="Version"><span class="sel">3.6</span><span class="sel-sub">openssl</span></td>
+  <td data-label="Registry"><span class="where-line"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect class="duo" x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="13" width="17" height="7" rx="1.5"/><path d="M7.5 7.5h.01M7.5 16.5h.01"/></svg><span class="ver">3.6.5-r1</span></span><span class="verdict-sub">yesterday · +1 older</span></td>
+  <td data-label="Local"><span class="where-line"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M4.5 5h15v10.5h-15z"/><path d="M4.5 5h15v10.5h-15z"/><path d="M2 19h20"/></svg><span class="none">None</span></span></td>
+  <td data-label="Latest in Wolfi"><span class="ver">3.6.5-r1</span></td>
+  <td class="wide" data-label="Missing fixes"><span class="sevset"><span class="none">None found</span></span></td>
+  <td class="wide" data-label="Verdict"><span class="verdict v-ok"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle class="duo" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.8 2.8L16.3 9.5"/></svg>Up to date</span><span class="verdict-sub warn">Last build not signed</span></td>
+  <td class="action" data-label=""><a class="btn quiet" href="build-20260930-184410-openssl.html" >View build</a></td>
+</tr><tr data-filter-row data-tags="current">
+  <td class="lead" data-label="Version"><span class="sel">3.5</span><span class="sel-sub">openssl</span></td>
+  <td data-label="Registry"><span class="where-line"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect class="duo" x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="13" width="17" height="7" rx="1.5"/><path d="M7.5 7.5h.01M7.5 16.5h.01"/></svg><span class="ver">3.5.4-r0</span></span><span class="verdict-sub">11 days ago</span></td>
+  <td data-label="Local"><span class="where-line"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M4.5 5h15v10.5h-15z"/><path d="M4.5 5h15v10.5h-15z"/><path d="M2 19h20"/></svg><span class="none">None</span></span></td>
+  <td data-label="Latest in Wolfi"><span class="ver">3.5.4-r0</span></td>
+  <td class="wide" data-label="Missing fixes"><span class="sevset"><span class="none">None found</span><span class="extra"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M12 3.5 2.5 20h19z"/><path d="M12 3.5 2.5 20h19z"/><path d="M12 10v4.5M12 17.3v.2"/></svg>8 need another version</span></span></td>
+  <td class="wide" data-label="Verdict"><span class="verdict v-ok"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle class="duo" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.8 2.8L16.3 9.5"/></svg>Up to date</span><span class="verdict-sub warn">8 fixes need 3.6</span></td>
+  <td class="action" data-label=""><a class="btn quiet" href="image-openssl-vulns-3.5.html" >Review fixes</a></td>
+</tr></tbody>
+  </table>
+</li></ul>
+<div class="empty small-empty" data-filter-empty hidden><h2>No images match</h2><p>Try a different search or filter.</p><div class="actions"><a class="btn" href="index-building.html">Clear filters</a></div></div>
+<div class="stack after-list" id="about"><details class="datanote" id="about-data">
+  <summary><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle class="duo" cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.8v.2"/></svg><span><strong>About this security data.</strong> Fixes come from Wolfi’s public security feed. It isn’t a full vulnerability scan.</span><span class="more"><span class="open-l">What this means</span><span class="close-l">Hide</span></span></summary>
+  <div class="note-body">
+    <ul>
+      <li><strong>Fixed issues only.</strong> Lupetto lists advisories that Wolfi has already fixed in a newer package. Issues without a fix yet are not listed, so “none found” does not mean “no vulnerabilities”.</li>
+      <li><strong>Wolfi packages only.</strong> Software added outside Wolfi packages is not covered.</li>
+      <li><strong>The feed is not signed.</strong> It is fetched over HTTPS from packages.wolfi.dev (unlike the package index, whose signature is verified).</li>
+      <li><strong>Severity</strong> comes from NVD (CVSS) or GitHub/OSV advisories. Newly published advisories may show <em>Unknown</em> until they are scored; severity never changes a verdict.</li>
+      <li><strong>1 feed entry could not be evaluated</strong> because its version is malformed (<span class="mono">opa-envoy 1.1.0-r1-r0</span>). It affects none of your images.</li>
+    </ul>
+  </div>
+</details></div>
+</main>
+<footer class="foot">
+  <span>Status checked 21:00 UTC (4 min ago) · <a href="index-building.html">Check now</a></span>
+  <span>Wolfi index <span class="mono">bad5600da4ee</span> · signature verified</span>
+  <span>Security feed <span class="mono">163ee313794e</span> · fetched 20:58 UTC</span>
+  <span>x86_64 · Lupetto CLI 0.6 (sample)</span>
+</footer>
+</div>
+</div>
+<dialog id="track-dialog" aria-labelledby="track-title"><div class="sheet-head dialog-head">
+    <div><h2 id="track-title">Track a product</h2><p class="muted small">Lupetto will watch these versions and tell you when to build, update, or rebuild.</p></div>
+    <a class="iconbtn" href="index.html" data-closes aria-label="Close"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/></svg></a>
+  </div>
+  <form method="get" action="index.html">
+  <div class="sheet-body">
+    <div class="field">
+      <label for="track-package-d">Wolfi package</label>
+      <input class="input" id="track-package-d" name="package" value="postgresql" list="pkg-suggest" autocomplete="off">
+      <datalist id="pkg-suggest"><option value="postgresql"><option value="nginx"><option value="valkey"><option value="redis-operator"><option value="caddy"><option value="haproxy"><option value="traefik"></datalist>
+      <span class="help">A package name or a provider, as listed in the <a href="catalog.html">catalog</a>.</span>
+    </div>
+    <fieldset class="field">
+      <legend>Versions to track</legend>
+      <div class="choice-list"><label class="choice"><input type="checkbox" name="selector" value="18" checked>
+  <span class="main">postgresql 18</span><span class="side"><span class="ver">18.6-r4</span><br>Newest major</span>
+  <span class="sub mono">postgresql-18</span></label><label class="choice"><input type="checkbox" name="selector" value="17" checked disabled>
+  <span class="main">postgresql 17</span><span class="side"><span class="ver">17.10-r1</span><br>Already tracked</span>
+  <span class="sub mono">postgresql-17</span></label><label class="choice"><input type="checkbox" name="selector" value="16" checked disabled>
+  <span class="main">postgresql 16</span><span class="side"><span class="ver">16.14-r1</span><br>Already tracked</span>
+  <span class="sub mono">postgresql-16</span></label><label class="choice"><input type="checkbox" name="selector" value="15">
+  <span class="main">postgresql 15</span><span class="side"><span class="ver">15.6-r5</span><br>Only 1 release in the index</span>
+  <span class="sub mono">postgresql-15</span></label><label class="choice"><input type="checkbox" name="selector" value="14">
+  <span class="main">postgresql 14</span><span class="side"><span class="ver">14.11-r6</span><br>Only 1 release in the index</span>
+  <span class="sub mono">postgresql-14</span></label></div>
+    </fieldset>
+    <div class="field">
+      <label for="track-custom-d">Or a more specific version <span class="muted">(optional)</span></label>
+      <input class="input mono" id="track-custom-d" name="custom" placeholder="e.g. 17.10" inputmode="decimal">
+      <span class="help">Lupetto always builds the newest release matching what you enter: “17” follows every 17.x, “17.10” stays on 17.10.x.</span>
+    </div>
+    <div class="preview" aria-live="polite"><strong>Will add</strong><ul><li>postgresql <strong>18</strong> → <span class="mono">postgresql-18 18.6-r4</span> (not built yet)</li></ul></div>
+  </div>
+  <div class="sheet-foot">
+    <span class="left">Saved to products.yaml on the server.</span>
+    <a class="btn" href="index.html" data-closes>Cancel</a>
+    <button class="btn primary" type="submit" name="tracked" value="postgresql 18"><svg class="i " viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="duo" d="M6.5 3.5h11v17L12 16.5l-5.5 4z"/><path d="M6.5 3.5h11v17L12 16.5l-5.5 4z"/><path d="M12 7v6M9 10h6"/></svg>Track 1 version</button>
+  </div>
+  </form></dialog>
+</body>
+</html>
