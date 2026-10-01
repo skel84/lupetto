@@ -101,6 +101,16 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 - [x] Implement the dashboard pages (overview, track detail, package browser, jobs) and verify them in a real browser against a real status/build run. Embedded `html/template` pages plus one CSS and one progressive-enhancement JS file under `internal/explorer/web/`; the real browser exposed that `Referrer-Policy: no-referrer` made Chromium send `Origin: null` on every form POST (rejected), so the server now sends `same-origin` and still rejects `Origin: null`. In headless Chromium against real binaries and an owned loopback `registry:3`: UI-triggered `busybox-static` builds streamed live logs to `succeeded` records and status auto-refreshed to `current` with the published digest; an exact `openssl@3.6.1-r0` build from the package page made track `openssl 3.6` `update-available` with 3 outdated APKs and 5 reachable missing-fix groups linked to NVD/GitHub; a running `valkey 9.1` build was canceled from the UI; builds-disabled mode hid every build/cancel control and a direct POST got 403; no CSP violations on any page (positive control detected). Template rendering tests cover all six pages. See [UI checkpoint evidence](verification.md#explorer-dashboard-ui-checkpoint-4).
 - [x] Build one non-root container image with `lupetto`, `lupetto-explorer`, apko 1.4.5, Cosign v3.1.3; verify that an unprivileged in-container build publishes to an isolated registry and the dashboard shows it. `docker build --platform linux/amd64 -f Containerfile` succeeded with digest-pinned Wolfi/Go bases, exact `apko=1.4.5-r0` and SHA-256-verified upstream Cosign. UID/GID 65532, `--cap-drop=ALL`, `no-new-privileges`, no Docker socket/daemon: CLI `busybox-static 1 --no-load --json` published with verified readback and `status --json` reported `current`; a CSRF/Origin-protected dashboard POST built successfully and automatically refreshed to the same published digest. Default builds-disabled POST returned 403 and `/healthz` returned 200. The CLI now accepts only exact apko `1.4.5` / `v1.4.5` release spellings (Wolfi uses the latter); focused regression passed. See [container evidence and limitations](verification.md#combined-container-checkpoint-5).
 
+**Redesign round** ([decision](decisions.md#dashboard-redesign-and-local-inventory-user-approved-2026-10-01)):
+
+- [ ] Clickable mockup with two visual directions; user picks one.
+- [ ] `lupetto products list|add|remove`.
+- [ ] `lupetto images --json` (build history + local Docker).
+- [ ] `lupetto inspect --json` for registry image package sets.
+- [ ] Advisory severity in status document version 2.
+- [ ] Explorer backend for the new information architecture (tabs, compare, tracking edits, persistent build history, SBOM download for local builds).
+- [ ] Rebuilt UI in the chosen direction, verified in a real browser; container updated (writable products directory, optional Docker socket + CLI).
+
 ### 4. Add Explorer as an optional application
 
 - [ ] Decide Explorer product/repository/module packaging without introducing a CLI dependency on Explorer.

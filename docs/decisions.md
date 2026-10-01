@@ -204,6 +204,29 @@ Advisory-ID handling (review correction): evaluate `CVE-YYYY-NNNN`, `GHSA-xxxx-x
 
 **Deferred.** Tekton task/PipelineRun execution, multi-architecture images, a database, multi-user authentication, unfixed-vulnerability scanning, and image deletion/retention.
 
+## Dashboard redesign and local inventory (user-approved 2026-10-01)
+
+The user rejected the first dashboard UI as basic and organized around the CLI's data rather than operator tasks. They approved: Chainguard-console-like functionality with a **distinct visual identity**; showing **local images** (images in local Docker **and** Lupetto's own build history); managing tracked products from the UI; and **severity** for security advisories. This amends the [registry-comparison dashboard](#registry-comparison-dashboard-user-approved-2026-10-01); its CLI-only boundary, HTTP safety, and single-build rules still apply.
+
+**Process.** A clickable static mockup of the main screens, using realistic data, is reviewed by the user before the UI is rebuilt. The mockup offers two distinct visual directions; the user picks one.
+
+**Information architecture** (task-oriented, Chainguard-console-like):
+
+- *Images* (home): one entry per tracked product, versions grouped under it; for each: what exists in the registry and locally, latest available, severity counts of missing fixes, one verdict, one primary action (build, update, rebuild for fixes). Search and filters.
+- *Image detail*, tabbed: overview/versions (registry and local, timeline against index versions), vulnerabilities (missing fixes with severity, package, fixed version, reachability), packages/SBOM (installed packages; SPDX download for local builds), compare (package differences between two versions), build history.
+- *Catalog*: all Wolfi packages with search; "Track" and "Build" actions.
+- *Builds*: stage progress (resolve, build, validate, load, publish, sign, attest) with the raw log behind a toggle; persistent history from build records.
+- Caveats (unsigned fixed-only feed, unevaluated entries) appear as one explained note, not repeated warnings.
+
+**New CLI facts** (the dashboard still gets everything through `lupetto … --json`):
+
+- `lupetto products list|add|remove --products <file> [--json]` owns products-file edits: validated, atomic replace in the same directory, comments preserved where the YAML library allows. The dashboard edits tracking only through this command; a read-only file yields a clear error. Containers therefore mount the products file's **directory** writable (atomic rename cannot replace a single bind-mounted file).
+- `lupetto images --json`: local inventory. Lupetto build history from retained workspace records (`result.json`/`failure.json`) in the cache directory, and Docker images that Lupetto loaded (identified by `lupetto/` references and record image IDs), each with its exact APK identity. Docker is optional: unavailable Docker is reported as such, not as "no images". In the container, Docker access requires an explicitly mounted Docker socket plus the Docker CLI; the socket grants host-root-equivalent control and is opt-in and documented as such.
+- `lupetto inspect --json <registry-digest-reference>`: installed package set of any published image (digest-addressed, cached), for the packages tab and comparisons.
+- **Severity** (status document version 2): each advisory ID gets a severity (`critical|high|medium|low|unknown`) with its source. CVEs: NVD CVSS base severity (prefer v4.0, then v3.1, v3.0, v2; primary source before secondary). GHSA and GO IDs: use a CVE alias from the same secdb entry or OSV aliases, else OSV/GitHub-advisory severity where available, else `unknown`. Results are cached by ID with a refresh interval; NVD's unauthenticated rate limit means missing severities are fetched within a time budget and filled on later refreshes; an optional `NVD_API_KEY` environment variable raises the limit and is never logged. Severity never changes state derivation; `unknown` is displayed honestly.
+
+**Deferred to a later round:** signature/attestation verification status, SBOM download from registry attestations, vulnerability trends over time, scanner-based (unfixed) vulnerabilities, end-of-life data.
+
 ## Proposed design choices
 
 | ID | Proposal | Tradeoff |
