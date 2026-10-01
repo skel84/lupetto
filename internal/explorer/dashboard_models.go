@@ -190,17 +190,20 @@ type BuildStage struct {
 	Status string `json:"status"`
 }
 type BuildItem struct {
-	ID        string       `json:"id"`
-	DetailURL string       `json:"detailURL"`
-	Package   string       `json:"package"`
-	Version   string       `json:"version"`
-	State     string       `json:"state"`
-	StartedAt time.Time    `json:"startedAt"`
-	Record    *BuildRecord `json:"record,omitempty"`
-	Error     string       `json:"error,omitempty"`
-	Stages    []BuildStage `json:"stages"`
-	Live      bool         `json:"live"`
-	SPDXURL   string       `json:"spdxURL,omitempty"`
+	ID         string       `json:"id"`
+	DetailURL  string       `json:"detailURL"`
+	Package    string       `json:"package"`
+	Version    string       `json:"version"`
+	State      string       `json:"state"`
+	StartedAt  time.Time    `json:"startedAt"`
+	Record     *BuildRecord `json:"record,omitempty"`
+	Error      string       `json:"error,omitempty"`
+	Stages     []BuildStage `json:"stages"`
+	Live       bool         `json:"live"`
+	SPDXURL    string       `json:"spdxURL,omitempty"`
+	Mode       string       `json:"mode,omitempty"`
+	Load       bool         `json:"load"`
+	LoadReason string       `json:"loadReason,omitempty"`
 }
 type TrackingView struct {
 	BaseView
@@ -233,14 +236,16 @@ type ImageSibling struct {
 	Current  bool   `json:"current"`
 }
 type ShellView struct {
-	Registry         string     `json:"registry"`
-	RegistryState    string     `json:"registryState"`
-	DockerState      string     `json:"dockerState"`
-	DockerReason     string     `json:"dockerReason"`
-	RunningBuild     *BuildItem `json:"runningBuild,omitempty"`
-	StatusComputedAt time.Time  `json:"statusComputedAt"`
-	StatusRefreshing bool       `json:"statusRefreshing"`
-	IndexSHA256      string     `json:"indexSHA256"`
-	FeedSHA256       string     `json:"feedSHA256"`
-	Architecture     string     `json:"architecture"`
+	Registry          string     `json:"registry"`
+	RegistryState     string     `json:"registryState"`
+	DockerState       string     `json:"dockerState"`
+	DockerReason      string     `json:"dockerReason"`
+	PublishLoad       bool       `json:"publishLoad"`
+	PublishLoadReason string     `json:"publishLoadReason"`
+	RunningBuild      *BuildItem `json:"runningBuild,omitempty"`
+	StatusComputedAt  time.Time  `json:"statusComputedAt"`
+	StatusRefreshing  bool       `json:"statusRefreshing"`
+	IndexSHA256       string     `json:"indexSHA256"`
+	FeedSHA256        string     `json:"feedSHA256"`
+	Architecture      string     `json:"architecture"`
 }

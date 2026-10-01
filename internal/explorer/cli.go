@@ -54,7 +54,7 @@ func buildArgs(request BuildRequest) []string {
 	} else {
 		args = append(args, "--apk-version", request.APKVersion)
 	}
-	if request.Mode != "local" {
+	if request.Mode != "local" && !request.Load {
 		args = append(args, "--no-load")
 	}
 	return append(args, "--json")
@@ -249,10 +249,10 @@ func (b *logBuffer) Write(p []byte) (int, error) {
 	}
 	return n, nil
 }
-func (b *logBuffer) stages(mode string) []BuildStage {
+func (b *logBuffer) stages(request BuildRequest) []BuildStage {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return liveStagesAt(b.stage, mode)
+	return liveStagesAt(b.stage, request)
 }
 func (b *logBuffer) chunk(offset int64) LogChunk {
 	b.mu.Lock()

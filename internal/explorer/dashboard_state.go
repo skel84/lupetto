@@ -27,6 +27,20 @@ func (d *dashboardState) inventorySnapshot() InventoryView {
 	return d.inventory
 }
 
+func publishLoadDecision(inventory InventoryView) (bool, string) {
+	if inventory.Document == nil {
+		return false, "Docker availability is unknown"
+	}
+	if inventory.Document.Docker.Available {
+		return true, ""
+	}
+	reason := inventory.Document.Docker.Reason
+	if reason == "" {
+		reason = "Docker is unavailable"
+	}
+	return false, reason
+}
+
 func buildID(b InventoryBuild) string {
 	sum := sha256.Sum256([]byte(b.RecordPath))
 	return "record-" + hex.EncodeToString(sum[:12])
@@ -39,6 +53,12 @@ func buildItem(b InventoryBuild) BuildItem {
 	}
 	if b.Record != nil {
 		item.Package = b.Record.Request.Package
+		item.Load = b.Record.Request.Load
+		if b.Record.Request.Publish {
+			item.Mode = "publish"
+		} else if item.Load {
+			item.Mode = "local"
+		}
 		item.State = b.Record.Outcome
 		if b.Record.Selection != nil {
 			item.Package = b.Record.Selection.Package
@@ -97,10 +117,11 @@ func buildStages(record *BuildRecord, running bool) []BuildStage {
 }
 func liveItem(job JobView) BuildItem {
 	item := BuildItem{ID: job.ID, DetailURL: "/builds/" + job.ID, Package: job.Request.Package, Version: job.Request.APKVersion, State: job.State, StartedAt: job.StartedAt, Record: job.Record, Error: job.Error, Live: true, Stages: buildStages(job.Record, job.State == "running")}
+	item.Mode, item.Load, item.LoadReason = job.Request.Mode, job.Request.Load, job.Request.LoadReason
 	if job.State == "running" {
 		item.Stages = job.Progress
 		if len(item.Stages) != 7 {
-			item.Stages = liveStages("", job.Request.Mode)
+			item.Stages = liveStages("", job.Request)
 		}
 	}
 	if job.Record != nil && job.Record.Selection != nil {
@@ -317,8 +338,8 @@ func diffPackages(before, after []PackageIdentity) []PackageChange {
 	return changes
 }
 
-func liveStages(log, mode string) []BuildStage {
-	return liveStagesAt(livePhase(log), mode)
+func liveStages(log string, request BuildRequest) []BuildStage {
+	return liveStagesAt(livePhase(log), request)
 }
 func livePhase(log string) int {
 	active := 0
@@ -340,16 +361,17 @@ func livePhase(log string) int {
 	}
 	return active
 }
-func liveStagesAt(active int, mode string) []BuildStage {
+func liveStagesAt(active int, request BuildRequest) []BuildStage {
 	stages := buildStages(nil, true)
 	for i := range stages {
 		if stages[i].Status == "not-attempted" {
 			stages[i].Status = "pending"
 		}
 	}
-	if mode != "local" {
+	if !request.Load {
 		stages[3].Status = "skipped"
-	} else {
+	}
+	if request.Mode == "local" {
 		stages[4].Status = "skipped"
 		stages[5].Status = "skipped"
 		stages[6].Status = "skipped"
@@ -359,6 +381,8 @@ func liveStagesAt(active int, mode string) []BuildStage {
 			stages[i].Status = "completed"
 		}
 	}
-	stages[active].Status = "running"
+	if stages[active].Status != "skipped" {
+		stages[active].Status = "running"
+	}
 	return stages
 }

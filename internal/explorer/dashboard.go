@@ -470,7 +470,7 @@ func (s *Server) editProducts(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) shell() ShellView {
 	status := s.status.snapshot()
-	shell := ShellView{StatusRefreshing: status.Refreshing, RegistryState: "unknown"}
+	shell := ShellView{StatusRefreshing: status.Refreshing, RegistryState: "unknown", DockerState: "unknown"}
 	if d := status.Document; d != nil {
 		shell.Registry = d.Registry + "/" + d.Repository
 		shell.StatusComputedAt = d.ComputedAt
@@ -488,7 +488,9 @@ func (s *Server) shell() ShellView {
 	if status.LastError != "" {
 		shell.RegistryState = "error"
 	}
-	inventory := s.dashboard.inventorySnapshot().Document
+	inventoryView := s.dashboard.inventorySnapshot()
+	shell.PublishLoad, shell.PublishLoadReason = publishLoadDecision(inventoryView)
+	inventory := inventoryView.Document
 	if inventory != nil {
 		shell.DockerState = "unavailable"
 		if inventory.Docker.Available {

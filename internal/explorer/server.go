@@ -413,7 +413,11 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	if !uniqueFields(w, r, "package", "selector", "apkVersion", "mode") {
 		return
 	}
-	job, err := s.jobs.start(BuildRequest{Package: oneField(r, "package"), Selector: oneField(r, "selector"), APKVersion: oneField(r, "apkVersion"), Mode: oneField(r, "mode")})
+	buildRequest := BuildRequest{Package: oneField(r, "package"), Selector: oneField(r, "selector"), APKVersion: oneField(r, "apkVersion"), Mode: oneField(r, "mode")}
+	if buildRequest.Mode == "publish" {
+		buildRequest.Load, buildRequest.LoadReason = publishLoadDecision(s.dashboard.inventorySnapshot())
+	}
+	job, err := s.jobs.start(buildRequest)
 	if err != nil {
 		code := http.StatusBadRequest
 		if errors.Is(err, ErrBuildsDisabled) {

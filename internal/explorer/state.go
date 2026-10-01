@@ -105,6 +105,9 @@ func (r *jobRunner) start(request BuildRequest) (JobView, error) {
 	if request.Mode == "publish" && (os.Getenv("LUPETTO_REGISTRY") == "" || os.Getenv("LUPETTO_REPOSITORY") == "") {
 		return JobView{}, errors.New("Build & publish requires configured LUPETTO_REGISTRY and LUPETTO_REPOSITORY; choose a local build instead")
 	}
+	if request.Mode == "local" {
+		request.Load, request.LoadReason = true, ""
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed || r.ctx.Err() != nil {
@@ -176,7 +179,7 @@ func (r *jobRunner) list() ([]JobView, bool) {
 	for i := len(r.jobs) - 1; i >= 0; i-- {
 		view := r.jobs[i].view
 		if view.State == "running" {
-			view.Progress = r.jobs[i].log.stages(view.Request.Mode)
+			view.Progress = r.jobs[i].log.stages(view.Request)
 		}
 		views = append(views, view)
 	}
@@ -201,7 +204,7 @@ func (r *jobRunner) detail(id string, offset int64) (JobView, LogChunk, bool) {
 	chunk.Done = j.view.State != "running"
 	view := j.view
 	if view.State == "running" {
-		view.Progress = j.log.stages(view.Request.Mode)
+		view.Progress = j.log.stages(view.Request)
 	}
 	return view, chunk, true
 }

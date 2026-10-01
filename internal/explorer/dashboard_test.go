@@ -277,7 +277,7 @@ func TestDashboardBuildModesStagesAndMerge(t *testing.T) {
 		log, mode string
 		active    int
 	}{{"", "publish", 0}, {"lupetto: Composing OCI image with apko", "publish", 1}, {"lupetto: Validating SPDX against apko lock", "local", 2}, {"lupetto: Pushing OCI image to registry", "publish", 4}, {"lupetto: Verifying registry manifest by digest", "publish", 4}, {"lupetto: Verifying registry tag", "publish", 4}, {"lupetto: Verifying registry config and layers", "publish", 4}} {
-		stages := liveStages(test.log, test.mode)
+		stages := liveStages(test.log, BuildRequest{Mode: test.mode, Load: test.mode == "local"})
 		if len(stages) != 7 || stages[test.active].Status != "running" {
 			t.Fatalf("stages: %+v", stages)
 		}
@@ -365,7 +365,7 @@ func TestDashboardEmptyTrackingAndLiveStagesRetained(t *testing.T) {
 	buffer := newLogBuffer(32)
 	_, _ = buffer.Write([]byte("lupetto: Composing OCI image with apko\n"))
 	_, _ = buffer.Write([]byte(strings.Repeat("x", 128)))
-	if stages := buffer.stages("local"); stages[1].Status != "running" || stages[2].Status != "pending" {
+	if stages := buffer.stages(BuildRequest{Mode: "local", Load: true}); stages[1].Status != "running" || stages[2].Status != "pending" {
 		t.Fatalf("truncation reset stages: %+v", stages)
 	}
 }
@@ -630,5 +630,196 @@ func TestDashboardProductsMutationsSerialized(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("serialized products edit stalled")
 		}
+	}
+}
+
+func TestDashboardPublishLoadDecisionAndArgs(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		inventory InventoryView
+		load      bool
+		reason    string
+	}{
+		{"available", InventoryView{Document: &ImagesDocument{Docker: DockerInventory{Available: true}}}, true, ""},
+		{"unavailable", InventoryView{Document: &ImagesDocument{Docker: DockerInventory{Reason: "Docker daemon unreachable"}}}, false, "Docker daemon unreachable"},
+		{"unknown", InventoryView{}, false, "Docker availability is unknown"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("LUPETTO_REGISTRY", "127.0.0.1:5000")
+			t.Setenv("LUPETTO_REPOSITORY", "tests/images")
+			for _, key := range []string{"LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP", "DOCKER_HOST", "DOCKER_CONFIG"} {
+				t.Setenv(key, "synthetic")
+			}
+			config := goodFake()
+			record, err := parseRecord([]byte(config.Build))
+			if err != nil {
+				t.Fatal(err)
+			}
+			record.Request.Load = test.load
+			if test.load {
+				record.Stages.Load.Status = "loaded"
+			}
+			config.Build = encodeFixture(t, record)
+			config.BuildDelay = 200
+			config.BuildEnvironment = filepath.Join(t.TempDir(), "environment.json")
+			server, _, calls := testServer(t, config, true)
+			server.dashboard.inventory = test.inventory
+			shell := server.shell()
+			if shell.PublishLoad != test.load || shell.PublishLoadReason != test.reason {
+				t.Fatalf("shell decision: %+v", shell)
+			}
+			if test.name == "unknown" && shell.DockerState != "unknown" {
+				t.Fatalf("unknown Docker state: %s", shell.DockerState)
+			}
+			form := buildForm(server)
+			form.Set("mode", "publish")
+			// Client fields must not override the inventory-derived decision.
+			form.Set("load", "true")
+			form.Set("loadReason", "caller input")
+			if w := request(server, "POST", "/builds", form); w.Code != 303 {
+				t.Fatal(w.Body.String())
+			}
+			view, _, ok := server.jobs.detail("1", 0)
+			if !ok || view.Request.Load != test.load || view.Request.LoadReason != test.reason {
+				t.Fatalf("job decision: %+v", view)
+			}
+			if got := view.Progress[3].Status; (got == "skipped") == test.load {
+				t.Fatalf("running load status: %s", got)
+			}
+			// A later inventory update must not alter a running job's decision.
+			server.dashboard.mu.Lock()
+			server.dashboard.inventory = InventoryView{Document: &ImagesDocument{Docker: DockerInventory{Available: !test.load}}}
+			server.dashboard.mu.Unlock()
+			view, _, _ = server.jobs.detail("1", 0)
+			if view.Request.Load != test.load {
+				t.Fatal("inventory update changed the job's decision")
+			}
+			eventually(t, func() bool { _, running := server.jobs.list(); return !running })
+			data, err := os.ReadFile(calls)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), "images|") {
+				t.Fatalf("POST refreshed inventory instead of reading its snapshot: %s", data)
+			}
+			argv := "build|cmd:curl|1.2|"
+			if !test.load {
+				argv += "--no-load|"
+			}
+			if !strings.Contains(string(data), argv+"--json\n") {
+				t.Fatalf("argv: %s", data)
+			}
+			data, err = os.ReadFile(config.BuildEnvironment)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var present map[string]bool
+			if err := json.Unmarshal(data, &present); err != nil {
+				t.Fatal(err)
+			}
+			for key, available := range present {
+				if !available {
+					t.Errorf("publish mode suppressed %s", key)
+				}
+			}
+			w := request(server, "GET", "/builds/1?format=json", nil)
+			var detail JobDetailView
+			if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
+				t.Fatal(err)
+			}
+			if detail.Job.Request.Load != test.load || detail.Item.Load != test.load || detail.Item.LoadReason != test.reason || detail.Item.Mode != "publish" {
+				t.Fatalf("JSON decision: %+v", detail)
+			}
+		})
+	}
+}
+
+func TestDashboardPublishLoadRunningStagesAndRecords(t *testing.T) {
+	job := JobView{State: "running", Request: BuildRequest{Mode: "publish", Load: true}}
+	if item := liveItem(job); item.Stages[3].Status != "pending" || item.Stages[4].Status != "pending" {
+		t.Fatalf("publish+load pending stages: %+v", item.Stages)
+	}
+	for _, test := range []struct {
+		log    string
+		status string
+	}{
+		{"lupetto: Loading image into Docker", "running"},
+		{"lupetto: Pushing OCI image to registry", "completed"},
+	} {
+		job.Progress = liveStages(test.log, job.Request)
+		if item := liveItem(job); item.Stages[3].Status != test.status {
+			t.Fatalf("publish+load stages: %+v", item.Stages)
+		}
+	}
+	if stages := liveStages("lupetto: Loading image into Docker", BuildRequest{Mode: "publish"}); stages[3].Status != "skipped" {
+		t.Fatalf("log marker overrode the stored no-load decision: %+v", stages)
+	}
+	record, err := parseRecord([]byte(`{"version":6,"command":"build","outcome":"succeeded","request":{"package":"busybox-static","selector":"1","load":true,"publish":true,"sign":true},"selection":{"package":"busybox-static","version":"1.38.0-r2","architecture":"x86_64"},"evidence":{"spdxValidated":true},"stages":{"build":{"status":"completed"},"load":{"status":"loaded","dockerImageID":"sha256:local"},"publication":{"status":"published","verified":true,"immutableReference":"127.0.0.1:5000/tests/busybox-static@sha256:remote"},"signing":{"status":"signed"},"attestation":{"status":"attested"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !record.Request.Load || !record.Request.Publish || !record.Request.Sign || record.Stages.Load.DockerImageID != "sha256:local" || !record.Stages.Publication.Verified {
+		t.Fatalf("load+publish+sign record: %+v", record)
+	}
+	// Finished records override live progress, including a differing request.
+	job.State, job.Record = "succeeded", record
+	job.Request.Load = false
+	item := liveItem(job)
+	want := []string{"completed", "completed", "completed", "loaded", "published", "signed", "attested"}
+	for i, stage := range item.Stages {
+		if stage.Status != want[i] {
+			t.Fatalf("record stages: %+v", item.Stages)
+		}
+	}
+	historical := buildItem(InventoryBuild{Record: record})
+	if !historical.Load || historical.Mode != "publish" {
+		t.Fatalf("historical decision: %+v", historical)
+	}
+	record.Outcome = "failed"
+	record.Failure = &RecordFailure{Stage: "Docker load"}
+	record.Stages.Load.Status = "failed"
+	record.Stages.Publication.Status = "not-attempted"
+	job.State = "failed"
+	item = liveItem(job)
+	if item.Stages[3].Status != "failed" || item.Stages[4].Status != "not-attempted" {
+		t.Fatalf("load failure mislabeled as publication: %+v", item.Stages)
+	}
+}
+
+func TestDashboardPublishLoadInvalidatesInventory(t *testing.T) {
+	t.Setenv("LUPETTO_REGISTRY", "127.0.0.1:5000")
+	t.Setenv("LUPETTO_REPOSITORY", "tests/images")
+	config := goodFake()
+	record, err := parseRecord([]byte(config.Build))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Request.Load = true
+	record.Stages.Load.Status = "loaded"
+	config.Build = encodeFixture(t, record)
+	config.Images = `{"kind":"images","version":1,"builds":[],"docker":{"available":true,"images":[]}}`
+	server, update, calls := testServer(t, config, true)
+	if view := server.inventory(context.Background()); view.Document == nil || !view.Document.Docker.Available {
+		t.Fatal("initial inventory unavailable")
+	}
+	form := buildForm(server)
+	form.Set("mode", "publish")
+	if w := request(server, "POST", "/builds", form); w.Code != 303 {
+		t.Fatal(w.Body.String())
+	}
+	eventually(t, func() bool {
+		server.dashboard.mu.Lock()
+		defer server.dashboard.mu.Unlock()
+		return server.dashboard.inventoryGeneration > 0 && server.dashboard.inventoryAt.IsZero()
+	})
+	config.Images = `{"kind":"images","version":1,"builds":[],"docker":{"available":true,"images":[{"id":"sha256:new","tags":["lupetto/busybox-static:1.38.0-r2-amd64"]}]}}`
+	update(config)
+	view := server.inventory(context.Background())
+	if view.Document == nil || len(view.Document.Docker.Images) != 1 || view.Document.Docker.Images[0].ID != "sha256:new" {
+		t.Fatalf("newly loaded image absent after invalidation: %+v", view)
+	}
+	data, _ := os.ReadFile(calls)
+	if strings.Count(string(data), "images|") != 2 {
+		t.Fatalf("inventory not re-read: %s", data)
 	}
 }

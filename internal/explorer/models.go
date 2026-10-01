@@ -113,6 +113,8 @@ type BuildRequest struct {
 	Selector   string `json:"selector"`
 	APKVersion string `json:"apkVersion"`
 	Mode       string `json:"mode,omitempty"`
+	Load       bool   `json:"load"`
+	LoadReason string `json:"loadReason,omitempty"`
 }
 type RecordSelection struct {
 	Package      string `json:"package"`
@@ -154,7 +156,6 @@ type RecordEvidence struct {
 }
 type RecordRequest struct {
 	BuildRequest
-	Load    bool `json:"load"`
 	Publish bool `json:"publish"`
 	Sign    bool `json:"sign"`
 }
