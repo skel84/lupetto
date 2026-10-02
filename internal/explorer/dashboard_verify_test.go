@@ -411,9 +411,10 @@ func TestSignatureCacheTTLAndBuildInvalidation(t *testing.T) {
 	server.invalidateSignatures(&BuildRecord{Stages: RecordStages{Publication: StageOutcome{Digest: testDigest("a")}}})
 	imageJSON(t, server, "/images/cmd:curl/1?format=json")
 	eventually(t, func() bool { return count(refA) == 7 })
-	// The reset results are queued again when a page next shows them.
-	imageJSON(t, server, "/images/cmd:curl/1?format=json")
-	eventually(t, func() bool { return count(refB) == 8 })
+	// The reset results are queued again when a page next shows them. The
+	// call count above rises when the CLI starts, before its result (and the
+	// reset) is stored, so keep showing the page until b is queued.
+	eventually(t, func() bool { imageJSON(t, server, "/images/cmd:curl/1?format=json"); return count(refB) == 8 })
 	eventually(t, settled("invalid", "unsigned"))
 	if count(refA) != 7 || count(refB) != 8 {
 		t.Fatalf("calls after key rotation a=%d b=%d", count(refA), count(refB))
