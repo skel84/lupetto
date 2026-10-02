@@ -267,6 +267,15 @@ On 2026-10-02 every retained build workspace under the OS user cache disappeared
 - **Size and backups.** Durable workspaces keep their OCI layout and Docker archives, as before; on macOS the data root is included in Time Machine backups unless excluded. Retention/pruning remains the deferred image deletion/retention item.
 - Explorer keeps its own small copy of the root resolution, as it does for the cache root, because it must not import CLI packages; both read the same inherited environment.
 
+## Unsigned publication warning and optional signing requirement (user-approved 2026-10-02)
+
+A publish without signing pushes the image but no signature and no SPDX attestation, so the registry holds no SBOM from Lupetto. The user chose to warn by default, with an opt-in setting that refuses unsigned publication.
+
+- **Warning (default).** `lupetto build` that publishes without a Cosign key prints one warning line to stderr before the build starts, saying that the image will be published without a signature or SPDX attestation and naming `--cosign-key`/`LUPETTO_COSIGN_KEY` and the setting below. The outcome, exit code, stdout, `--json` document, and version-6 record are unchanged; the warning is not part of the record.
+- **Setting.** `--require-signing[=true|false]` / `LUPETTO_REQUIRE_SIGNING` (`true` or `false`; a valueless flag means true; an explicit flag overrides the environment; any other value is invalid configuration). When effective true, a build that publishes without a Cosign key is invalid configuration (exit 2) before any tool, network, or workspace work. It has no effect on builds that do not publish. `sbom` rejects the flag like the other publication/signing flags and ignores the environment input.
+- **Explorer.** Dashboard publish builds inherit the environment, so the setting applies to them. When builds and publication are enabled but `LUPETTO_COSIGN_KEY` is not set, the build controls show a notice that publishes will be unsigned; when `LUPETTO_REQUIRE_SIGNING` is also true, the notice says that publishing will be refused. Local-only dashboard builds already drop publication/signing inputs and also drop `LUPETTO_REQUIRE_SIGNING`.
+- Harbor's own Trivy SBOM generation is a registry setting, not a Lupetto feature; it does not replace the signed, lock-validated attestation.
+
 ## Proposed design choices
 
 | ID | Proposal | Tradeoff |
