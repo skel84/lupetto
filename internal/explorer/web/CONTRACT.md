@@ -59,17 +59,19 @@ Every page model embeds `BaseView`, so its fields are at the root (`{{.CSRFToken
 ```
 ShellView { Registry, RegistryState, DockerState, DockerReason string; RunningBuild *BuildItem;
             StatusComputedAt time.Time; StatusRefreshing bool; IndexSHA256, FeedSHA256, Architecture string;
-            PublishLoad bool; PublishLoadReason string }
+            PublishLoad bool; PublishLoadReason string; Signatures SignatureConfigView }
+SignatureConfigView { Enabled bool; Reason string }
 ```
 
 - `Registry` is the configured `host/repository` ("" = not configured). `RegistryState` is the result of the last status comparison, not a separate health check: `ready` (comparison without errors), `error` (`Status.LastError` or any track error), or `unknown`/`""` (not compared yet). `DockerState` is `available`, `unavailable` (show `DockerReason`), or `""` (not known yet, e.g. `lupetto images` failed before any successful load). Only `available` may be presented as "no images in local Docker"; any other value reads "Local Docker state unknown or unavailable".
 - `PublishLoad` is true exactly when the latest local inventory reports Docker as `available`; a "Build & publish" started now would then also load into local Docker. Otherwise `PublishLoadReason` says why it would publish only (the inventory's Docker reason, "Docker is unavailable", or "Docker availability is unknown"). Every enabled "Build & publish" control carries a short sub-line (`btn-note`): "also loads into local Docker", or "publish only: Docker unavailable" / "publish only: Docker state unknown" (by `DockerState`).
 - `RunningBuild` is non-nil while a build runs. Only one build runs at a time: render every build control disabled with "Another build is running", show the nav count and a link to the running build.
+- `Signatures.Enabled` is true when Explorer was started with `LUPETTO_COSIGN_PUBLIC_KEY` set. When false, nothing is verified, every registry image's signature is `not-checked`, and pages show `Signatures.Reason` once (the `sig-note` partial) instead of repeating it per image.
 - `StatusComputedAt` can be zero (no successful check yet). The footer offers `POST /status/refresh` ("Check now").
 
 ## Read-only JSON (`?format=json`)
 
-Adding `?format=json` to any GET page route returns its model as `application/json` (JSON names from the Go tags). There are no JSON write endpoints. Missing slices can be `null` in JSON. The JS uses: `/?format=json` → `status.refreshing`; `/catalog?format=json` → `refreshing`; `/builds?format=json` → `running`, `shell.runningBuild.detailURL`; `/builds/{id}?format=json` → `item.state`, `item.stages[].name|status`.
+Adding `?format=json` to any GET page route returns its model as `application/json` (JSON names from the Go tags). There are no JSON write endpoints. Missing slices can be `null` in JSON. The JS uses: `/?format=json` → `status.refreshing`, `signaturesPending`; `/images/{package}/{selector}?format=json` → `signaturesPending`; `/catalog?format=json` → `refreshing`; `/builds?format=json` → `running`, `shell.runningBuild.detailURL`; `/builds/{id}?format=json` → `item.state`, `item.stages[].name|status`.
 
 ## Time values
 
@@ -88,6 +90,9 @@ Adding `?format=json` to any GET page route returns its model as `application/js
 | `BuildStage.Name` | 7-stage progress, always all seven in order | `resolve`, `build`, `validate`, `load`, `publish`, `sign`, `attest` → "Resolve", "Build", "Validate SBOM", "Load into Docker", "Publish", "Sign", "Attest SBOM". |
 | `BuildStage.Status` | stage cells | record values `completed`, `loaded`, `published`, `signed`, `attested` (done), `failed`, `skipped` ("Skipped · not requested"; a publish-only job with `BuildItem.LoadReason` shows "Skipped · <LoadReason>" on its Load stage instead), `not-attempted` ("Not attempted · earlier stage failed"); live jobs also `running` ("In progress") and `pending` ("Waiting") for stages not yet reached. A live job's Load stage follows `BuildItem.Load`, not the button that was clicked. No percentages. |
 | `PackageSet.Source` | packages/compare | `registry`, `local`. |
+| `SignatureView.State` | signature chip (`sig-chip`) | `signed` → "Signed" (green seal), `unsigned` → "Unsigned" (amber), `invalid` → "Invalid" (red), `error` → "Error" (red; `Detail` is the sanitized CLI or verify error, one line, ≤ 240 characters), `checking` → "Checking…" (muted, dashed; no result yet, a check is queued or running), `not-checked` → "Not checked" (no trusted key; `Detail` says why) or "Not checked yet" (trusted key, check not started). `Label` is the Go display text. A signature state never changes `Verdict`, `VerdictKind`, `NeedsAction` or a track state. |
+| `SignatureView.Attestation` | SBOM attestation chip (`att-chip`) | `attested` → "SBOM attested · N packages" (green), `absent` → "No SBOM attestation" (amber), `invalid` → "Invalid SBOM attestation" (red), `error` → "SBOM check error" (red); `""` when no result yet (no chip). |
+| `SignatureView.TransparencyLog` | caveat | `verified`; `skipped-local` sets `LocalOnly` and renders "local only · no transparency log" next to the chip: verified with the loopback HTTP exception, not production evidence. |
 | `PackageChange.Kind` | compare | `added`, `removed`, `changed`. Explorer does not order versions, so a change is never labelled an upgrade or downgrade. |
 
 ## Pages
@@ -96,13 +101,16 @@ Adding `?format=json` to any GET page route returns its model as `application/js
 
 ```
 ImagesView   { BaseView; Status StatusView; Inventory InventoryView; Products []ProductRow; Groups []ProductGroup;
-               Summary ImagesSummary; Notice ImagesNotice; Query, Filter string; TotalMatches int }
+               Summary ImagesSummary; Notice ImagesNotice; Query, Filter string; TotalMatches int; SignaturesPending bool }
 ProductGroup { Package, DetailURL string; Rows []ProductRow }
 ImagesSummary{ All, NeedsAction, Current, NotInRegistry, MissingCritical int }
 ImagesNotice { Tracked, Untracked string }
 ProductRow   { Package, Selector string; Track Track; DetailURL string; Versions []VersionRow;
                Verdict, VerdictKind, VerdictDetail string; UnreachableCount int; NeedsAction bool;
-               Severity SeverityCounts; Action PrimaryAction }
+               Severity SeverityCounts; Action PrimaryAction;
+               Signatures map[string]*SignatureView; NewestSignature *SignatureView }
+SignatureView{ State, Label, Detail, Attestation, AttestationLabel, AttestationDetail string; SBOMPackages int; SBOMURL string;
+               TransparencyLog string; LocalOnly bool; KeySHA256 string; CheckedAt time.Time; Rechecking bool }
 VersionRow   { Identity PackageIdentity; Key string; Registry []Image; LocalImages []DockerImage; Builds []BuildItem; Latest bool }
 SeverityCounts { Critical, High, Medium, Low, Unknown, Total int }
 StatusView   { Document *StatusDocument; LastError string; Refreshing bool }
@@ -111,6 +119,7 @@ InventoryView{ Document *ImagesDocument; Error string }
 
 - Query string: `q` (≤ 256 bytes, else `400`) and `filter` = `all` | `needs-action` | `current` | `not-in-registry` (tracks in state `not-built`; an error track is not evidence of absence) | `critical` (tracks with any critical advisory) (aliases `action`, `notbuilt`); anything else is `400`. The toolbar is a GET form (no CSRF). Filtering happens in Go; `Groups` holds only matching rows, `Summary` counts all tracks.
 - The ledger renders one `ProductGroup` per product (`product-head` + one `tracks` row per selector). Columns: Version (`Selector`, `Track.Latest.Name`), Registry (`Track.Newest`, `len Track.Images`), Local (first `VersionRow` with `LocalImages`, else first with `Builds`, else "None"; "Docker unavailable" when `Shell.DockerState` is `unavailable`), Latest in Wolfi (`Track.Latest.Version`), Missing fixes (`Severity` meter + "`UnreachableCount` need another version"; "No registry image" without `Track.Newest`; "Unknown (track error)" when `Track.State` is `error`), Verdict, Action.
+- Signatures on the home page are compact: each row's `Signatures` holds only its newest registry image (also `NewestSignature`), rendered as a `sig-chip` under the Registry cell. `SignaturesPending` (any shown image still `checking`) adds a `data-poll-field="signaturesPending"` element that reloads the page when checks finish. With `Shell.Signatures.Enabled` false the page shows the reason once.
 - `Severity` counts unique advisory IDs over all missing and unevaluated fixes of the newest registry image. `UnreachableCount` counts fixes that need a version outside the selector.
 - `Notice.Tracked`/`Untracked` come from `?tracked=`/`?untracked=` after a products POST and render a confirmation banner.
 - States: `Status.Document == nil && Status.Refreshing` → "Checking your images…" (polls `status.refreshing`, reloads); `Status.LastError` → error banner (with stale data if `Document` is set, showing `ComputedAt`); no tracks and no filter → "No products tracked yet" empty state; filter/query with no rows → "No images match"; `!BuildsEnabled` → read-only banner; `Shell.RunningBuild` → building banner; Docker unavailable / `Inventory.Error` → warning banners.
@@ -121,9 +130,10 @@ InventoryView{ Document *ImagesDocument; Error string }
 ```
 ImageView { BaseView; Status StatusView; Inventory InventoryView; Product ProductRow; Tab string;
             Versions []PackageSet; Packages PackageSet; Compare CompareView;
-            FixedByRebuilding, NeedsAnotherVersion []MissingFix; Builds []BuildItem; Siblings []ImageSibling }
+            FixedByRebuilding, NeedsAnotherVersion []MissingFix; Builds []BuildItem; Siblings []ImageSibling;
+            SignaturesPending bool }
 ImageSibling { Selector, URL string; Current bool }
-PackageSet   { Key, Label, Source string; Packages []PackageIdentity; SPDXURL, Error string }
+PackageSet   { Key, Label, Source string; Packages []PackageIdentity; SPDXURL, Error string; Signature *SignatureView }
 CompareView  { From, To string; Before, After PackageSet; Changes []PackageChange; Added, Removed, Changed, Unchanged int; Error string }
 PackageChange{ Name, Architecture, Before, After, Kind string }
 MissingFix   { Name, Architecture, InstalledVersion, FixedVersion, AvailableVersion string; IDs []string; ReachableByTrack bool;
@@ -134,9 +144,9 @@ Advisory     { ID, Severity, SeveritySource string }
 - `?tab=` `overview` (default) | `vulnerabilities` | `packages` | `compare` | `builds`; anything else is `400`. Packages: `?version=<PackageSet.Key>`. Compare: `?from=<Key>&to=<Key>`. Keys are registry digests or build IDs. A track missing from the cached status is a plain-text `404`.
 - Tab links are `{{.Product.DetailURL}}?tab=…`; the version switcher uses `Siblings[].URL` and keeps the tab.
 - The security-data note is rendered once per page, below the tab content, on the Overview and Vulnerabilities tabs (both can show "None found").
-- **Overview:** verdict block, Registry (`Track.Images`, newest first; `UnidentifiedCount`/`ArtifactCount` are counts, not errors), Local Docker (`Versions[].LocalImages`), Recent builds (first three `Builds`), and a version strip from `Product.Versions` (index latest first, then registry newest-first, then local-only identities — not an APK ordering). `Track.State == "error"` shows `Track.Error` and never a clean result; an empty `Track.Images` on an error track reads "Registry contents could not be determined", not "Nothing published yet".
+- **Overview:** verdict block, Registry (`Track.Images`, newest first; `UnidentifiedCount`/`ArtifactCount` are counts, not errors), Local Docker (`Versions[].LocalImages`), Recent builds (first three `Builds`), and a version strip from `Product.Versions` (index latest first, then registry newest-first, then local-only identities — not an APK ordering). Each registry image shows `index .Product.Signatures <digest>` with the `sig-full` partial (signature and SBOM chips, `Detail`, "checked <time>", "· rechecking" while a stale result is being refreshed, the trusted key's short SHA-256) and, when `SBOMURL` is set, a "Download signed SBOM (SPDX JSON)" link. `SignaturesPending` polls `{{.Product.DetailURL}}?format=json`. `Track.State == "error"` shows `Track.Error` and never a clean result; an empty `Track.Images` on an error track reads "Registry contents could not be determined", not "Nothing published yet".
 - **Vulnerabilities:** scope line (newest registry image; local images are not checked), banner, severity tiles (`Product.Severity`), "Fixed by rebuilding" (`FixedByRebuilding`) and "Needs another version" (`NeedsAnotherVersion`) tables, then `Track.UnevaluatedFixes` as an explicit "Couldn't be evaluated" table. One row per fix; each advisory ID links to NVD/GitHub/pkg.go.dev by prefix with its own severity and `SeveritySource`. "No missing fixes found" only appears when all three lists are empty and the track is not in error, and always links to the data note.
-- **Packages:** source switcher over `Versions`; local builds with `SPDXURL` get a "Download SPDX (JSON)" link (`download` attribute, served by `GET /builds/{id}/sbom`); registry sets say SBOM download from attestations comes later. "Newer in Wolfi"/"Missing fixes" columns appear only for the newest registry image (they come from `Track.Outdated`/`Track.MissingFixes`). `PackageSet.Error` is shown verbatim.
+- **Packages:** source switcher over `Versions`; local builds with `SPDXURL` get a "Download SPDX (JSON)" link (`download` attribute, served by `GET /builds/{id}/sbom`); registry sets show `PackageSet.Signature`: with an `SBOMURL` a "Download signed SBOM (SPDX JSON)" button, otherwise why there is nothing to download (checking, not checked, or no verified SPDX attestation). The registry package list itself still comes from `lupetto inspect`, not from the attestation. "Newer in Wolfi"/"Missing fixes" columns appear only for the newest registry image (they come from `Track.Outdated`/`Track.MissingFixes`). `PackageSet.Error` is shown verbatim.
 - **Compare:** GET form with `tab=compare`, `from`, `to` selects over `Versions`; summary pills from the counts; table of `Changes` (unchanged hidden). Fewer than two `Versions` → "Nothing to compare yet".
 - **Builds:** the shared builds table over `Builds` (records and live jobs for every version of this package, not only this selector).
 
@@ -254,6 +264,14 @@ StageOutcome    { Status, Reference, Digest, ImmutableReference, ImageReference,
 - Show reachable and unreachable missing fixes separately: **Fixed by rebuilding** (`ReachableByTrack`: top-level fixes through the track's selected APK; dependency fixes by index availability — not a solved future lock, and the rebuild may fail) and **Needs another version** (the top-level fix needs a version beyond this selector).
 - A track in `error` shows its error and "could not be determined", never an empty (clean) list.
 
+## Signature checks
+
+Explorer never verifies signatures itself. With `LUPETTO_COSIGN_PUBLIC_KEY` set in its environment it runs `lupetto verify --json <repository>@<digest>` in the background, adding `--cosign-allow-http` only when its own environment has `LUPETTO_COSIGN_ALLOW_HTTP=true` and the reference's registry is a literal loopback host. The key path is inherited through the environment and never appears in arguments. Only `kind: "verify"`, `version: 1` documents that echo the requested reference and digest and use the documented enumerations are accepted; anything else, and CLI exit codes 1/2, becomes an `error` result.
+
+- At most two checks run at once, one per image reference at a time; pages never wait for them. Newest registry images are queued after each status refresh; detail pages queue the images they show.
+- Results are cached per process by trusted-key path and image reference: about 1 hour when the results are `signed` and `attested`, otherwise (unsigned, absent, invalid, error) about 5 minutes, so a transient failure reported as `invalid` does not stick. When the CLI reports a different `trust.publicKeySHA256` than before (key replaced at the same path), every cached result is discarded. An expired result stays visible with "rechecking" until the new one arrives.
+- When a build finishes, results for every digest its record published, signed or attested are discarded (all results when the build left no usable record), so the next page shows "Checking…".
+
 ## Other routes
 
-`GET /builds/{id}/sbom` downloads a local build's validated SPDX JSON (the `SPDXURL` fields). `GET /healthz` returns `text/plain` `ok` (the process is serving; nothing more). `GET /static/<path>` serves embedded assets. There are no other routes.
+`GET /builds/{id}/sbom` downloads a local build's validated SPDX JSON (the `SPDXURL` fields). `GET /images/{package}/{selector}/sbom/{digest}` downloads a registry image's signed SPDX SBOM (`SignatureView.SBOMURL`): the digest must be `sha256:<64 hex>` (else `400`), the image must be in that track of the cached status (else `404`), and its cached result must be `attested` (else `409`, also when no key is configured). Explorer then verifies again with `--sbom-out` into a new private temporary directory, requires the fresh result to still be `attested` (`409` and the cache is updated if not) and the file's SHA-256 to equal `attestation.sbom.sha256` (`502` on mismatch, CLI failure or invalid JSON), and serves it as `application/spdx+json` attachment `lupetto-<name>-<version>-<digest12>.spdx.json`. The temporary file is always removed. At most two downloads run at once (`503` when busy); each has 25 seconds. `GET /healthz` returns `text/plain` `ok` (the process is serving; nothing more). `GET /static/<path>` serves embedded assets. There are no other routes.

@@ -4,10 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"path/filepath"
 	"regexp"
+	"strings"
 )
 
-var digestReferencePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.\-:\[\]]*/[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$`)
+var (
+	digestReferencePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.\-:\[\]]*/[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$`)
+	imageDigestPattern     = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+	hexSHA256Pattern       = regexp.MustCompile(`^[a-f0-9]{64}$`)
+)
 
 func (c *CLI) document(ctx context.Context, args []string, kind string, version int, target any) error {
 	stderr := newLogBuffer(maxErrorBytes)
@@ -84,4 +91,70 @@ func (c *CLI) Products(ctx context.Context, products, action, name string, selec
 		return nil, err
 	}
 	return &d, nil
+}
+
+// Verify runs `lupetto verify --json [--cosign-allow-http] [--sbom-out <new
+// file>] <reference>`. Trust reaches the CLI only through the inherited
+// LUPETTO_COSIGN_PUBLIC_KEY environment variable, never as an argument.
+// allowHTTP adds the local-only flag, and only for a literal loopback registry.
+func (c *CLI) Verify(ctx context.Context, reference, sbomOut string, allowHTTP bool) (*VerifyDocument, error) {
+	if len(reference) > 1024 || !digestReferencePattern.MatchString(reference) {
+		return nil, errors.New("verify requires an explicit registry sha256 digest reference")
+	}
+	args := []string{"verify", "--json"}
+	if allowHTTP && loopbackReference(reference) {
+		args = append(args, "--cosign-allow-http")
+	}
+	if sbomOut != "" {
+		if !filepath.IsAbs(sbomOut) {
+			return nil, errors.New("verify --sbom-out requires an absolute path")
+		}
+		args = append(args, "--sbom-out", sbomOut)
+	}
+	args = append(args, reference)
+	var d VerifyDocument
+	if err := c.document(ctx, args, "verify", 1, &d); err != nil {
+		return nil, err
+	}
+	if d.Reference != reference || d.Digest != reference[len(reference)-71:] {
+		return nil, errors.New("incompatible lupetto CLI: verify reference or digest mismatch")
+	}
+	switch d.Signature.State {
+	case "signed", "unsigned", "invalid", "error":
+	default:
+		return nil, fmt.Errorf("incompatible lupetto CLI: unknown verify signature state %q", d.Signature.State)
+	}
+	switch d.Attestation.State {
+	case "attested", "absent", "invalid", "error":
+	default:
+		return nil, fmt.Errorf("incompatible lupetto CLI: unknown verify attestation state %q", d.Attestation.State)
+	}
+	if d.TransparencyLog != "verified" && d.TransparencyLog != "skipped-local" {
+		return nil, fmt.Errorf("incompatible lupetto CLI: unknown verify transparencyLog %q", d.TransparencyLog)
+	}
+	if d.Attestation.State == "attested" {
+		if d.Attestation.SBOM == nil || !hexSHA256Pattern.MatchString(d.Attestation.SBOM.SHA256) {
+			return nil, errors.New("incompatible lupetto CLI: attested verify result without an SBOM SHA-256")
+		}
+		if sbomOut != "" && filepath.Clean(d.Attestation.SBOM.Path) != filepath.Clean(sbomOut) {
+			return nil, errors.New("incompatible lupetto CLI: verify did not report writing the requested --sbom-out file")
+		}
+	}
+	return &d, nil
+}
+
+// loopbackReference reports whether the reference's registry authority is a
+// literal localhost or loopback IP, the only scope of the CLI's HTTP exception.
+func loopbackReference(reference string) bool {
+	authority, _, _ := strings.Cut(reference, "/")
+	host := authority
+	if h, _, err := net.SplitHostPort(authority); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

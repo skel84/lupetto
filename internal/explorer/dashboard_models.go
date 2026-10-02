@@ -89,6 +89,61 @@ type InspectDocument struct {
 	Created      *time.Time        `json:"created,omitempty"`
 	Packages     []PackageIdentity `json:"packages"`
 }
+
+// VerifyDocument is the CLI's kind "verify" version-1 signature-status fact.
+type VerifyDocument struct {
+	Kind            string            `json:"kind"`
+	Version         int               `json:"version"`
+	Reference       string            `json:"reference"`
+	Digest          string            `json:"digest"`
+	CheckedAt       time.Time         `json:"checkedAt"`
+	Trust           VerifyTrust       `json:"trust"`
+	TransparencyLog string            `json:"transparencyLog"`
+	Signature       VerifySignature   `json:"signature"`
+	Attestation     VerifyAttestation `json:"attestation"`
+}
+type VerifyTrust struct {
+	PublicKeySHA256 string `json:"publicKeySHA256"`
+}
+type VerifySignature struct {
+	State     string `json:"state"`
+	Error     string `json:"error,omitempty"`
+	Artifacts int    `json:"artifacts"`
+}
+type VerifyAttestation struct {
+	State         string      `json:"state"`
+	Error         string      `json:"error,omitempty"`
+	Artifacts     int         `json:"artifacts"`
+	PredicateType string      `json:"predicateType,omitempty"`
+	SBOM          *VerifySBOM `json:"sbom,omitempty"`
+}
+type VerifySBOM struct {
+	SHA256   string `json:"sha256"`
+	Packages int    `json:"packages"`
+	Path     string `json:"path,omitempty"`
+}
+
+// SignatureView is Explorer's display of one registry image's cached verify
+// result. It never changes a track state or verdict.
+type SignatureView struct {
+	State             string    `json:"state"`
+	Label             string    `json:"label"`
+	Detail            string    `json:"detail,omitempty"`
+	Attestation       string    `json:"attestation,omitempty"`
+	AttestationLabel  string    `json:"attestationLabel,omitempty"`
+	AttestationDetail string    `json:"attestationDetail,omitempty"`
+	SBOMPackages      int       `json:"sbomPackages,omitempty"`
+	SBOMURL           string    `json:"sbomURL,omitempty"`
+	TransparencyLog   string    `json:"transparencyLog,omitempty"`
+	LocalOnly         bool      `json:"localOnly"`
+	KeySHA256         string    `json:"keySHA256,omitempty"`
+	CheckedAt         time.Time `json:"checkedAt"`
+	Rechecking        bool      `json:"rechecking"`
+}
+type SignatureConfigView struct {
+	Enabled bool   `json:"enabled"`
+	Reason  string `json:"reason,omitempty"`
+}
 type InventoryView struct {
 	Document *ImagesDocument `json:"document,omitempty"`
 	Error    string          `json:"error,omitempty"`
@@ -130,6 +185,9 @@ type ProductRow struct {
 	NeedsAction      bool           `json:"needsAction"`
 	Severity         SeverityCounts `json:"severity"`
 	Action           PrimaryAction  `json:"action"`
+	// Signatures is keyed by registry digest; NewestSignature is Track.Newest's.
+	Signatures      map[string]*SignatureView `json:"signatures"`
+	NewestSignature *SignatureView            `json:"newestSignature,omitempty"`
 }
 type ImagesView struct {
 	BaseView
@@ -143,6 +201,8 @@ type ImagesView struct {
 	Summary      ImagesSummary  `json:"summary"`
 	Notice       ImagesNotice   `json:"notice"`
 	Empty        bool           `json:"empty"`
+	// SignaturesPending is true while a shown image has no verify result yet.
+	SignaturesPending bool `json:"signaturesPending"`
 }
 type PackageSet struct {
 	Key      string            `json:"key"`
@@ -151,6 +211,8 @@ type PackageSet struct {
 	Packages []PackageIdentity `json:"packages"`
 	SPDXURL  string            `json:"spdxURL,omitempty"`
 	Error    string            `json:"error,omitempty"`
+	// Signature is set for registry sets only.
+	Signature *SignatureView `json:"signature,omitempty"`
 }
 type PackageChange struct {
 	Name         string `json:"name"`
@@ -184,6 +246,7 @@ type ImageView struct {
 	NeedsAnotherVersion []MissingFix   `json:"needsAnotherVersion"`
 	Builds              []BuildItem    `json:"builds"`
 	Siblings            []ImageSibling `json:"siblings"`
+	SignaturesPending   bool           `json:"signaturesPending"`
 }
 type BuildStage struct {
 	Name   string `json:"name"`
@@ -236,16 +299,17 @@ type ImageSibling struct {
 	Current  bool   `json:"current"`
 }
 type ShellView struct {
-	Registry          string     `json:"registry"`
-	RegistryState     string     `json:"registryState"`
-	DockerState       string     `json:"dockerState"`
-	DockerReason      string     `json:"dockerReason"`
-	PublishLoad       bool       `json:"publishLoad"`
-	PublishLoadReason string     `json:"publishLoadReason"`
-	RunningBuild      *BuildItem `json:"runningBuild,omitempty"`
-	StatusComputedAt  time.Time  `json:"statusComputedAt"`
-	StatusRefreshing  bool       `json:"statusRefreshing"`
-	IndexSHA256       string     `json:"indexSHA256"`
-	FeedSHA256        string     `json:"feedSHA256"`
-	Architecture      string     `json:"architecture"`
+	Registry          string              `json:"registry"`
+	RegistryState     string              `json:"registryState"`
+	DockerState       string              `json:"dockerState"`
+	DockerReason      string              `json:"dockerReason"`
+	PublishLoad       bool                `json:"publishLoad"`
+	PublishLoadReason string              `json:"publishLoadReason"`
+	RunningBuild      *BuildItem          `json:"runningBuild,omitempty"`
+	StatusComputedAt  time.Time           `json:"statusComputedAt"`
+	StatusRefreshing  bool                `json:"statusRefreshing"`
+	IndexSHA256       string              `json:"indexSHA256"`
+	FeedSHA256        string              `json:"feedSHA256"`
+	Architecture      string              `json:"architecture"`
+	Signatures        SignatureConfigView `json:"signatures"`
 }

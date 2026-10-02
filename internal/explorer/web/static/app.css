@@ -253,6 +253,25 @@ pre.errtext { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-si
 .verdict-sub { display: block; color: var(--muted); font-size: 12px; margin-top: 4px; }
 .verdict-sub.warn { color: var(--warn); }
 
+/* Signature / SBOM attestation status: text label always present, colour is secondary. */
+.sig {
+  display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border: 1px solid currentColor; border-radius: 2px;
+  font-size: 12px; font-weight: 600; line-height: 1.6; white-space: nowrap;
+}
+.sig .i { width: 12px; height: 12px; }
+.sig-signed, .att-attested { color: var(--ok); }
+.sig-unsigned, .att-absent { color: var(--warn); }
+.sig-invalid, .sig-error, .att-invalid, .att-error { color: var(--danger); }
+.sig-checking, .sig-not-checked { color: var(--muted); border-style: dashed; }
+.sig-caveat { display: inline-block; color: var(--warn); font-size: 12px; white-space: nowrap; }
+.sigs { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-top: 4px; }
+.sig-line { flex-wrap: wrap; margin-top: 4px; }
+.sig-detail { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; margin-top: 2px; }
+.sig-detail span + span::before { content: " · "; }
+.sig-note { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-small); color: var(--muted); margin: 10px 0 0; }
+.sig-note .i { flex: none; margin-top: 2px; }
+.where .sig-note { margin-top: 12px; }
+
 .sev {
   display: inline-flex; align-items: center; gap: 4px; border-radius: 2px;
   font: 600 12px/1.5 var(--font-mono); padding: 1px 8px 1px 5px; white-space: nowrap;

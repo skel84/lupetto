@@ -43,6 +43,15 @@ type fakeConfig struct {
 	OutputBytes      int
 	IgnoreTERM       bool
 	Calls            string
+	// Verify maps a digest reference to its verify document; "__SBOM_PATH__"
+	// is replaced by the --sbom-out path (or "" without it).
+	Verify            map[string]string
+	VerifySBOM        string
+	VerifyDelay       int
+	VerifyExit        int
+	VerifyEnvironment string
+	VerifyActive      string
+	VerifyMax         int
 }
 
 const goodStatus = `{"kind":"status","version":2,"computedAt":"2026-10-01T00:00:00Z","security":{"severity":{"idCount":1,"resolvedCount":1,"sourceCounts":{"nvd-cvss-v3.1":1}}},"tracks":[{"package":"cmd:curl","selector":"1","state":"current","outdated":[{"name":"dep"}],"missingFixes":[{"reachableByTrack":true,"maxSeverity":"high","advisories":[{"id":"CVE-2026-1234","severity":"high","severitySource":"nvd-cvss-v3.1"}]},{"reachableByTrack":false}],"unevaluatedFixes":[{"name":"dep","fixedVersion":"invalid"}]}]}`
@@ -152,6 +161,61 @@ func TestCLIHelper(t *testing.T) {
 			}
 		}
 		_, _ = fmt.Fprint(os.Stdout, config.Products)
+	case "verify":
+		if config.VerifyEnvironment != "" {
+			environment := map[string]string{"key": os.Getenv("LUPETTO_COSIGN_PUBLIC_KEY"), "password": os.Getenv("COSIGN_PASSWORD")}
+			data, _ := json.Marshal(environment)
+			if os.WriteFile(config.VerifyEnvironment+"."+strconv.Itoa(os.Getpid()), data, 0600) != nil {
+				os.Exit(3)
+			}
+		}
+		marker := ""
+		if config.VerifyActive != "" {
+			marker = filepath.Join(config.VerifyActive, strconv.Itoa(os.Getpid()))
+			if os.WriteFile(marker, nil, 0600) != nil {
+				os.Exit(3)
+			}
+			entries, _ := os.ReadDir(config.VerifyActive)
+			if len(entries) > config.VerifyMax {
+				_ = os.WriteFile(config.VerifyActive+".violation", nil, 0600)
+			}
+			if len(entries) >= 2 {
+				_ = os.WriteFile(config.VerifyActive+".parallel", nil, 0600)
+			}
+		}
+		completed := pause(config.VerifyDelay)
+		if marker != "" {
+			_ = os.Remove(marker)
+		}
+		if !completed {
+			os.Exit(1)
+		}
+		if config.VerifyExit != 0 {
+			_, _ = fmt.Fprint(os.Stderr, "lupetto: verify: registry referrers request failed\nsecond line")
+			os.Exit(config.VerifyExit)
+		}
+		reference := args[len(args)-1]
+		document, ok := config.Verify[reference]
+		if !ok {
+			_, _ = fmt.Fprint(os.Stderr, "no verify fixture")
+			os.Exit(1)
+		}
+		out := ""
+		for i, arg := range args {
+			if arg == "--sbom-out" && i+1 < len(args) {
+				out = args[i+1]
+			}
+		}
+		if out != "" && strings.Contains(document, "__SBOM_PATH__") {
+			file, err := os.OpenFile(out, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+			if err != nil {
+				os.Exit(1)
+			}
+			_, _ = file.WriteString(config.VerifySBOM)
+			_ = file.Close()
+		}
+		quoted, _ := json.Marshal(out)
+		_, _ = fmt.Fprint(os.Stdout, strings.ReplaceAll(document, `"__SBOM_PATH__"`, string(quoted)))
 	case "build":
 		if config.BuildEnvironment != "" {
 			present := map[string]bool{}
@@ -689,10 +753,15 @@ func TestImportBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range strings.Fields(string(data)) {
-		for _, forbidden := range []string{"lupetto/internal/build", "lupetto/internal/wolfi", "lupetto/internal/status", "lupetto/internal/registry", "lupetto/cmd/lupetto"} {
+		for _, forbidden := range []string{"lupetto/internal/build", "lupetto/internal/wolfi", "lupetto/internal/status", "lupetto/internal/registry", "lupetto/internal/images", "lupetto/internal/products", "lupetto/internal/verify", "lupetto/cmd/lupetto"} {
 			if path == forbidden || strings.HasPrefix(path, forbidden+"/") {
 				t.Errorf("Explorer imported forbidden package %s", path)
 			}
+		}
+		// Allowlist: any other module package (including future verify/Cosign
+		// helpers) must be reached through the CLI's JSON contract instead.
+		if strings.HasPrefix(path, "lupetto/") && path != "lupetto/cmd/lupetto-explorer" && path != "lupetto/internal/explorer" && !strings.HasPrefix(path, "lupetto/internal/explorer/") {
+			t.Errorf("Explorer depends on module package %s; use the CLI JSON contract", path)
 		}
 	}
 	command = exec.Command("go", "list", "-deps", "-f", "{{.ImportPath}}", "lupetto/cmd/lupetto")

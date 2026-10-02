@@ -31,7 +31,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags.BoolVar(&config.EnableBuilds, "enable-builds", false, "enable one-at-a-time CLI build execution")
 	flags.DurationVar(&config.RefreshInterval, "refresh-interval", config.RefreshInterval, "background status/discovery refresh interval")
 	flags.Usage = func() {
-		_, _ = fmt.Fprintln(flags.Output(), "Usage: lupetto-explorer --products <file> [options]\n\nOptional CLI-only dashboard server. No login; builds are disabled by default.\nRegistry, repository, Docker credentials and Cosign settings are inherited only\nfrom the process environment, never supplied as CLI arguments by Explorer.")
+		_, _ = fmt.Fprintln(flags.Output(), "Usage: lupetto-explorer --products <file> [options]\n\nOptional CLI-only dashboard server. No login; builds are disabled by default.\nRegistry, repository, Docker credentials and Cosign settings are inherited only\nfrom the process environment, never supplied as CLI arguments by Explorer.\nSet LUPETTO_COSIGN_PUBLIC_KEY to a trusted public key to show registry\nsignature and SBOM attestation status.")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {

@@ -161,6 +161,9 @@ func (s *Server) images(w http.ResponseWriter, r *http.Request) {
 			if filter == "critical" && row.Severity.Critical == 0 {
 				continue
 			}
+			if s.attachSignatures(&row, true) {
+				view.SignaturesPending = true
+			}
 			view.Products = append(view.Products, row)
 			view.TotalMatches++
 			if len(view.Groups) == 0 || view.Groups[len(view.Groups)-1].Package != row.Package {
@@ -207,6 +210,7 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 	}
 	inventory := s.inventory(r.Context())
 	view := ImageView{BaseView: s.base(), Status: status, Inventory: inventory, Product: joinTrack(*track, inventory.Document), Tab: tab, Versions: []PackageSet{}, FixedByRebuilding: []MissingFix{}, NeedsAnotherVersion: []MissingFix{}, Builds: []BuildItem{}}
+	view.SignaturesPending = s.attachSignatures(&view.Product, false)
 	for _, f := range track.MissingFixes {
 		if f.ReachableByTrack {
 			view.FixedByRebuilding = append(view.FixedByRebuilding, f)
@@ -254,6 +258,17 @@ func (s *Server) image(w http.ResponseWriter, r *http.Request) {
 			key = view.Versions[0].Key
 		}
 		view.Packages = s.productPackageSet(r.Context(), siblingTracks, inventory.Document, key)
+		if view.Packages.Source == "registry" {
+		signature:
+			for _, t := range siblingTracks {
+				for _, image := range t.Images {
+					if image.Digest == view.Packages.Key {
+						view.Packages.Signature = s.signatureView(t, image)
+						break signature
+					}
+				}
+			}
+		}
 	}
 	if tab == "compare" {
 		view.Compare.From = r.URL.Query().Get("from")
@@ -470,7 +485,7 @@ func (s *Server) editProducts(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) shell() ShellView {
 	status := s.status.snapshot()
-	shell := ShellView{StatusRefreshing: status.Refreshing, RegistryState: "unknown", DockerState: "unknown"}
+	shell := ShellView{StatusRefreshing: status.Refreshing, RegistryState: "unknown", DockerState: "unknown", Signatures: s.signatures.config()}
 	if d := status.Document; d != nil {
 		shell.Registry = d.Registry + "/" + d.Repository
 		shell.StatusComputedAt = d.ComputedAt

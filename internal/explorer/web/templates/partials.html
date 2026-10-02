@@ -110,3 +110,17 @@
   </div>
   </form>
 </dialog>{{end}}
+
+{{/* Root: *SignatureView (non-nil). Signature state chip with text, plus the local-only caveat. Label comes from Go. */}}
+{{define "sig-chip"}}<span class="sig sig-{{if eq .State "signed" "unsigned" "invalid" "error" "checking"}}{{.State}}{{else}}not-checked{{end}}"{{with .Detail}} title="{{.}}"{{end}}>{{if eq .State "signed"}}{{template "icon" "seal"}}{{else if eq .State "unsigned"}}{{template "icon" "skip"}}{{else if eq .State "invalid"}}{{template "icon" "fail"}}{{else if eq .State "error"}}{{template "icon" "error"}}{{else if eq .State "checking"}}{{template "icon" "running"}}{{else}}{{template "icon" "pending"}}{{end}}<span class="sr-only">Signature: </span>{{.Label}}</span>{{if .LocalOnly}}<span class="sig-caveat" title="Checked with the local HTTP exception: no transparency-log evidence, not production evidence">local only · no transparency log</span>{{end}}{{end}}
+
+{{/* Root: *SignatureView (non-nil). SBOM attestation chip; nothing until a check has completed. */}}
+{{define "att-chip"}}{{if .Attestation}}<span class="sig att-{{if eq .Attestation "attested" "absent" "invalid"}}{{.Attestation}}{{else}}error{{end}}"{{with .AttestationDetail}} title="{{.}}"{{end}}>{{if eq .Attestation "attested"}}{{template "icon" "check"}}{{else if eq .Attestation "absent"}}{{template "icon" "skip"}}{{else if eq .Attestation "invalid"}}{{template "icon" "fail"}}{{else}}{{template "icon" "error"}}{{end}}{{.AttestationLabel}}{{if and (eq .Attestation "attested") .SBOMPackages}} · {{.SBOMPackages}} package{{if ne .SBOMPackages 1}}s{{end}}{{end}}</span>{{end}}{{end}}
+
+{{/* Root: *SignatureView (non-nil). Status for one registry image: chips, visible details and check time. Not-checked reasons are explained once per page instead. */}}
+{{define "sig-full"}}<div class="sigs">{{template "sig-chip" .}}{{template "att-chip" .}}</div>
+{{- if ne .State "not-checked"}}{{if or .Detail .AttestationDetail}}<div class="sig-detail">{{with .Detail}}<span>{{.}}</span>{{end}}{{with .AttestationDetail}}<span>SBOM: {{.}}</span>{{end}}</div>{{end}}{{end}}
+{{- if not .CheckedAt.IsZero}}<div class="sig-detail">checked {{template "time" .CheckedAt}}{{if .Rechecking}} · rechecking{{end}}{{with .KeySHA256}} · key {{template "short-hash" .}}{{end}}</div>{{end}}{{end}}
+
+{{/* Root: SignatureConfigView. One explanation when no trusted key is configured. */}}
+{{define "sig-note"}}{{if not .Enabled}}<p class="sig-note">{{template "icon" "info"}}<span><strong>Signatures: Not checked.</strong> {{.Reason}}</span></p>{{end}}{{end}}

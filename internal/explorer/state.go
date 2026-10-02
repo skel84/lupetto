@@ -92,7 +92,7 @@ type jobRunner struct {
 	limit       int
 	logBytes    int
 	wg          sync.WaitGroup
-	afterFinish func()
+	afterFinish func(*BuildRecord)
 }
 
 func (r *jobRunner) start(request BuildRequest) (JobView, error) {
@@ -169,7 +169,7 @@ func (r *jobRunner) run(ctx context.Context, j *job) {
 	r.active = ""
 	r.mu.Unlock()
 	if r.afterFinish != nil {
-		r.afterFinish()
+		r.afterFinish(record)
 	}
 }
 func (r *jobRunner) list() ([]JobView, bool) {

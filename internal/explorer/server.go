@@ -44,6 +44,7 @@ type Server struct {
 	discovery     discoveryCache
 	discoverSlots chan struct{}
 	dashboard     dashboardState
+	signatures    signatureCache
 	jobs          jobRunner
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -87,8 +88,11 @@ func New(config Config) (*Server, error) {
 		return nil, fmt.Errorf("create CSRF token: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{config: config, cli: cli, renderer: renderer, token: hex.EncodeToString(entropy[:]), allowedHosts: allowedHosts, discoverSlots: make(chan struct{}, 4), ctx: ctx, cancel: cancel}
-	s.jobs = jobRunner{cli: cli, ctx: ctx, enabled: config.EnableBuilds, limit: HistoryLimit, logBytes: defaultLogBytes, afterFinish: s.refreshAfterBuild}
+	s := &Server{config: config, cli: cli, renderer: renderer, token: hex.EncodeToString(entropy[:]), allowedHosts: allowedHosts, discoverSlots: make(chan struct{}, 4), signatures: newSignatureCache(), ctx: ctx, cancel: cancel}
+	s.jobs = jobRunner{cli: cli, ctx: ctx, enabled: config.EnableBuilds, limit: HistoryLimit, logBytes: defaultLogBytes, afterFinish: func(record *BuildRecord) {
+		s.invalidateSignatures(record)
+		s.refreshAfterBuild()
+	}}
 	s.handler = s.safe(s.routes())
 	return s, nil
 }
@@ -144,6 +148,9 @@ func (s *Server) refreshStatusLocked() bool {
 		} else {
 			document, err := s.cli.Status(ctx, s.config.Products)
 			s.status.finish(document, err)
+			if err == nil {
+				s.warmSignatures(document)
+			}
 		}
 		s.mu.Lock()
 		if s.statusPending {
@@ -230,6 +237,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /{$}", s.images)
 	mux.HandleFunc("GET /images", s.images)
 	mux.HandleFunc("GET /images/{package}/{selector}", s.image)
+	mux.HandleFunc("GET /images/{package}/{selector}/sbom/{digest}", s.downloadSignedSBOM)
 	mux.HandleFunc("GET /catalog", s.packages)
 	mux.HandleFunc("GET /catalog/{name}", s.packageDetail)
 	mux.HandleFunc("GET /builds", s.builds)
