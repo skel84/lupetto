@@ -374,7 +374,7 @@ Continue with the [registry, signing, and verification guide](docs/registry-sign
 
 The rebuild is based on the operator-documentation request for a lost implementation. The overwritten older checkout is excluded from evidence/design; no historical source or executable claims are inferred from it. [AGENTS.md](AGENTS.md) contains repository instructions for coding agents.
 
-Explorer remains an optional separate application/consumer, not a second build engine or CLI prerequisite. Its backend consumes only the versioned CLI `status`, `discover`, `products`, `images`, `inspect`, and build JSON contracts. Remote Konflux execution, unfixed-vulnerability scanning, production credential/key management, and invented service recipes remain deferred. Status is a bounded registry/security-fix comparison, not a general vulnerability scanner.
+Explorer remains an optional separate application/consumer, not a second build engine or CLI prerequisite. Its backend consumes only the versioned CLI `status`, `discover`, `products`, `images`, `inspect`, `verify`, and build JSON contracts. Remote Konflux execution, unfixed-vulnerability scanning, production credential/key management, and invented service recipes remain deferred. Status is a bounded registry/security-fix comparison, not a general vulnerability scanner.
 
 ## Optional Explorer server
 
