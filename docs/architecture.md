@@ -32,6 +32,8 @@ internal/wolfi/       signed index fetch/verification, parsing, selection, disco
 internal/registry/    shared registry settings/naming, Docker-config-only authentication, loopback HTTP guard, sanitized errors
 internal/status/      strict products YAML, registry/index/security comparison, digest-keyed installed-package cache
 internal/verify/      read-only signature/attestation status of one registry digest (`lupetto verify`)
+internal/images/      read-only build history across builds roots and local Docker inventory (`lupetto images`)
+internal/storage/     build-workspace roots: durable data root (LUPETTO_DATA_DIR/OS data dir) and legacy cache root
 internal/wolfi/wolfitest/   shared test fixtures (signed index generation)
 cmd/lupetto-explorer/ flags, signal-aware HTTP/CLI shutdown
 internal/explorer/    own JSON decoding/view models, subprocess adapter, caches, job runner, HTTP safety/rendering seam
@@ -41,14 +43,15 @@ cmd/lupetto ──▶ internal/build ──▶ internal/wolfi
       └──────────────────────────────▶ internal/wolfi
       └────────▶ internal/status ──▶ internal/wolfi, internal/registry
       └────────▶ internal/verify ──▶ internal/status, internal/registry
-                 internal/build ──▶ internal/registry
+      └────────▶ internal/images ──▶ internal/build, internal/storage, internal/wolfi
+                 internal/build ──▶ internal/registry, internal/storage
 
 cmd/lupetto-explorer ──▶ internal/explorer ──(argv + JSON)──▶ lupetto executable
 ```
 
-- `internal/wolfi` imports nothing else from the module and owns the shared installed-APK-database parser; `internal/registry` likewise imports no in-module packages. `internal/build` and `internal/status` consume those shared boundaries independently, and status never imports the build pipeline.
+- `internal/wolfi` imports nothing else from the module and owns the shared installed-APK-database parser; `internal/registry` and `internal/storage` likewise import no in-module packages. `internal/storage` is the one CLI rule for where build workspaces live: `internal/build` (the only writer) and `internal/images` (a reader) share it. Explorer keeps its own copy of that root resolution because it must not import CLI packages. `internal/build` and `internal/status` consume those shared boundaries independently, and status never imports the build pipeline.
 - `cmd/lupetto` makes no apko, Docker, Cosign, or registry calls itself; `doctor` only checks `PATH`. The CLI owns status table/JSON presentation, not comparison logic.
-- These packages are module-internal, not a public Go API. Explorer defines its own JSON decoding types and imports none of `internal/build`, `internal/wolfi`, `internal/status`, `internal/registry`, `internal/verify`, `internal/images`, `internal/products`, or `cmd/lupetto`; its `go list -deps` boundary test also verifies the CLI never imports Explorer.
+- These packages are module-internal, not a public Go API. Explorer defines its own JSON decoding types and imports none of `internal/build`, `internal/wolfi`, `internal/status`, `internal/registry`, `internal/verify`, `internal/images`, `internal/products`, `internal/storage`, or `cmd/lupetto`; its `go list -deps` boundary test also verifies the CLI never imports Explorer.
 
 ## Application and dependency boundaries
 
@@ -109,7 +112,7 @@ A selected top-level version does not pin its dependency closure, and a retained
 
 ## Artifact and data ownership
 
-Each build owns a unique mode-0700 user-cache workspace and its private records (listed in the [operator guide](../README.md#retained-evidence-and-failures)). The workspace record is the single description of that execution; there is no second mutable status store. Readable local tags are mutable conveniences, not build identity; the unique build reference, local OCI manifest digest, and pushed immutable digest identify a build.
+Each build owns a unique mode-0700 workspace under the durable data root's `lupetto/builds/` and its private records (listed in the [operator guide](../README.md#retained-evidence-and-failures); see the [durable build evidence decision](decisions.md#durable-build-evidence-location-user-approved-2026-10-02)). Workspaces from before 2026-10-02 remain in the legacy user-cache `lupetto/builds/` and are only read. The user cache holds only regenerable data (status's installed-package and severity caches). The workspace record is the single description of that execution; there is no second mutable status store. Readable local tags are mutable conveniences, not build identity; the unique build reference, local OCI manifest digest, and pushed immutable digest identify a build.
 
 The deferred catalog/Explorer design owns SQLite catalog data and immutable downloaded SBOM evidence, not build execution state. Workspace paths alone are insufficient for durable Explorer downloads: retain document bytes or a content-addressed copy with its checksum, so deleting a workspace cannot silently destroy evidence Explorer claims to keep. Explorer may index workspace records and report transient job progress.
 

@@ -21,7 +21,7 @@ Go installs `lupetto` in `GOBIN`, or otherwise in the `bin` directory of `GOPATH
 | `help`, `doctor` | Installed CLI; `doctor` checks executable availability. |
 | `discover` | Access to the public Wolfi index/key; no apko, Docker, or Cosign invocation. |
 | `status` | Access to the public Wolfi index/key/security feed, a configured registry/repository and Docker client credentials when needed, writable user cache; no apko, Docker daemon, or Cosign invocation. |
-| `build --no-load`, `sbom` | Native **apko 1.4.5**, access to the public Wolfi repository, writable user cache. |
+| `build --no-load`, `sbom` | Native **apko 1.4.5**, access to the public Wolfi repository, a writable user data directory for [retained workspaces](#retained-evidence-and-failures). |
 | Default `build` | The above plus Docker on `PATH` and a running local Linux daemon (for loading). |
 | Publication | An authorized compatible registry/repository and credentials in Docker's client configuration. Docker itself is not needed with `--no-load`. |
 | Requested signing | Publication requirements plus exactly **Cosign v3.1.3** and the key/config inputs described in the [detailed guide](docs/registry-signing.md#sign-and-attest-the-verified-digest). |
@@ -218,9 +218,9 @@ lupetto images --json
 DOCKER_HOST=unix:///tmp/no-docker-daemon.sock lupetto images --json
 ```
 
-`images` reads retained `result.json` **and** `failure.json` under the OS user cache's `lupetto/builds/`, newest record modification time first. Version-6 records preserve command, outcome/failure stage, request, exact selection, local OCI manifest digest, and separate load/publication/signing/attestation outcomes. Older/unknown versions are listed as `unsupported` without interpreting their fields; malformed/unreadable records are listed explicitly, not silently omitted. `buildTime` comes from the retained apko configuration's actual UTC creation annotation when available; `recordedAt` is the record file's modification time, not an invented build timestamp.
+`images` reads retained `result.json` **and** `failure.json` under the [data root](#retained-evidence-and-failures)'s `lupetto/builds/` and, read-only, the legacy OS user cache `lupetto/builds/` that builds before 2026-10-02 used, merged newest record modification time first. Each root's directory listing is bounded to 10,000 entries and the merged history to 1,000 records; exceeding either fails the command rather than truncating. A relative `LUPETTO_DATA_DIR` fails with an invalid-configuration error. Version-6 records preserve command, outcome/failure stage, request, exact selection, local OCI manifest digest, and separate load/publication/signing/attestation outcomes. Older/unknown versions are listed as `unsupported` without interpreting their fields; malformed/unreadable records are listed explicitly, not silently omitted. `buildTime` comes from the retained apko configuration's actual UTC creation annotation when available; `recordedAt` is the record file's modification time, not an invented build timestamp.
 
-Validated local SPDX is reported with path/checksum and `present: true` only if the current regular file remains inside its workspace and its bytes still match the record's validated checksum. A deleted, changed, unreadable, oversized or outside-workspace document has `present: false` and a reason. This is retained, checksum-checked evidence, not a new SPDX validation or durable storage guarantee; deleting a workspace removes that history/evidence.
+Validated local SPDX is reported with path/checksum and `present: true` only if the current regular file remains inside its workspace and its bytes still match the record's validated checksum. A deleted, changed, unreadable, oversized or outside-workspace document has `present: false` and a reason. This is retained, checksum-checked evidence, not a new SPDX validation or a backup; deleting a workspace removes that history/evidence.
 
 Docker access is optional and read-only: the command inherits the existing Docker environment/context and uses only `docker image ls` and `docker image inspect`, without starting a daemon or changing images/tags/contexts. Inventory includes `lupetto/` tags only, grouped by full image ID, with creation time and byte size. Exact APK identity is derived first from matching version-6 record image IDs; without such a record, one unambiguous literal readable tag can supply it. Conflicting identities, unique-only tags, and SHA-256 fallback names remain unknown. Readable tags are mutable names, not immutable build associations.
 
@@ -308,7 +308,16 @@ Lupetto checks the selected installed APK's name/version/architecture and requir
 
 ## Retained evidence and failures
 
-Each build uses a unique mode-0700 workspace under the OS user cache, `lupetto/builds/image-<suffix>`. It retains:
+Each build uses a unique mode-0700 workspace `<data>/lupetto/builds/image-<suffix>` in a durable user data directory, not the cache:
+
+| `<data>` | When |
+| --- | --- |
+| `LUPETTO_DATA_DIR` | Set and non-empty. It must be an absolute path; otherwise `build`/`sbom` exit 2 and `images` exits 1 with an invalid-configuration error. |
+| `$HOME/Library/Application Support` | macOS. |
+| `%LocalAppData%` | Windows. |
+| `$XDG_DATA_HOME`, else `$HOME/.local/share` | Other systems; a relative `XDG_DATA_HOME` is ignored. |
+
+The `<data>/lupetto/builds` directory is created mode 0700 and must not be a symlink. Builds made before 2026-10-02 stay in the legacy OS user cache `lupetto/builds/`; they are not moved, `images` and Explorer still read them, and moving them by hand is unsupported because their records contain absolute paths. Only regenerable data (status's installed-package and severity caches) remains in the cache. On macOS the data root is included in Time Machine backups unless excluded. Each workspace retains:
 
 - `APKINDEX.tar.gz`, `APKINDEX.sha256`, and the pinned `wolfi-signing.rsa.pub`;
 - `apko.yaml`, `lock.json`, and the local OCI layout `image/`;
@@ -330,7 +339,7 @@ Every `build` and `sbom` run that passes argument validation produces one **vers
   "version": 6,
   "command": "build",
   "outcome": "succeeded",
-  "workspace": "/home/user/.cache/lupetto/builds/image-123",
+  "workspace": "/home/user/.local/share/lupetto/builds/image-123",
   "request": {"package": "nginx", "selector": "1.30", "apkVersion": "", "load": false, "publish": true, "sign": false},
   "selection": {"package": "nginx-stable", "version": "1.30.2-r0", "architecture": "x86_64", "indexSHA256": "…"},
   "evidence": {"apkoVersion": "1.4.5", "imageDirectory": "…/image", "imageDigest": "sha256:…", "lockPath": "…/lock.json",
@@ -419,7 +428,7 @@ Build forms submit `package`, exactly one of `selector` (dotted numeric) or `apk
 
 Status refreshes at startup, on the interval, after builds and tracking edits, and on `POST /status/refresh`. Refresh is single-flight; last good facts, computed time, latest error and in-progress state remain separate. A build finishing during an older refresh schedules another comparison. Inventory is cached for 15 seconds and invalidated after builds/tracking edits; inspected immutable package sets are cached by digest reference. Catalog search returns at most 200 entries; named discovery has a 25-second limit and at most four concurrent processes. Append `?format=json` to page GET routes for their view model. Old `/tracks`, `/packages`, and `/jobs` routes remain aliases. `/healthz` means process up, not healthy comparison data. The [rendering contract](internal/explorer/web/CONTRACT.md) specifies models, forms, states and polling.
 
-`GET /builds/{record-id}/sbom` downloads only the local build's validated, checksum-matching SPDX as `application/spdx+json` with attachment disposition. Explorer rechecks the bytes, confines file access to the OS user-cache `lupetto/builds/` directory and that build's workspace, and rejects traversal, symlinks and non-regular/oversized files. The route never accepts a caller-supplied file path. Deleted or changed evidence is unavailable, not silently substituted. Signed SBOMs of registry images use the separate attested-download route above.
+`GET /builds/{record-id}/sbom` downloads only the local build's validated, checksum-matching SPDX as `application/spdx+json` with attachment disposition. Explorer rechecks the bytes, confines file access to one builds root (the [data root](#retained-evidence-and-failures)'s `lupetto/builds/`, or the legacy OS user-cache `lupetto/builds/` for older builds; it resolves both from its own environment the same way the CLI does) and that build's workspace, and rejects traversal, symlinks (including a symlinked builds root) and non-regular/oversized files. The route never accepts a caller-supplied file path. Deleted or changed evidence is unavailable, not silently substituted. Signed SBOMs of registry images use the separate attested-download route above.
 
 `POST /builds/{id}/cancel` sends SIGTERM, which the CLI handles through context cancellation; after five seconds Explorer kills an unresponsive CLI. SIGINT/SIGTERM cancels the active job/background work and gracefully drains HTTP. Cancellation is best-effort, can retain a failure record, and does not roll back images/tags/signatures; a CLI that completes successfully remains successful if cancel races its final record.
 
@@ -441,6 +450,7 @@ docker run --rm --name lupetto-explorer \
   --cap-drop=ALL --security-opt=no-new-privileges \
   -p 127.0.0.1:8080:8080 \
   --mount type=volume,src=lupetto-cache,dst=/var/cache/lupetto \
+  --mount type=volume,src=lupetto-data,dst=/var/lib/lupetto \
   --mount "type=bind,src=$PWD/products,dst=/etc/lupetto/products" \
   --mount "type=bind,src=$HOME/.docker/config.json,dst=/etc/lupetto/docker/config.json,readonly" \
   -e DOCKER_CONFIG=/etc/lupetto/docker \
@@ -449,7 +459,7 @@ docker run --rm --name lupetto-explorer \
   lupetto-explorer:local
 ```
 
-This is an operator template: create a `products/` directory containing a [products file](#compare-published-images-with-wolfi) named `products.yaml`, replace the generic registry/repository with an authorized HTTPS target, and mount only the intended Docker config file. `DOCKER_CONFIG` names its **directory**, not the file. Credential helpers referenced by that file must also exist in the container; this image does not bundle vendor-specific helpers. Mounted files must be readable by UID/GID **65532:65532**. An empty new Docker named volume inherits the image's cache ownership; a pre-existing volume or bind-mounted cache must already be writable by that UID/GID.
+This is an operator template: create a `products/` directory containing a [products file](#compare-published-images-with-wolfi) named `products.yaml`, replace the generic registry/repository with an authorized HTTPS target, and mount only the intended Docker config file. `DOCKER_CONFIG` names its **directory**, not the file. Credential helpers referenced by that file must also exist in the container; this image does not bundle vendor-specific helpers. Mounted files must be readable by UID/GID **65532:65532**. An empty new Docker named volume inherits the image's ownership (65532, mode 0700) of `/var/cache/lupetto` or `/var/lib/lupetto`; a pre-existing volume or bind mount must already be writable by that UID/GID.
 
 For dashboard tracking edits, both `products/` and `products/products.yaml` must be writable by UID/GID 65532 (on Linux, for example, `sudo chown -R 65532:65532 products`, after placing the intended file there). Mount the **directory**, not a single file: `lupetto products` writes a temporary file alongside the original and atomically renames it. A single-file bind mount cannot be replaced by that rename. Add `,readonly` to the directory mount for deliberate read-only tracking; viewing still works and an attempted edit shows the dashboard's read-only/writable-directory message.
 
@@ -474,11 +484,11 @@ No Docker daemon, socket, privileged mode, or extra capabilities are needed for 
 
 The socket must allow that group to read/write it; `--group-add` does not change socket permissions. Do not run the container as root or make the socket world-writable to work around access. Docker Desktop on macOS exposes the daemon through its Linux VM; the host CLI commonly uses `$HOME/.docker/run/docker.sock` (inspect `docker context inspect`) and `/var/run/docker.sock` may be an optional symlink. Desktop's `docker run --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock` exposes the **VM** socket, whose group/permissions need not match the macOS endpoint. Inspect its numeric GID in the VM/container and add that group if required; do not apply Linux `stat -c` to the macOS filesystem. Desktop socket mounting was exercised in the [redesign container check](docs/verification.md#combined-container-redesign-round).
 
-Cache/evidence live below `XDG_CACHE_HOME=/var/cache/lupetto` on the declared volume; `HOME=/var/cache/lupetto/home` is on the same volume. Retained CLI build records persist there and populate history after restart; live jobs/logs are in-memory. For optional signing, additionally bind-mount the intended key file read-only (for example at `/etc/lupetto/cosign.key`), set `LUPETTO_COSIGN_KEY=/etc/lupetto/cosign.key`, and provide `COSIGN_PASSWORD` only through the process environment (`-e COSIGN_PASSWORD` passes an already-set host variable). Never put a password in image build arguments, the Containerfile, or command arguments. Signing requires the remaining [signing configuration](docs/registry-signing.md#sign-and-attest-the-verified-digest); the container check used no keys or credentials.
+Regenerable caches live below `XDG_CACHE_HOME=/var/cache/lupetto`, and `HOME=/var/cache/lupetto/home` is on that volume. Build workspaces and evidence live below `XDG_DATA_HOME=/var/lib/lupetto` (`/var/lib/lupetto/lupetto/builds`) on the separate data volume; both paths are declared volumes, so an unmounted run gets anonymous volumes that are not reused. Retained CLI build records persist on the data volume and populate history after restart; records an older image wrote to `/var/cache/lupetto/lupetto/builds` remain readable while the cache volume is mounted. Live jobs/logs are in-memory. For optional signing, additionally bind-mount the intended key file read-only (for example at `/etc/lupetto/cosign.key`), set `LUPETTO_COSIGN_KEY=/etc/lupetto/cosign.key`, and provide `COSIGN_PASSWORD` only through the process environment (`-e COSIGN_PASSWORD` passes an already-set host variable). Never put a password in image build arguments, the Containerfile, or command arguments. Signing requires the remaining [signing configuration](docs/registry-signing.md#sign-and-attest-the-verified-digest); the container check used no keys or credentials.
 
 #### Compose
 
-The root [`compose.yaml`](compose.yaml) runs the same container with the same defaults as the `docker run` template above: linux/amd64, all capabilities dropped, `no-new-privileges`, port published on host loopback only, builds disabled, the cache on a named volume, and `restart: unless-stopped`. It takes its settings from variables, so keep them in an env file **outside the checkout**:
+The root [`compose.yaml`](compose.yaml) runs the same container with the same defaults as the `docker run` template above: linux/amd64, all capabilities dropped, `no-new-privileges`, port published on host loopback only, builds disabled, the cache and the durable build data on separate named volumes, and `restart: unless-stopped`. It takes its settings from variables, so keep them in an env file **outside the checkout**:
 
 ```bash
 # /srv/lupetto/lupetto.env (example path)
@@ -487,13 +497,13 @@ LUPETTO_REPOSITORY=team/lupetto/images
 LUPETTO_PRODUCTS_DIR=/srv/lupetto/products              # directory containing products.yaml
 LUPETTO_DOCKER_CONFIG_FILE=/srv/lupetto/docker/config.json
 # Optional: LUPETTO_PUBLISH (default 127.0.0.1:8080), LUPETTO_IMAGE (default lupetto-explorer:local),
-#           LUPETTO_CACHE_VOLUME (default lupetto-cache)
+#           LUPETTO_CACHE_VOLUME (default lupetto-cache), LUPETTO_DATA_VOLUME (default lupetto-data)
 ```
 
 ```bash
 docker compose --env-file /srv/lupetto/lupetto.env up -d --build   # build the image and start
 docker compose --env-file /srv/lupetto/lupetto.env logs -f          # follow the server log
-docker compose --env-file /srv/lupetto/lupetto.env down             # stop; add -v to also delete the cache volume
+docker compose --env-file /srv/lupetto/lupetto.env down             # stop; -v also deletes the cache AND build-data volumes
 ```
 
 The registry, repository, and Docker config file are required: Compose refuses to start and names the missing variable. The products and Docker-config ownership rules [above](#combined-container) apply unchanged.

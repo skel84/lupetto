@@ -15,13 +15,22 @@ import (
 	"time"
 )
 
+// fixtureInventory places one validated build in the durable data builds
+// root; callers must isolate the environment with isolatedCache first.
 func fixtureInventory(t *testing.T) (ImagesDocument, InventoryBuild) {
 	t.Helper()
-	cache, err := os.UserCacheDir()
+	roots, err := buildsRoots()
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace := filepath.Join(cache, "lupetto", "builds", "image-fixture")
+	return fixtureInventoryAt(t, roots[0], "image-fixture")
+}
+func fixtureInventoryAt(t *testing.T, builds, name string) (ImagesDocument, InventoryBuild) {
+	t.Helper()
+	if home := os.Getenv("HOME"); home == "" || !strings.HasPrefix(builds, home+string(filepath.Separator)) {
+		t.Fatalf("fixture root %q is outside the isolated HOME %q", builds, home)
+	}
+	workspace := filepath.Join(builds, name)
 	if err := os.MkdirAll(filepath.Join(workspace, "sbom"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -36,12 +45,23 @@ func fixtureInventory(t *testing.T) (ImagesDocument, InventoryBuild) {
 	d := ImagesDocument{Kind: "images", Version: 1, Builds: []InventoryBuild{b}, Docker: DockerInventory{Available: true, Images: []DockerImage{{ID: "sha256:local", IdentityKnown: true, Identity: &PackageIdentity{Name: "curl", Version: "1.2-r0", Architecture: "x86_64"}}}}}
 	return d, b
 }
-func isolatedCache(t *testing.T) {
+
+// isolatedCache points every user cache/data input at a fresh temporary
+// HOME, so tests never touch the real cache or data directories. It returns
+// the durable data and legacy cache builds roots.
+func isolatedCache(t *testing.T) (data, legacy string) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "xdg-data"))
 	t.Setenv("LOCALAPPDATA", filepath.Join(home, "cache"))
+	t.Setenv("LUPETTO_DATA_DIR", filepath.Join(home, "data"))
+	roots, err := buildsRoots()
+	if err != nil || len(roots) != 2 {
+		t.Fatalf("isolated roots: %q %v", roots, err)
+	}
+	return roots[0], roots[1]
 }
 func fixtureTrack() Track {
 	newest := Image{Digest: "sha256:" + strings.Repeat("a", 64), Name: "curl", Version: "1.2-r0", Architecture: "x86_64"}
@@ -392,11 +412,11 @@ func TestDashboardSiblingCompareAndRootSymlink(t *testing.T) {
 	if view.Compare.Error != "" || view.Compare.Changed != 1 {
 		t.Fatalf("sibling compare: %+v", view.Compare)
 	}
-	cache, err := os.UserCacheDir()
+	roots, err := buildsRoots()
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := filepath.Join(cache, "lupetto", "builds")
+	root := roots[0]
 	moved := root + "-moved"
 	if err := os.Rename(root, moved); err != nil {
 		t.Fatal(err)
@@ -405,7 +425,7 @@ func TestDashboardSiblingCompareAndRootSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := readValidatedSPDX(build); err == nil {
-		t.Fatal("symlink cache builds root accepted")
+		t.Fatal("symlink data builds root accepted")
 	}
 }
 
@@ -429,6 +449,83 @@ func TestDashboardErrorsAreNotRegistryAbsence(t *testing.T) {
 	server.status.finish(nil, context.DeadlineExceeded)
 	if server.shell().RegistryState != "error" {
 		t.Fatal("last error claimed successful comparison")
+	}
+}
+
+func TestDashboardSPDXFromDataAndLegacyRoots(t *testing.T) {
+	data, legacy := isolatedCache(t)
+	inventory, durable := fixtureInventoryAt(t, data, "image-durable")
+	_, old := fixtureInventoryAt(t, legacy, "image-legacy")
+	inventory.Builds = append(inventory.Builds, old)
+	config := goodFake()
+	config.Images = encodeFixture(t, inventory)
+	server, _, _ := testServer(t, config, false)
+	for _, build := range []InventoryBuild{durable, old} {
+		w := request(server, "GET", "/builds/"+buildID(build)+"/sbom", nil)
+		sum := sha256.Sum256(w.Body.Bytes())
+		if w.Code != 200 || w.Header().Get("Content-Type") != "application/spdx+json" || hex.EncodeToString(sum[:]) != build.SPDX.SHA256 {
+			t.Fatalf("%s download: %d %s", build.Workspace, w.Code, w.Body.String())
+		}
+	}
+
+	// A workspace outside both roots, and SPDX evidence that crosses from one
+	// root's workspace into the other's, are refused.
+	_, outside := fixtureInventoryAt(t, filepath.Join(os.Getenv("HOME"), "elsewhere", "lupetto", "builds"), "image-outside")
+	if _, err := readValidatedSPDX(outside); err == nil || !strings.Contains(err.Error(), "outside the Lupetto builds directories") {
+		t.Fatalf("workspace outside both roots: %v", err)
+	}
+	crossed := old
+	record, evidence := *old.Record, *old.Record.Evidence
+	record.Evidence = &evidence
+	crossed.Record = &record
+	crossed.SPDX.Path, crossed.Record.Evidence.SPDXPath = durable.SPDX.Path, durable.SPDX.Path
+	crossed.SPDX.SHA256, crossed.Record.Evidence.SPDXSHA256 = durable.SPDX.SHA256, durable.SPDX.SHA256
+	if _, err := readValidatedSPDX(crossed); err == nil || !strings.Contains(err.Error(), "outside") {
+		t.Fatalf("cross-root SPDX accepted: %v", err)
+	}
+
+	// A symlinked legacy root is refused without affecting the data root.
+	moved := legacy + "-moved"
+	if err := os.Rename(legacy, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(moved, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readValidatedSPDX(old); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlinked legacy root accepted: %v", err)
+	}
+	if _, err := readValidatedSPDX(durable); err != nil {
+		t.Fatalf("data root affected by legacy symlink: %v", err)
+	}
+
+	t.Setenv("LUPETTO_DATA_DIR", "relative/data")
+	if _, err := readValidatedSPDX(durable); err == nil || !strings.Contains(err.Error(), "LUPETTO_DATA_DIR must be an absolute path") {
+		t.Fatalf("relative LUPETTO_DATA_DIR: %v", err)
+	}
+}
+
+func TestExplorerDataDirMatchesCLIRule(t *testing.T) {
+	for _, test := range []struct {
+		goos string
+		env  map[string]string
+		want string
+	}{
+		{"linux", map[string]string{"LUPETTO_DATA_DIR": "/srv/data/", "XDG_DATA_HOME": "/xdg"}, "/srv/data"},
+		{"darwin", map[string]string{"HOME": "/Users/u", "XDG_DATA_HOME": "/ignored"}, "/Users/u/Library/Application Support"},
+		{"windows", map[string]string{"LocalAppData": "/appdata"}, "/appdata"},
+		{"linux", map[string]string{"XDG_DATA_HOME": "/xdg", "HOME": "/home/u"}, "/xdg"},
+		{"linux", map[string]string{"XDG_DATA_HOME": "relative", "HOME": "/home/u"}, "/home/u/.local/share"},
+	} {
+		got, err := dataDir(test.goos, func(key string) string { return test.env[key] })
+		if err != nil || got != test.want {
+			t.Fatalf("%s %v: %q %v; want %q", test.goos, test.env, got, err, test.want)
+		}
+	}
+	for _, env := range []map[string]string{{"LUPETTO_DATA_DIR": "data", "HOME": "/home/u"}, {"HOME": "relative"}, {}} {
+		if got, err := dataDir("linux", func(key string) string { return env[key] }); err == nil {
+			t.Fatalf("%v accepted: %q", env, got)
+		}
 	}
 }
 

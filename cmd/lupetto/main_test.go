@@ -549,3 +549,25 @@ func TestRunJSONOutput(t *testing.T) {
 		t.Fatalf("code=%d stderr=%q", code, stderr.String())
 	}
 }
+
+func TestRunBuildRejectsRelativeDataDirBeforeCallback(t *testing.T) {
+	t.Setenv("LUPETTO_DATA_DIR", "relative/data")
+	t.Setenv("LUPETTO_REGISTRY", "")
+	t.Setenv("LUPETTO_REPOSITORY", "")
+	for _, args := range [][]string{{"build", "busybox-static", "1", "--no-load"}, {"sbom", "busybox-static", "--apk-version", "1.38.0-r2"}} {
+		called := false
+		callback := func(context.Context, cliRequest) (build.Result, error) { called = true; return build.Result{}, nil }
+		var stdout, stderr bytes.Buffer
+		if code := runWithBuild(context.Background(), args, &stdout, &stderr, callback); code != 2 || called || stdout.Len() != 0 || !strings.Contains(stderr.String(), "invalid configuration: LUPETTO_DATA_DIR must be an absolute path") {
+			t.Fatalf("args=%q code=%d called=%v stdout=%q stderr=%q", args, code, called, stdout.String(), stderr.String())
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run(context.Background(), []string{"images", "--json"}, &stdout, &stderr); code != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "LUPETTO_DATA_DIR must be an absolute path") {
+		t.Fatalf("images: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	if code := run(context.Background(), []string{"--help"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "<data>/lupetto/builds, where <data> is LUPETTO_DATA_DIR") || !strings.Contains(stdout.String(), "read-only, the legacy <user cache>/lupetto/builds") {
+		t.Fatalf("help does not describe the data root: %s", stdout.String())
+	}
+}

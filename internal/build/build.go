@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
+	"lupetto/internal/storage"
 	"lupetto/internal/wolfi"
 )
 
@@ -50,7 +51,7 @@ type Result struct {
 // boundaries.
 func Run(ctx context.Context, request Request) (Result, error) {
 	return RunWith(ctx, request, Services{
-		Command: ExecuteLocalCommand, CacheDir: os.UserCacheDir,
+		Command: ExecuteLocalCommand, DataDir: storage.DataDir,
 		PublicFile: wolfi.GetPublicFile, SigningKey: wolfi.GetSigningKey,
 		SigningCommand: executeSigningCommand,
 	})
@@ -61,9 +62,11 @@ func Run(ctx context.Context, request Request) (Result, error) {
 type Services struct {
 	Command        CommandFunc
 	SigningCommand CommandFunc
-	CacheDir       func() (string, error)
-	PublicFile     func(context.Context, string, int64) ([]byte, error)
-	SigningKey     func(context.Context) ([]byte, error)
+	// DataDir returns the durable data base directory; workspaces are created
+	// under storage.BuildsDir of it.
+	DataDir    func() (string, error)
+	PublicFile func(context.Context, string, int64) ([]byte, error)
+	SigningKey func(context.Context) ([]byte, error)
 	// RegistryTransport nil means remote.DefaultTransport. Either way it is
 	// wrapped by the loopback-only plain-HTTP guard.
 	RegistryTransport http.RoundTripper
@@ -108,13 +111,18 @@ func RunWith(ctx context.Context, request Request, services Services) (Result, e
 		return buildFail(err)
 	}
 	buildStage(ctx, "Creating build workspace")
-	cacheDir, err := services.CacheDir()
+	dataDir, err := services.DataDir()
 	if err != nil {
-		return buildFail(fmt.Errorf("find user cache: %w", err))
+		return buildFail(fmt.Errorf("find user data directory: %w", err))
 	}
-	root := filepath.Join(cacheDir, "lupetto", "builds")
+	root := storage.BuildsDir(dataDir)
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return buildFail(fmt.Errorf("create build directory: %w", err))
+	}
+	// Explorer refuses to serve evidence below a symlinked builds root, so do
+	// not create evidence there.
+	if info, err := os.Lstat(root); err != nil || !info.IsDir() {
+		return buildFail(fmt.Errorf("build directory %s must be a directory, not a symlink", root))
 	}
 	workspace, err := os.MkdirTemp(root, "image-")
 	if err != nil {

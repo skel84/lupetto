@@ -33,7 +33,7 @@ func TestBuildPublicationRejectedBeforeExternalBoundaries(t *testing.T) {
 				t.Fatal("tool called before validation")
 				return nil, nil
 			},
-			CacheDir: func() (string, error) { t.Fatal("workspace called before validation"); return "", nil },
+			DataDir: func() (string, error) { t.Fatal("workspace called before validation"); return "", nil },
 			PublicFile: func(context.Context, string, int64) ([]byte, error) {
 				t.Fatal("network called before validation")
 				return nil, nil
@@ -53,7 +53,7 @@ func TestBuildSigningEarlierApkoFailureKeepsRequestedNotAttempted(t *testing.T) 
 		Command: func(context.Context, string, ...string) ([]byte, error) {
 			return []byte(buildtest.SigningCanary), errors.New(buildtest.SigningCanary)
 		},
-		CacheDir: func() (string, error) { t.Fatal("workspace used after failed apko preflight"); return "", nil },
+		DataDir: func() (string, error) { t.Fatal("workspace used after failed apko preflight"); return "", nil },
 	}
 	result, err := RunWith(context.Background(), request, services)
 	var wf *WorkflowFailure
@@ -78,7 +78,7 @@ func TestBuildSigningInvalidOptionsRejectedBeforeExternalBoundaries(t *testing.T
 				t.Fatal("Cosign invoked before validation")
 				return nil, nil
 			},
-			CacheDir: func() (string, error) { t.Fatal("workspace invoked before validation"); return "", nil },
+			DataDir: func() (string, error) { t.Fatal("workspace invoked before validation"); return "", nil },
 			PublicFile: func(context.Context, string, int64) ([]byte, error) {
 				t.Fatal("network invoked before validation")
 				return nil, nil
@@ -180,5 +180,66 @@ func TestCheckImagePackageKeepsFirstSelectedRecordSemantics(t *testing.T) {
 	selected := wolfi.Package{Name: "valkey-9.1", Version: "9.1.2-r1", Arch: "x86_64"}
 	if _, err := checkImagePackage(dir, selected); err == nil || !strings.Contains(err.Error(), "different version or architecture") {
 		t.Fatalf("later duplicate record must not mask wrong first selected version: %v", err)
+	}
+}
+
+func TestBuildWorkspaceUnderDataRoot(t *testing.T) {
+	stopped := errors.New("stop after workspace creation")
+	apko := func(context.Context, string, ...string) ([]byte, error) {
+		return []byte("GitVersion:    " + ApkoVersion + "\n"), nil
+	}
+	data := filepath.Join(t.TempDir(), "data")
+	result, err := RunWith(context.Background(), Request{NoLoad: true}, Services{
+		Command:    apko,
+		DataDir:    func() (string, error) { return data, nil },
+		PublicFile: func(context.Context, string, int64) ([]byte, error) { return nil, stopped },
+	})
+	if !errors.Is(err, stopped) {
+		t.Fatalf("err=%v", err)
+	}
+	root := filepath.Join(data, "lupetto", "builds")
+	if filepath.Dir(result.Workspace) != root || !strings.HasPrefix(filepath.Base(result.Workspace), "image-") {
+		t.Fatalf("workspace %q is not directly under %q", result.Workspace, root)
+	}
+	for _, directory := range []string{root, result.Workspace} {
+		info, err := os.Stat(directory)
+		if err != nil || !info.IsDir() || info.Mode().Perm() != 0700 {
+			t.Fatalf("%s: %v %v", directory, info, err)
+		}
+	}
+
+	// Explorer refuses evidence below a symlinked builds root; the build must
+	// not create evidence there.
+	linked := filepath.Join(t.TempDir(), "linked")
+	if err := os.MkdirAll(filepath.Join(linked, "lupetto"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(linked, "lupetto", "builds")); err != nil {
+		t.Fatal(err)
+	}
+	result, err = RunWith(context.Background(), Request{NoLoad: true}, Services{
+		Command: apko,
+		DataDir: func() (string, error) { return linked, nil },
+		PublicFile: func(context.Context, string, int64) ([]byte, error) {
+			t.Fatal("workspace created below a symlinked root")
+			return nil, nil
+		},
+	})
+	var wf *WorkflowFailure
+	if !errors.As(err, &wf) || wf.Stage != "build" || result.Workspace != "" || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlinked root: result=%+v err=%v", result, err)
+	}
+
+	invalid := errors.New("invalid configuration: LUPETTO_DATA_DIR must be an absolute path")
+	result, err = RunWith(context.Background(), Request{NoLoad: true}, Services{
+		Command: apko,
+		DataDir: func() (string, error) { return "", invalid },
+		PublicFile: func(context.Context, string, int64) ([]byte, error) {
+			t.Fatal("continued without a data root")
+			return nil, nil
+		},
+	})
+	if !errors.Is(err, invalid) || result.Workspace != "" {
+		t.Fatalf("invalid data root: result=%+v err=%v", result, err)
 	}
 }

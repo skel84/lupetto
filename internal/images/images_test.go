@@ -212,3 +212,84 @@ func TestImagesDockerMalformedBoundedAndSanitized(t *testing.T) {
 		}
 	}
 }
+
+func isolatedRoots(t *testing.T) (data, legacy string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "xdg-data"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "cache"))
+	data = filepath.Join(home, "data")
+	t.Setenv("LUPETTO_DATA_DIR", data)
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(data, "lupetto", "builds"), filepath.Join(cache, "lupetto", "builds")
+}
+
+func TestImagesHistoryFromDataAndLegacyRoots(t *testing.T) {
+	data, legacy := isolatedRoots(t)
+	newer := fixtureRecord(t, data, "durable", "succeeded", "")
+	older := fixtureRecord(t, legacy, "legacy", "succeeded", "")
+	oldTime := time.Date(2026, 10, 1, 11, 0, 0, 0, time.UTC)
+	os.Chtimes(older, oldTime, oldTime)
+	os.Chtimes(newer, oldTime.Add(time.Hour), oldTime.Add(time.Hour))
+	fakeDocker(t, "exit 1\n")
+	document, err := Run(context.Background())
+	if err != nil || len(document.Builds) != 2 {
+		t.Fatalf("history: %+v %v", document, err)
+	}
+	if document.Builds[0].RecordPath != newer || document.Builds[1].RecordPath != older || !document.Builds[0].SPDX.Present || !document.Builds[1].SPDX.Present {
+		t.Fatalf("merged order/SPDX: %+v", document.Builds)
+	}
+	if legacyEntries, _ := os.ReadDir(legacy); len(legacyEntries) != 1 {
+		t.Fatalf("legacy root modified: %v", legacyEntries)
+	}
+
+	// The same directory reached twice (equal configuration or an alias) is
+	// listed once.
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(data, alias); err != nil {
+		t.Fatal(err)
+	}
+	if history, err := scanHistory(context.Background(), data, alias, data); err != nil || len(history) != 1 {
+		t.Fatalf("aliased root listed twice: %+v %v", history, err)
+	}
+
+	// Only the legacy root exists: still listed.
+	t.Setenv("LUPETTO_DATA_DIR", filepath.Join(t.TempDir(), "empty"))
+	if document, err := Run(context.Background()); err != nil || len(document.Builds) != 1 || document.Builds[0].RecordPath != older {
+		t.Fatalf("legacy only: %+v %v", document.Builds, err)
+	}
+
+	t.Setenv("LUPETTO_DATA_DIR", "relative/data")
+	if _, err := Run(context.Background()); err == nil || !strings.Contains(err.Error(), "LUPETTO_DATA_DIR must be an absolute path") {
+		t.Fatalf("relative LUPETTO_DATA_DIR: %v", err)
+	}
+}
+
+func TestImagesRecordBoundSpansRoots(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	for i := range MaxRecords {
+		root := first
+		if i%2 == 1 {
+			root = second
+		}
+		directory := filepath.Join(root, fmt.Sprintf("record-%d", i))
+		if err := os.Mkdir(directory, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, "result.json"), []byte(`{"version":99}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if history, err := scanHistory(context.Background(), first, second); err != nil || len(history) != MaxRecords {
+		t.Fatalf("exactly %d records across roots: %d %v", MaxRecords, len(history), err)
+	}
+	fixtureRecord(t, second, "one-more", "succeeded", "")
+	if _, err := scanHistory(context.Background(), first, second); err == nil || !strings.Contains(err.Error(), "retained records") {
+		t.Fatalf("combined record bound: %v", err)
+	}
+}

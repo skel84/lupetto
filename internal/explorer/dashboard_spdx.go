@@ -24,25 +24,32 @@ func readValidatedSPDX(build InventoryBuild) ([]byte, error) {
 	if build.SPDX.Path != build.Record.Evidence.SPDXPath || build.SPDX.SHA256 != build.Record.Evidence.SPDXSHA256 {
 		return nil, errors.New("SPDX inventory does not match validated record")
 	}
-	cache, err := os.UserCacheDir()
+	roots, err := buildsRoots()
 	if err != nil {
 		return nil, err
 	}
-	builds := filepath.Join(cache, "lupetto", "builds")
+	// The record's workspace selects one root (durable data first, then the
+	// legacy cache); every later check is confined to that root alone.
+	builds := ""
+	for _, root := range roots {
+		if workspace, err := filepath.Rel(root, build.Workspace); err == nil && filepath.IsLocal(workspace) && workspace != "." {
+			builds = root
+			break
+		}
+	}
+	if builds == "" {
+		return nil, errors.New("build workspace is outside the Lupetto builds directories")
+	}
 	info, err := os.Lstat(builds)
 	if err != nil {
 		return nil, err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return nil, errors.New("Lupetto cache builds directory must not be a symlink")
+		return nil, errors.New("Lupetto builds directory must not be a symlink")
 	}
 	relative, err := filepath.Rel(builds, build.SPDX.Path)
 	if err != nil || !filepath.IsLocal(relative) || relative == "." {
-		return nil, errors.New("SPDX path is outside Lupetto cache builds directory")
-	}
-	workspace, err := filepath.Rel(builds, build.Workspace)
-	if err != nil || !filepath.IsLocal(workspace) || workspace == "." {
-		return nil, errors.New("build workspace is outside Lupetto cache builds directory")
+		return nil, errors.New("SPDX path is outside the Lupetto builds directory")
 	}
 	inside, err := filepath.Rel(build.Workspace, build.SPDX.Path)
 	if err != nil || !filepath.IsLocal(inside) || inside == "." {
@@ -58,7 +65,7 @@ func readValidatedSPDX(build InventoryBuild) ([]byte, error) {
 		return nil, err
 	}
 	if !os.SameFile(info, opened) {
-		return nil, errors.New("Lupetto cache builds directory changed while opening")
+		return nil, errors.New("Lupetto builds directory changed while opening")
 	}
 	components := strings.Split(relative, string(filepath.Separator))
 	current := ""

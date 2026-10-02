@@ -30,9 +30,13 @@ services:
         target: /etc/lupetto/docker/config.json
         read_only: true
       - cache:/var/cache/lupetto
+      # Durable build workspaces and evidence (separate from regenerable cache).
+      - data:/var/lib/lupetto
     # Same as the image defaults: builds stay disabled unless overridden.
     command: [--listen, "0.0.0.0:8080", --products, /etc/lupetto/products/products.yaml]
 
 volumes:
   cache:
     name: ${LUPETTO_CACHE_VOLUME:-lupetto-cache}
+  data:
+    name: ${LUPETTO_DATA_VOLUME:-lupetto-data}

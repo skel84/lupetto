@@ -20,6 +20,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 	"lupetto/internal/build"
+	"lupetto/internal/storage"
 	"lupetto/internal/wolfi"
 )
 
@@ -76,17 +77,19 @@ type Image struct {
 	Identity       *Identity `json:"identity,omitempty"`
 }
 
+// Run lists retained records from the durable data builds root and, read-only,
+// the legacy user-cache builds root (see storage.HistoryRoots).
 func Run(ctx context.Context) (Document, error) {
-	cache, err := os.UserCacheDir()
+	roots, err := storage.HistoryRoots()
 	if err != nil {
-		return Document{}, fmt.Errorf("find user cache: %w", err)
+		return Document{}, fmt.Errorf("find user data directory: %w", err)
 	}
-	return RunAt(ctx, filepath.Join(cache, "lupetto", "builds"))
+	return RunAt(ctx, roots...)
 }
 
-// RunAt scans an explicit builds root, used by hermetic fixture tests.
-func RunAt(ctx context.Context, root string) (Document, error) {
-	history, err := scanHistory(ctx, root)
+// RunAt scans explicit builds roots, used by hermetic fixture tests.
+func RunAt(ctx context.Context, roots ...string) (Document, error) {
+	history, err := scanHistory(ctx, roots...)
 	if err != nil {
 		return Document{}, err
 	}
@@ -97,26 +100,60 @@ func RunAt(ctx context.Context, root string) (Document, error) {
 	return Document{Kind: "images", Version: 1, ComputedAt: time.Now().UTC().Format(time.RFC3339Nano), Builds: history, Docker: docker}, nil
 }
 
-func scanHistory(ctx context.Context, root string) ([]History, error) {
+// scanHistory merges every root's records, newest first. MaxWorkspaces bounds
+// each root's directory listing; MaxRecords bounds the merged list, so the
+// images document has the same size bound as with one root. A root that is
+// the same directory as an earlier one is read once.
+func scanHistory(ctx context.Context, roots ...string) ([]History, error) {
 	history := []History{}
+	scanned := []os.FileInfo{}
+	for _, root := range roots {
+		var err error
+		history, scanned, err = scanRoot(ctx, root, history, scanned)
+		if err != nil {
+			return nil, err
+		}
+	}
+	sort.Slice(history, func(i, j int) bool {
+		left, _ := time.Parse(time.RFC3339Nano, history[i].RecordedAt)
+		right, _ := time.Parse(time.RFC3339Nano, history[j].RecordedAt)
+		if !left.Equal(right) {
+			return left.After(right)
+		}
+		return history[i].RecordPath < history[j].RecordPath
+	})
+	return history, nil
+}
+
+func scanRoot(ctx context.Context, root string, history []History, scanned []os.FileInfo) ([]History, []os.FileInfo, error) {
 	directory, err := os.Open(root)
 	if errors.Is(err, os.ErrNotExist) {
-		return history, nil
+		return history, scanned, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("open build history: %w", err)
+		return nil, nil, fmt.Errorf("open build history: %w", err)
 	}
 	defer directory.Close()
+	info, err := directory.Stat()
+	if err != nil {
+		return nil, nil, fmt.Errorf("open build history: %w", err)
+	}
+	for _, earlier := range scanned {
+		if os.SameFile(earlier, info) {
+			return history, scanned, nil
+		}
+	}
+	scanned = append(scanned, info)
 	entries, err := directory.ReadDir(MaxWorkspaces + 1)
 	if err != nil && err != io.EOF {
-		return nil, fmt.Errorf("read build history: %w", err)
+		return nil, nil, fmt.Errorf("read build history: %w", err)
 	}
 	if len(entries) > MaxWorkspaces {
-		return nil, fmt.Errorf("build history exceeds %d workspace entries", MaxWorkspaces)
+		return nil, nil, fmt.Errorf("build history %s exceeds %d workspace entries", root, MaxWorkspaces)
 	}
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if !entry.IsDir() {
 			continue
@@ -129,65 +166,55 @@ func scanHistory(ctx context.Context, root string) ([]History, error) {
 				continue
 			}
 			if len(history) >= MaxRecords {
-				return nil, fmt.Errorf("build history exceeds %d retained records", MaxRecords)
+				return nil, nil, fmt.Errorf("build history exceeds %d retained records", MaxRecords)
 			}
-			item := History{Workspace: workspace, RecordPath: path, Status: "unreadable", SPDX: SPDX{Reason: "record unavailable"}}
-			if err != nil {
-				item.Error = "cannot stat record"
-				history = append(history, item)
-				continue
-			}
-			item.RecordedAt = info.ModTime().UTC().Format(time.RFC3339Nano)
-			if !info.Mode().IsRegular() {
-				item.Error = "record is not a regular file"
-				history = append(history, item)
-				continue
-			}
-			data, err := readBounded(path, MaxRecordBytes)
-			if err != nil {
-				item.Error = "cannot read record or record exceeds 1 MiB"
-				history = append(history, item)
-				continue
-			}
-			var header struct {
-				Version int `json:"version"`
-			}
-			if err := json.Unmarshal(data, &header); err != nil {
-				item.Status = "invalid"
-				item.Error = "invalid record JSON"
-				history = append(history, item)
-				continue
-			}
-			item.RecordVersion = header.Version
-			if header.Version != 6 {
-				item.Status = "unsupported"
-				item.SPDX.Reason = "unsupported record version"
-				history = append(history, item)
-				continue
-			}
-			var record build.Record
-			if err := json.Unmarshal(data, &record); err != nil || (record.Outcome != "succeeded" && record.Outcome != "failed") || (record.Command != "build" && record.Command != "sbom") {
-				item.Status = "invalid"
-				item.Error = "invalid version-6 record"
-				history = append(history, item)
-				continue
-			}
-			item.Status = "supported"
-			item.Record = &record
-			item.BuildTime = readBuildTime(workspace)
-			item.SPDX = checkSPDX(workspace, record.Evidence)
-			history = append(history, item)
+			history = append(history, readRecord(workspace, path, info, err))
 		}
 	}
-	sort.Slice(history, func(i, j int) bool {
-		left, _ := time.Parse(time.RFC3339Nano, history[i].RecordedAt)
-		right, _ := time.Parse(time.RFC3339Nano, history[j].RecordedAt)
-		if !left.Equal(right) {
-			return left.After(right)
-		}
-		return history[i].RecordPath < history[j].RecordPath
-	})
-	return history, nil
+	return history, scanned, nil
+}
+
+func readRecord(workspace, path string, info os.FileInfo, statErr error) History {
+	item := History{Workspace: workspace, RecordPath: path, Status: "unreadable", SPDX: SPDX{Reason: "record unavailable"}}
+	if statErr != nil {
+		item.Error = "cannot stat record"
+		return item
+	}
+	item.RecordedAt = info.ModTime().UTC().Format(time.RFC3339Nano)
+	if !info.Mode().IsRegular() {
+		item.Error = "record is not a regular file"
+		return item
+	}
+	data, err := readBounded(path, MaxRecordBytes)
+	if err != nil {
+		item.Error = "cannot read record or record exceeds 1 MiB"
+		return item
+	}
+	var header struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(data, &header); err != nil {
+		item.Status = "invalid"
+		item.Error = "invalid record JSON"
+		return item
+	}
+	item.RecordVersion = header.Version
+	if header.Version != 6 {
+		item.Status = "unsupported"
+		item.SPDX.Reason = "unsupported record version"
+		return item
+	}
+	var record build.Record
+	if err := json.Unmarshal(data, &record); err != nil || (record.Outcome != "succeeded" && record.Outcome != "failed") || (record.Command != "build" && record.Command != "sbom") {
+		item.Status = "invalid"
+		item.Error = "invalid version-6 record"
+		return item
+	}
+	item.Status = "supported"
+	item.Record = &record
+	item.BuildTime = readBuildTime(workspace)
+	item.SPDX = checkSPDX(workspace, record.Evidence)
+	return item
 }
 
 func readBounded(path string, maximum int64) ([]byte, error) {

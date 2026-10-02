@@ -11,7 +11,7 @@ import (
 	"lupetto/internal/images"
 )
 
-const imagesUsage = "\n\nRead-only local inventory:\n  lupetto images [--json]\nImages lists retained version-6 build/failure records and local lupetto/ Docker images, newest first.\nImages --json prints kind=images, version=1; unsupported record versions are listed without parsing them.\nDocker is optional: unreachable/missing Docker is reported as unavailable, never as an empty available inventory.\nImages does not build, load, tag, publish, or change Docker state."
+const imagesUsage = "\n\nRead-only local inventory:\n  lupetto images [--json]\nImages lists retained version-6 build/failure records and local lupetto/ Docker images, newest first.\nRecords are read from <data>/lupetto/builds (LUPETTO_DATA_DIR or the OS user data directory) and, read-only, the legacy <user cache>/lupetto/builds.\nImages --json prints kind=images, version=1; unsupported record versions are listed without parsing them.\nDocker is optional: unreachable/missing Docker is reported as unavailable, never as an empty available inventory.\nImages does not build, load, tag, publish, or change Docker state."
 
 func runImages(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	return runImagesWith(ctx, args, stdout, stderr, images.Run)

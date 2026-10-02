@@ -49,7 +49,7 @@ func newPipelineFixture(t *testing.T, failure string, cancel context.CancelFunc)
 	}
 	ociArch := buildtest.OCIArch(t, arch)
 	index, key := wolfitest.MakeSignedIndexFor(t, "P:postgresql-17\nV:17.10-r1\nA:"+arch+"\nC:Q1checksum\n\n")
-	cache := t.TempDir()
+	data := t.TempDir()
 	f := &pipelineFixture{}
 	f.readableReference = "lupetto/postgresql-17:17.10-r1-" + ociArch
 	write := func(path string, data []byte) {
@@ -59,7 +59,7 @@ func newPipelineFixture(t *testing.T, failure string, cancel context.CancelFunc)
 		}
 	}
 	f.services = build.Services{
-		CacheDir: func() (string, error) { return cache, nil },
+		DataDir: func() (string, error) { return data, nil },
 		PublicFile: func(ctx context.Context, url string, max int64) ([]byte, error) {
 			f.events = append(f.events, "index")
 			if failure == "cancel index" {

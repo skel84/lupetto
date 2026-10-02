@@ -315,7 +315,7 @@ func TestBuildSigningVersionPreflightBeforeWorkspaceNetworkAndBuild(t *testing.T
 					t.Fatal("build tool invoked after failed signing preflight")
 					return nil, nil
 				},
-				CacheDir: func() (string, error) { t.Fatal("workspace used after failed signing preflight"); return "", nil },
+				DataDir: func() (string, error) { t.Fatal("workspace used after failed signing preflight"); return "", nil },
 				PublicFile: func(context.Context, string, int64) ([]byte, error) {
 					t.Fatal("network used after failed signing preflight")
 					return nil, nil

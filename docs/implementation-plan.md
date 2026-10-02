@@ -118,6 +118,10 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 - [x] Dashboard signature status and signed-SBOM download, verified in a real browser against Harbor: Signed chips on Images, Signed/Unsigned and SBOM states with key fingerprint on the image detail, at desktop and phone width; the download returned the attested SPDX with `Content-Length`, matching SHA-256, and no leftover temporary directory; wrong host 403, unattested digest 409. [Evidence](verification.md#signature-status-lupetto-verify-and-dashboard-2026-10-02).
 - [ ] Containerized LAN dashboard against Harbor (replacing the loopback-registry LAN test deployment). Not run: deploying the container with the signing key and password was left to the operator; the native dashboard above is the recorded evidence.
 
+**Durable build evidence round** ([decision](decisions.md#durable-build-evidence-location-user-approved-2026-10-02)):
+
+- [x] Move new build workspaces from the user cache to the durable data root (`LUPETTO_DATA_DIR` or the OS user data directory) and read history and local SBOM downloads from both roots. A real `--no-load` BusyBox build landed under `<data>/lupetto/builds` with mode-0700 directories; `images --json` listed it beside a legacy-root record written by the pre-change CLI, and Explorer served both SPDX files with matching checksums. A relative `LUPETTO_DATA_DIR` exited 2 for `build` and 1 for `images`. The linux/amd64 image has `XDG_DATA_HOME=/var/lib/lupetto` (65532, 0700) as a second volume; Compose mounts a separate named data volume. Focused regressions and the `go test ./...`/`-race` gates are in [durable evidence](verification.md#durable-build-evidence-location-2026-10-02).
+
 ### 4. Add Explorer as an optional application
 
 - [ ] Decide Explorer product/repository/module packaging without introducing a CLI dependency on Explorer.

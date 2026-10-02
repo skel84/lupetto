@@ -180,7 +180,7 @@ BuildStage{ Name, Status string }
 ```
 
 - `Mode` (`publish`/`local`, empty when unknown), `Load` and `LoadReason` come from the live job's request, or from `Record.Request` for history records. `Load` is whether loading into Docker was requested. `LoadReason` is set only for jobs started by this server process whose publish build stays publish-only; it is the Docker reason recorded at submission. History records cannot recover that reason, so their skipped Load stage reads "Skipped · not requested".
-- `Items` is newest first and merges retained build records (`lupetto images --json`, including CLI builds) with Explorer's in-memory jobs (`Live` true). Explorer keeps the last `HistoryLimit` (50) live jobs in memory only; records persist in the cache directory. `?package=` filters by package.
+- `Items` is newest first and merges retained build records (`lupetto images --json`, including CLI builds) with Explorer's in-memory jobs (`Live` true). Explorer keeps the last `HistoryLimit` (50) live jobs in memory only; records persist in the CLI's builds roots (the durable data root, plus the read-only legacy cache root for older builds). `?package=` filters by package.
 - `Shell.RunningBuild` renders a "Running now" card with live stages, View and Cancel (POST `/builds/{id}/cancel`).
 - The result column is derived only from stage statuses (e.g. "published; failed at Sign"), never from log text.
 

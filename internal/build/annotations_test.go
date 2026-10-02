@@ -28,7 +28,7 @@ func TestBuildIdentityAnnotationsAndScopedEpoch(t *testing.T) {
 			stopped := errors.New("stop before real composition")
 			buildCalled := false
 			services := Services{
-				CacheDir:   func() (string, error) { return t.TempDir(), nil },
+				DataDir:    func() (string, error) { return t.TempDir(), nil },
 				PublicFile: func(context.Context, string, int64) ([]byte, error) { return index, nil },
 				SigningKey: func(context.Context) ([]byte, error) { return key, nil },
 				Command: func(ctx context.Context, executable string, args ...string) ([]byte, error) {
