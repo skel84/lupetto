@@ -255,6 +255,18 @@ The user authorized closing the production-verification gate against a real regi
 
 **Dashboard.** The dashboard gets trust only from `LUPETTO_COSIGN_PUBLIC_KEY` in its environment, passed to the CLI through the environment. Without it, every image shows **Not checked**. With it, the dashboard verifies the registry images it shows in the background, caches each result by key path and digest (discarding all results when the reported key fingerprint changes; positive results about 1 h, others including `invalid` about 5 min), and shows **Signed / Unsigned / Invalid / Not checked** (plus an error state) per image. Signed SBOMs are downloadable from the verified attestation. Signature status does not change track state or the build verdict.
 
+## Durable build evidence location (user-approved 2026-10-02)
+
+On 2026-10-02 every retained build workspace under the OS user cache disappeared, by a cause that was not identified. The user approved moving build history and evidence out of the cache into a durable data location, using files, not a database. SQLite remains deferred to the catalog/automation work.
+
+- **One root moves.** New build workspaces (`image-<suffix>`, the same contents as before) are created under `<data>/lupetto/builds/`. Version-6 records already reference their own workspace by absolute path, so the record schema, its version, and the `images`/`inspect`/build JSON documents are unchanged; only the paths they contain point to the new root. Copying only the small evidence files was rejected: it would leave the record's `lockPath`/`spdxPath`/`imageDirectory` pointing into a deletable cache, which changes their meaning.
+- **Data root.** `LUPETTO_DATA_DIR` when set (must be absolute, otherwise invalid configuration). Otherwise macOS `$HOME/Library/Application Support`, Windows `%LocalAppData%`, other systems `$XDG_DATA_HOME` when absolute, else `$HOME/.local/share`. The workspace mode-0700 rule and symlink refusal apply to the new root.
+- **What stays in the cache.** Only regenerable data: status's digest-keyed installed-package cache and advisory-severity cache, and tool caches.
+- **Existing workspaces.** No automatic move. `images` history and Explorer's local-SBOM download read both the data root and the legacy `<cache>/lupetto/builds/` root (read-only), with the existing per-root bounds; new builds write only to the data root. Moving old workspaces by hand is not supported: their records contain absolute paths to the old location.
+- **Container.** The image sets `XDG_DATA_HOME=/var/lib/lupetto`, creates it owned by 65532 with mode 0700, and declares it a volume alongside the cache volume. The documented `docker run` and Compose forms mount a separate named data volume.
+- **Size and backups.** Durable workspaces keep their OCI layout and Docker archives, as before; on macOS the data root is included in Time Machine backups unless excluded. Retention/pruning remains the deferred image deletion/retention item.
+- Explorer keeps its own small copy of the root resolution, as it does for the cache root, because it must not import CLI packages; both read the same inherited environment.
+
 ## Proposed design choices
 
 | ID | Proposal | Tradeoff |
