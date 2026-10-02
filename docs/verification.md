@@ -1289,3 +1289,13 @@ This exercises the [signature-status decision](decisions.md#production-registry-
 **Gates.** `gofmt -l .` empty; `go test ./... -count=1` passed (a first run under full parallel load timed out two unrelated Explorer polling tests at their 5 s wait, `TestDashboardEmptyTrackingAndLiveStagesRetained` and `TestLiveLogsTruncationCancellationAndHistory`; `go test ./internal/explorer` alone and the repeated full run passed); `go test -race ./... -count=1` passed.
 
 Limitations: `verify` uses Cosign's default trust, so a custom signing config cannot be verified on a non-loopback registry; Cosign failures that match no outage pattern are reported `invalid` (Explorer re-checks them after minutes). The containerized LAN dashboard against Harbor was not run. The build workspaces of the Harbor runs were removed from `~/Library/Caches/lupetto` on 2026-10-02 at about 09:59 local time by an unidentified process (re-running the `cmd/lupetto`, `internal/status`, and signing `internal/build` tests with marker files did not reproduce it); the SPDX comparisons above rely on copies and hashes taken before that.
+
+## Compose file (2026-10-02)
+
+The root `compose.yaml` documented in [Compose](../README.md#compose) was exercised on darwin with Docker 27.4.0 and Docker Compose 2.31.0, with a placeholder registry (`registry.example.invalid`), an empty Docker config, a copy of a products file, a throwaway public key, no private key or password, and host port `127.0.0.1:18482`:
+
+- `docker compose config -q` without `LUPETTO_REGISTRY` failed with “required variable LUPETTO_REGISTRY is missing a value”; with the env file it succeeded. Merged with an override like the README example, `environment` gained `LUPETTO_COSIGN_PUBLIC_KEY` and `COSIGN_PASSWORD: null` (taken from the invoking shell), and `command` was replaced.
+- `up -d --build` with the override: the container ran as `65532:65532` with `CapDrop [ALL]`, `no-new-privileges:true`, restart `unless-stopped`, and a port bound only to `127.0.0.1`. `/healthz` with the allowed Host returned 200 and an unlisted Host returned 403. `?format=json` reported `buildsEnabled: true`, `shell.signatures.enabled: true`, and the configured registry/repository.
+- The base file alone reported `buildsEnabled: false` and signatures not checked, with the missing-key reason. `down -v` removed the container, network, and test volume.
+
+Not exercised: signing, the Docker socket override, or a real registry through Compose. The native and `docker run` evidence above covers those paths.

@@ -476,4 +476,52 @@ The socket must allow that group to read/write it; `--group-add` does not change
 
 Cache/evidence live below `XDG_CACHE_HOME=/var/cache/lupetto` on the declared volume; `HOME=/var/cache/lupetto/home` is on the same volume. Retained CLI build records persist there and populate history after restart; live jobs/logs are in-memory. For optional signing, additionally bind-mount the intended key file read-only (for example at `/etc/lupetto/cosign.key`), set `LUPETTO_COSIGN_KEY=/etc/lupetto/cosign.key`, and provide `COSIGN_PASSWORD` only through the process environment (`-e COSIGN_PASSWORD` passes an already-set host variable). Never put a password in image build arguments, the Containerfile, or command arguments. Signing requires the remaining [signing configuration](docs/registry-signing.md#sign-and-attest-the-verified-digest); the container check used no keys or credentials.
 
+#### Compose
+
+The root [`compose.yaml`](compose.yaml) runs the same container with the same defaults as the `docker run` template above: linux/amd64, all capabilities dropped, `no-new-privileges`, port published on host loopback only, builds disabled, the cache on a named volume, and `restart: unless-stopped`. It takes its settings from variables, so keep them in an env file **outside the checkout**:
+
+```bash
+# /srv/lupetto/lupetto.env (example path)
+LUPETTO_REGISTRY=registry.example.invalid
+LUPETTO_REPOSITORY=team/lupetto/images
+LUPETTO_PRODUCTS_DIR=/srv/lupetto/products              # directory containing products.yaml
+LUPETTO_DOCKER_CONFIG_FILE=/srv/lupetto/docker/config.json
+# Optional: LUPETTO_PUBLISH (default 127.0.0.1:8080), LUPETTO_IMAGE (default lupetto-explorer:local),
+#           LUPETTO_CACHE_VOLUME (default lupetto-cache)
+```
+
+```bash
+docker compose --env-file /srv/lupetto/lupetto.env up -d --build   # build the image and start
+docker compose --env-file /srv/lupetto/lupetto.env logs -f          # follow the server log
+docker compose --env-file /srv/lupetto/lupetto.env down             # stop; add -v to also delete the cache volume
+```
+
+The registry, repository, and Docker config file are required: Compose refuses to start and names the missing variable. The products and Docker-config ownership rules [above](#combined-container) apply unchanged.
+
+Add signing, signature status, Docker access, or builds with an override file, also kept outside the checkout. Compose merges it over the base: `environment` and `volumes` (by container path) are added, and `command` is replaced as a whole, so repeat the defaults:
+
+```yaml
+# /srv/lupetto/override.yaml (example)
+services:
+  explorer:
+    environment:
+      LUPETTO_COSIGN_KEY: /etc/lupetto/signing/cosign.key        # signing
+      LUPETTO_COSIGN_PUBLIC_KEY: /etc/lupetto/signing/cosign.pub # signature status
+      COSIGN_PASSWORD:                                           # no value: taken from the shell running compose
+    volumes:
+      - /srv/lupetto/signing/cosign.key:/etc/lupetto/signing/cosign.key:ro
+      - /srv/lupetto/signing/cosign.pub:/etc/lupetto/signing/cosign.pub:ro
+      - /var/run/docker.sock:/var/run/docker.sock                # optional, host-root-equivalent (see above)
+    group_add: ["<socket GID>"]
+    command: [--listen, "0.0.0.0:8080", --products, /etc/lupetto/products/products.yaml,
+              --allowed-host, dashboard.example.invalid, --enable-builds]
+```
+
+```bash
+COSIGN_PASSWORD="$(cat /srv/lupetto/signing/cosign.password)" \
+  docker compose --env-file /srv/lupetto/lupetto.env -f compose.yaml -f /srv/lupetto/override.yaml up -d
+```
+
+Each `docker compose` command must name the same `-f` files. Never write `COSIGN_PASSWORD` into the env file, the override, or `compose.yaml`, and do not run `docker compose config` while it is set: that prints resolved values. Signing needs the remaining [signing configuration](docs/registry-signing.md#sign-and-attest-the-verified-digest). Signature status needs only the public key, as described under [Optional Explorer server](#optional-explorer-server). Exposing a build-enabled instance follows the network guidance above. `extra_hosts` can pin a registry name to a specific address when DNS is not suitable. This form was exercised locally with a placeholder registry; see [Compose evidence](docs/verification.md#compose-file-2026-10-02).
+
 See [redesign-container verification](docs/verification.md#combined-container-redesign-round) for image size, Docker access, tracking edits and local/publish dashboard outcomes, and the [original container checkpoint](docs/verification.md#combined-container-checkpoint-5) for the pinned bases and earlier evidence. Exact APK/tool availability is fail-closed, but the live Wolfi index and unpinned APK dependency closure do not guarantee byte-identical historical rebuilds; arm64 is not supported by this recipe.

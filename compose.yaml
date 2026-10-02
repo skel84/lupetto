@@ -1,0 +1,38 @@
+# Optional Compose form of the combined Explorer container (README:
+# "Combined container" → "Compose"). Settings come from the environment or an
+# --env-file kept outside the checkout; never put COSIGN_PASSWORD in a file.
+name: lupetto
+
+services:
+  explorer:
+    build:
+      context: .
+      dockerfile: Containerfile
+      platforms: [linux/amd64]
+    image: ${LUPETTO_IMAGE:-lupetto-explorer:local}
+    platform: linux/amd64
+    restart: unless-stopped
+    ports:
+      # Host loopback by default; this is not authentication.
+      - "${LUPETTO_PUBLISH:-127.0.0.1:8080}:8080"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      DOCKER_CONFIG: /etc/lupetto/docker
+      LUPETTO_REGISTRY: ${LUPETTO_REGISTRY:?set LUPETTO_REGISTRY to an authorized registry host}
+      LUPETTO_REPOSITORY: ${LUPETTO_REPOSITORY:?set LUPETTO_REPOSITORY to the image repository prefix}
+    volumes:
+      - type: bind
+        source: ${LUPETTO_PRODUCTS_DIR:-./products}
+        target: /etc/lupetto/products
+      - type: bind
+        source: ${LUPETTO_DOCKER_CONFIG_FILE:?set LUPETTO_DOCKER_CONFIG_FILE to the Docker config.json to mount}
+        target: /etc/lupetto/docker/config.json
+        read_only: true
+      - cache:/var/cache/lupetto
+    # Same as the image defaults: builds stay disabled unless overridden.
+    command: [--listen, "0.0.0.0:8080", --products, /etc/lupetto/products/products.yaml]
+
+volumes:
+  cache:
+    name: ${LUPETTO_CACHE_VOLUME:-lupetto-cache}
