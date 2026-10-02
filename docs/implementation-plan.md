@@ -122,6 +122,10 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 
 - [x] Move new build workspaces from the user cache to the durable data root (`LUPETTO_DATA_DIR` or the OS user data directory) and read history and local SBOM downloads from both roots. A real `--no-load` BusyBox build landed under `<data>/lupetto/builds` with mode-0700 directories; `images --json` listed it beside a legacy-root record written by the pre-change CLI, and Explorer served both SPDX files with matching checksums. A relative `LUPETTO_DATA_DIR` exited 2 for `build` and 1 for `images`. The linux/amd64 image has `XDG_DATA_HOME=/var/lib/lupetto` (65532, 0700) as a second volume; Compose mounts a separate named data volume. Focused regressions and the `go test ./...`/`-race` gates are in [durable evidence](verification.md#durable-build-evidence-location-2026-10-02).
 
+**Unsigned publication round** ([decision](decisions.md#unsigned-publication-warning-and-optional-signing-requirement-user-approved-2026-10-02)):
+
+- [x] Warn on unsigned publication and add `--require-signing` / `LUPETTO_REQUIRE_SIGNING`. A real `--no-load` BusyBox publish to an owned loopback `registry:2` without a key exited 0 with the warning as the first stderr line only (not in `--json` stdout, record unchanged: publication `published`, signing/attestation `skipped`); `LUPETTO_REQUIRE_SIGNING=true` and `--require-signing` each exited 2 with the refusal, empty stdout and no new workspace; a non-publishing build with the requirement exited 0 with no warning. Explorer with builds and publication enabled showed the unsigned notice (and the refused notice with the requirement) on Images, catalog and a publish image detail in headless Chrome at 1440 and 390 px without horizontal scroll; a refused dashboard publish build failed with exit 2 and no workspace. [Evidence](verification.md#unsigned-publication-warning-and-signing-requirement-2026-10-02).
+
 ### 4. Add Explorer as an optional application
 
 - [ ] Decide Explorer product/repository/module packaging without introducing a CLI dependency on Explorer.

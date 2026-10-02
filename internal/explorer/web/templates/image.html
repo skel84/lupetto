@@ -4,6 +4,7 @@
 {{- $p := .Product}}{{$t := .Product.Track}}
 {{- if .Status.LastError}}<div class="banner error" role="alert">{{template "icon-lg" "error"}}<div class="body"><p><strong>The last status check failed.</strong> {{if .Status.Document}}This page shows the previous successful check.{{else}}Registry and security information is unavailable.{{end}}</p><pre class="errtext">{{.Status.LastError}}</pre></div></div>{{end}}
 {{- with .Inventory.Error}}<div class="banner warn">{{template "icon-lg" "error"}}<div class="body"><p><strong>Local inventory couldn’t be read.</strong> Local images and build history may be missing.</p><pre class="errtext">{{.}}</pre></div></div>{{end}}
+{{- with .Product.Action}}{{if and (eq .Kind "build") (eq .Mode "publish")}}{{template "publish-signing-note" $.Shell}}{{end}}{{end}}
 <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Images</a><span aria-hidden="true">/</span><span>{{$p.Package}}</span><span aria-hidden="true">/</span><span aria-current="page">{{$p.Selector}}</span></nav>
 <div class="page-head">
   <div class="titles"><div class="title-row"><span class="pmark" aria-hidden="true">{{printf "%.2s" $p.Package}}</span><h1>{{$p.Package}} <span class="mono">{{$p.Selector}}</span></h1>{{template "verdict" $p}}</div>

@@ -219,7 +219,7 @@ func TestCLIHelper(t *testing.T) {
 	case "build":
 		if config.BuildEnvironment != "" {
 			present := map[string]bool{}
-			for _, key := range []string{"LUPETTO_REGISTRY", "LUPETTO_REPOSITORY", "LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP", "DOCKER_HOST", "DOCKER_CONFIG"} {
+			for _, key := range []string{"LUPETTO_REGISTRY", "LUPETTO_REPOSITORY", "LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP", "LUPETTO_REQUIRE_SIGNING", "DOCKER_HOST", "DOCKER_CONFIG"} {
 				_, present[key] = os.LookupEnv(key)
 			}
 			data, _ := json.Marshal(present)

@@ -92,7 +92,7 @@ func (c *CLI) executeMode(ctx context.Context, args []string, stderr io.Writer, 
 		for _, entry := range os.Environ() {
 			key, _, _ := strings.Cut(entry, "=")
 			switch key {
-			case "LUPETTO_REGISTRY", "LUPETTO_REPOSITORY", "LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP":
+			case "LUPETTO_REGISTRY", "LUPETTO_REPOSITORY", "LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP", "LUPETTO_REQUIRE_SIGNING":
 				continue
 			}
 			cmd.Env = append(cmd.Env, entry)

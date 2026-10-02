@@ -305,6 +305,7 @@ type ShellView struct {
 	DockerReason      string              `json:"dockerReason"`
 	PublishLoad       bool                `json:"publishLoad"`
 	PublishLoadReason string              `json:"publishLoadReason"`
+	PublishSigning    string              `json:"publishSigning"`
 	RunningBuild      *BuildItem          `json:"runningBuild,omitempty"`
 	StatusComputedAt  time.Time           `json:"statusComputedAt"`
 	StatusRefreshing  bool                `json:"statusRefreshing"`

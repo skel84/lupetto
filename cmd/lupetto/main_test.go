@@ -258,6 +258,10 @@ func TestSBOMRejectsExplicitPublicationBeforeCallback(t *testing.T) {
 		{"--cosign-key", ""},
 		{"--cosign-signing-config", ""},
 		{"--cosign-key=/synthetic/key", "--cosign-signing-config=/synthetic/config"},
+		{"--require-signing"},
+		{"--require-signing=true"},
+		{"--require-signing=false"},
+		{"--require-signing="},
 	} {
 		called := false
 		callback := func(context.Context, cliRequest) (build.Result, error) {
@@ -284,6 +288,7 @@ func TestSBOMIgnoresPublicationAndSigningEnvironment(t *testing.T) {
 		t.Setenv("LUPETTO_COSIGN_KEY", "/synthetic/key")
 		t.Setenv("LUPETTO_COSIGN_SIGNING_CONFIG", "/synthetic/config")
 		t.Setenv("LUPETTO_COSIGN_ALLOW_HTTP", "invalid")
+		t.Setenv("LUPETTO_REQUIRE_SIGNING", "invalid")
 		calls := 0
 		callback := func(_ context.Context, request cliRequest) (build.Result, error) {
 			calls++
@@ -300,8 +305,9 @@ func TestSBOMIgnoresPublicationAndSigningEnvironment(t *testing.T) {
 }
 
 func TestRunBuildReportsPublicationImmutableIdentity(t *testing.T) {
-	t.Setenv("LUPETTO_REGISTRY", "")
-	t.Setenv("LUPETTO_REPOSITORY", "")
+	for _, name := range []string{"LUPETTO_REGISTRY", "LUPETTO_REPOSITORY", "LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP", "LUPETTO_REQUIRE_SIGNING"} {
+		t.Setenv(name, "")
+	}
 	immutable := "registry.example/team/images/pkg@sha256:" + strings.Repeat("b", 64)
 	callback := func(_ context.Context, request cliRequest) (build.Result, error) {
 		if !request.Publication.Enabled() {
@@ -314,7 +320,8 @@ func TestRunBuildReportsPublicationImmutableIdentity(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	args := []string{"build", "pkg", "1", "--registry=registry.example", "--repository=team/images"}
-	if code := runWithBuild(context.Background(), args, &stdout, &stderr, callback); code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), "Immutable reference: "+immutable) || !strings.Contains(stdout.String(), "Registry published:") || !strings.Contains(stdout.String(), "Image signing: skipped\nSPDX attestation: skipped") || strings.Contains(stdout.String(), "Registry publication: skipped") {
+	// Unsigned publication adds exactly the one warning line on stderr.
+	if code := runWithBuild(context.Background(), args, &stdout, &stderr, callback); code != 0 || stderr.String() != "lupetto: "+build.UnsignedPublicationWarning+"\n" || !strings.Contains(stdout.String(), "Immutable reference: "+immutable) || !strings.Contains(stdout.String(), "Registry published:") || !strings.Contains(stdout.String(), "Image signing: skipped\nSPDX attestation: skipped") || strings.Contains(stdout.String(), "Registry publication: skipped") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }

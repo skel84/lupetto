@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -505,6 +506,7 @@ func (s *Server) shell() ShellView {
 	}
 	inventoryView := s.dashboard.inventorySnapshot()
 	shell.PublishLoad, shell.PublishLoadReason = publishLoadDecision(inventoryView)
+	shell.PublishSigning = publishSigningState(s.config.EnableBuilds, os.Getenv)
 	inventory := inventoryView.Document
 	if inventory != nil {
 		shell.DockerState = "unavailable"
@@ -522,6 +524,23 @@ func (s *Server) shell() ShellView {
 		}
 	}
 	return shell
+}
+
+// publishSigningState says whether a "Build & publish" started now would be
+// signed. It reads only the inherited environment's presence and values, never
+// the key file: "" when builds or publication are not enabled, "key" when
+// LUPETTO_COSIGN_KEY is set, "refused" when it is not and
+// LUPETTO_REQUIRE_SIGNING is true (the CLI rejects the build), else "unsigned".
+func publishSigningState(builds bool, getenv func(string) string) string {
+	switch {
+	case !builds || getenv("LUPETTO_REGISTRY") == "" || getenv("LUPETTO_REPOSITORY") == "":
+		return ""
+	case getenv("LUPETTO_COSIGN_KEY") != "":
+		return "key"
+	case getenv("LUPETTO_REQUIRE_SIGNING") == "true":
+		return "refused"
+	}
+	return "unsigned"
 }
 
 func (s *Server) productPackageSet(ctx context.Context, tracks []Track, inventory *ImagesDocument, key string) PackageSet {

@@ -18,6 +18,9 @@ type OptionalBool struct {
 type SigningFlags struct {
 	Key, Config OptionalString
 	AllowHTTP   OptionalBool
+	// Require is --require-signing. It is resolved and enforced here and is not
+	// part of SigningOptions: it only rejects unsigned publication.
+	Require OptionalBool
 }
 
 type SigningOptions struct {
@@ -52,24 +55,59 @@ func ResolveSigning(raw SigningFlags, pub PublicationOptions, lookupEnv func(str
 	if err != nil {
 		return SigningOptions{}, err
 	}
-	allowHTTP := raw.AllowHTTP.Set && raw.AllowHTTP.Value
-	if !raw.AllowHTTP.Set && lookupEnv != nil {
-		if value, present := lookupEnv("LUPETTO_COSIGN_ALLOW_HTTP"); present && value != "" {
-			switch value {
-			case "true":
-				allowHTTP = true
-			case "false":
-				allowHTTP = false
-			default:
-				return SigningOptions{}, fmt.Errorf("LUPETTO_COSIGN_ALLOW_HTTP must be true or false")
-			}
-		}
+	allowHTTP, err := resolveBool(raw.AllowHTTP, "LUPETTO_COSIGN_ALLOW_HTTP", lookupEnv)
+	if err != nil {
+		return SigningOptions{}, err
+	}
+	require, err := resolveBool(raw.Require, RequireSigningEnv, lookupEnv)
+	if err != nil {
+		return SigningOptions{}, err
 	}
 	opts := SigningOptions{Key: key, Config: config, AllowHTTP: allowHTTP}
 	if err := validateSigningOptions(opts, pub); err != nil {
 		return SigningOptions{}, err
 	}
+	if require && pub.Enabled() && !opts.Enabled() {
+		return SigningOptions{}, errUnsignedPublicationRefused
+	}
 	return opts, nil
+}
+
+// RequireSigningEnv is the environment input of --require-signing.
+const RequireSigningEnv = "LUPETTO_REQUIRE_SIGNING"
+
+var errUnsignedPublicationRefused = fmt.Errorf("unsigned publication refused: signing is required (--require-signing / %s) but no Cosign key is set (--cosign-key / LUPETTO_COSIGN_KEY)", RequireSigningEnv)
+
+// UnsignedPublicationWarning is printed once on stderr before a build that
+// publishes without a Cosign key. It is not part of the build record.
+const UnsignedPublicationWarning = "warning: publishing without signing: the image will be pushed with no Cosign signature or SPDX attestation; set --cosign-key / LUPETTO_COSIGN_KEY to sign, or --require-signing / " + RequireSigningEnv + "=true to refuse unsigned publication"
+
+// UnsignedPublication reports whether a resolved build publishes without
+// signing, which also means no SPDX attestation reaches the registry.
+func UnsignedPublication(pub PublicationOptions, signing SigningOptions) bool {
+	return pub.Enabled() && !signing.Enabled()
+}
+
+// resolveBool resolves a strict true/false setting: an explicit flag wins;
+// otherwise a non-empty environment value must be exactly true or false.
+func resolveBool(flag OptionalBool, envName string, lookupEnv func(string) (string, bool)) (bool, error) {
+	if flag.Set {
+		return flag.Value, nil
+	}
+	if lookupEnv == nil {
+		return false, nil
+	}
+	value, present := lookupEnv(envName)
+	if !present || value == "" {
+		return false, nil
+	}
+	switch value {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	}
+	return false, fmt.Errorf("%s must be true or false", envName)
 }
 
 func validateSigningOptions(opts SigningOptions, pub PublicationOptions) error {

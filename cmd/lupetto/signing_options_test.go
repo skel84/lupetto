@@ -68,7 +68,7 @@ func TestRunBuildSigningConfigurationBeforeCallback(t *testing.T) {
 		{name: "environment signing with no load", flags: []string{"--no-load"}, env: map[string]string{"LUPETTO_COSIGN_KEY": "secret-key-canary"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, name := range []string{"LUPETTO_REGISTRY", "LUPETTO_REPOSITORY", "LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP"} {
+			for _, name := range []string{"LUPETTO_REGISTRY", "LUPETTO_REPOSITORY", "LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP", "LUPETTO_REQUIRE_SIGNING"} {
 				t.Setenv(name, tc.env[name])
 			}
 			called := false
@@ -109,7 +109,7 @@ func TestRunBuildResolvesSigningInSameCallback(t *testing.T) {
 }
 
 func TestRunBuildSigningDefaultsRemainDisabled(t *testing.T) {
-	for _, name := range []string{"LUPETTO_REGISTRY", "LUPETTO_REPOSITORY", "LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP"} {
+	for _, name := range []string{"LUPETTO_REGISTRY", "LUPETTO_REPOSITORY", "LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP", "LUPETTO_REQUIRE_SIGNING"} {
 		t.Setenv(name, "")
 	}
 	for _, flags := range [][]string{nil, {"--no-load"}, {"--cosign-allow-http=false"}} {

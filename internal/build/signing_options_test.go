@@ -68,6 +68,7 @@ func TestResolveSigningDoesNotInspectSecretsOrOverriddenEnvironment(t *testing.T
 		Key:       OptionalString{Value: "key", Set: true},
 		Config:    OptionalString{Value: "config", Set: true},
 		AllowHTTP: OptionalBool{Set: true},
+		Require:   OptionalBool{Value: true, Set: true},
 	}
 	if opts, err := ResolveSigning(raw, PublicationOptions{Registry: "registry.example", Repository: "team/images"}, lookup); err != nil || opts != (SigningOptions{Key: "key", Config: "config"}) {
 		t.Fatalf("explicit resolution: opts=%+v err=%v", opts, err)
@@ -83,7 +84,7 @@ func TestResolveSigningDoesNotInspectSecretsOrOverriddenEnvironment(t *testing.T
 	if _, err := ResolveSigning(SigningFlags{}, PublicationOptions{}, lookup); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(lookedUp, ",") != "LUPETTO_COSIGN_KEY,LUPETTO_COSIGN_SIGNING_CONFIG,LUPETTO_COSIGN_ALLOW_HTTP" {
+	if strings.Join(lookedUp, ",") != "LUPETTO_COSIGN_KEY,LUPETTO_COSIGN_SIGNING_CONFIG,LUPETTO_COSIGN_ALLOW_HTTP,LUPETTO_REQUIRE_SIGNING" {
 		t.Fatalf("unexpected environment reads: %q", lookedUp)
 	}
 }
@@ -124,5 +125,60 @@ func TestValidateSigningRequiresCompletePublication(t *testing.T) {
 	}
 	if err := validateSigningOptions(SigningOptions{}, PublicationOptions{}); err != nil {
 		t.Fatalf("unsigned local build rejected: %v", err)
+	}
+}
+
+func TestResolveSigningRequireSigning(t *testing.T) {
+	production := PublicationOptions{Registry: "registry.example", Repository: "team/images"}
+	on := OptionalBool{Value: true, Set: true}
+	off := OptionalBool{Set: true}
+	for _, tc := range []struct {
+		name      string
+		raw       SigningFlags
+		env       map[string]string
+		pub       PublicationOptions
+		want      SigningOptions
+		wantError string
+	}{
+		{name: "flag refuses unsigned publication", raw: SigningFlags{Require: on}, pub: production, wantError: errUnsignedPublicationRefused.Error()},
+		{name: "environment refuses unsigned publication", env: map[string]string{RequireSigningEnv: "true"}, pub: production, wantError: errUnsignedPublicationRefused.Error()},
+		{name: "flag true overrides environment false", raw: SigningFlags{Require: on}, env: map[string]string{RequireSigningEnv: "false"}, pub: production, wantError: errUnsignedPublicationRefused.Error()},
+		{name: "flag false overrides environment true", raw: SigningFlags{Require: off}, env: map[string]string{RequireSigningEnv: "true"}, pub: production},
+		{name: "flag false overrides invalid environment", raw: SigningFlags{Require: off}, env: map[string]string{RequireSigningEnv: "secret-invalid"}, pub: production},
+		{name: "environment false", env: map[string]string{RequireSigningEnv: "false"}, pub: production},
+		{name: "empty environment is unset", env: map[string]string{RequireSigningEnv: ""}, pub: production},
+		{name: "empty environment key is no key", env: map[string]string{RequireSigningEnv: "true", "LUPETTO_COSIGN_KEY": ""}, pub: production, wantError: errUnsignedPublicationRefused.Error()},
+		{name: "satisfied by key", raw: SigningFlags{Require: on, Key: OptionalString{Value: "flag-key", Set: true}}, pub: production, want: SigningOptions{Key: "flag-key"}},
+		{name: "satisfied by environment key", env: map[string]string{RequireSigningEnv: "true", "LUPETTO_COSIGN_KEY": "env-key"}, pub: production, want: SigningOptions{Key: "env-key"}},
+		{name: "no effect without publication", raw: SigningFlags{Require: on}},
+		{name: "environment no effect without publication", env: map[string]string{RequireSigningEnv: "true"}},
+		{name: "invalid environment without publication", env: map[string]string{RequireSigningEnv: "yes"}, wantError: "LUPETTO_REQUIRE_SIGNING must be true or false"},
+		{name: "other errors still win", raw: SigningFlags{Require: on, Key: OptionalString{Value: "flag-key", Set: true}}, wantError: "signing requires publication with both registry and repository settings"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lookup := func(name string) (string, bool) { value, ok := tc.env[name]; return value, ok }
+			opts, err := ResolveSigning(tc.raw, tc.pub, lookup)
+			if tc.wantError != "" {
+				if err == nil || err.Error() != tc.wantError {
+					t.Fatalf("err=%v want %q", err, tc.wantError)
+				}
+				return
+			}
+			if err != nil || opts != tc.want {
+				t.Fatalf("opts=%+v err=%v want=%+v", opts, err, tc.want)
+			}
+		})
+	}
+	for _, value := range []string{"TRUE", "False", "1", "0", "yes", " true", "false ", "secret-canary"} {
+		lookup := func(name string) (string, bool) { return value, name == RequireSigningEnv }
+		if _, err := ResolveSigning(SigningFlags{}, production, lookup); err == nil || err.Error() != "LUPETTO_REQUIRE_SIGNING must be true or false" {
+			t.Fatalf("value=%q err=%v; want exact sanitized strict-bool error", value, err)
+		}
+	}
+	if !UnsignedPublication(production, SigningOptions{}) || UnsignedPublication(production, SigningOptions{Key: "k"}) || UnsignedPublication(PublicationOptions{}, SigningOptions{}) {
+		t.Fatal("UnsignedPublication classification")
+	}
+	if strings.Contains(UnsignedPublicationWarning, "\n") || !strings.Contains(UnsignedPublicationWarning, "--cosign-key / LUPETTO_COSIGN_KEY") || !strings.Contains(UnsignedPublicationWarning, "--require-signing / LUPETTO_REQUIRE_SIGNING") {
+		t.Fatalf("warning must be one line naming both settings: %q", UnsignedPublicationWarning)
 	}
 }

@@ -26,21 +26,24 @@ Keep keys, signing configuration, and passwords outside the repository, shell hi
 | `--cosign-key` | `LUPETTO_COSIGN_KEY` | Key that requests signing. |
 | `--cosign-signing-config` | `LUPETTO_COSIGN_SIGNING_CONFIG` | Optional upstream signing-config file; requires a key. |
 | `--cosign-allow-http` | `LUPETTO_COSIGN_ALLOW_HTTP` | Explicit HTTP consent for Cosign; literal loopback only. |
+| `--require-signing` | `LUPETTO_REQUIRE_SIGNING` | Refuse publication without a key (see [unsigned publication](#unsigned-publication)). |
 
 Each explicit flag overrides **only its own** environment input, so a registry flag can combine with a repository environment value. Unset or empty environment values are absent. Explicitly empty flags (`--registry=`, `--cosign-key=`) are errors, not a way to fall back or disable a stage. Duplicate flags are errors.
 
-`--cosign-allow-http` alone means true; `--cosign-allow-http=true|false` sets it explicitly, and explicit false overrides environment true. A separate following `false` is a positional argument, not the value.
+`--cosign-allow-http` and `--require-signing` are booleans: alone they mean true; `=true|false` sets them explicitly, and explicit false overrides environment true. A separate following `false` is a positional argument, not the value. Their environment inputs accept exactly `true` or `false`; any other non-empty value is invalid configuration.
 
 These are rejected before tool checks, workspace creation, network access, or building:
 
 - Exactly one of registry/repository set. (Both absent skips publication.)
 - A key without complete publication settings; a signing config or HTTP consent without a key. There is no implicit keyless signing.
+- Publication without a key while `--require-signing` / `LUPETTO_REQUIRE_SIGNING` is effectively true.
+- An environment boolean other than `true` or `false`, or a boolean flag with another value.
 - HTTP consent for a non-loopback authority (a DNS name that merely resolves to loopback does not count), or signing to a literal-loopback authority **without** HTTP consent.
 - Invalid authorities or prefixes. Registry is an authority, not a URL: DNS name, IPv4, or bracketed IPv6, optional port 1–65535; a single-label name needs a port unless it is `localhost`. Repository has no leading/trailing/repeated slash, `.`/`..`, tag, or digest. Nothing is truncated or normalized into another target.
 
 After the APK is selected (so after the workspace exists and the index is fetched) but before composition, loading, or publication, the complete reference is checked: it must parse to the same registry, repository, and tag in both `github.com/distribution/reference` and go-containerregistry (the only accepted difference is `docker.io` ↔ `index.docker.io`) and fit the length limits. A failure there is a `build`-stage failure with a `failure.json`.
 
-`--no-load` is valid with publication and signing. `sbom` ignores all five environment inputs and rejects their flags (including false/empty forms).
+`--no-load` is valid with publication and signing. `sbom` ignores all six environment inputs and rejects their flags (including false/empty forms).
 
 For an intentionally local-only build, clear the stage-requesting settings:
 
@@ -116,6 +119,22 @@ cosign attest --yes --key <key> [--signing-config <file>] [--allow-http-registry
 ```
 
 Immediately before attesting, Lupetto re-hashes the validated architecture SPDX and compares it with the recorded checksum. It never regenerates SPDX or attests the supplemental index document. Cosign v3.1.3's default registry mode (modern bundle/referrers) is used unchanged.
+
+### Unsigned publication
+
+A build that publishes without a key pushes and verifies the image but creates **no signature and no SPDX attestation**, so the registry holds no SBOM from Lupetto (a registry's own scanner SBOM, such as Harbor's Trivy, is not the signed, lock-validated attestation). Such a build prints one warning line on stderr before it starts:
+
+```text
+lupetto: warning: publishing without signing: the image will be pushed with no Cosign signature or SPDX attestation; set --cosign-key / LUPETTO_COSIGN_KEY to sign, or --require-signing / LUPETTO_REQUIRE_SIGNING=true to refuse unsigned publication
+```
+
+The outcome, exit code, stdout, `--json` document, and version-6 record are unchanged; the warning is not part of the record. To make unsigned publication an error instead, set `--require-signing` or `LUPETTO_REQUIRE_SIGNING=true`: a publishing build without a key then exits **2** before any tool, network, or workspace work:
+
+```text
+lupetto: unsigned publication refused: signing is required (--require-signing / LUPETTO_REQUIRE_SIGNING) but no Cosign key is set (--cosign-key / LUPETTO_COSIGN_KEY)
+```
+
+The requirement has no effect on builds that do not publish, and `--require-signing=false` overrides the environment for one build. Explorer's publish builds inherit it; see the [Explorer notes](../README.md#optional-explorer-server). Observed behavior is recorded in the [verification record](verification.md#unsigned-publication-warning-and-signing-requirement-2026-10-02).
 
 ### Production signing
 
