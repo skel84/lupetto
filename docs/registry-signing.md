@@ -4,7 +4,7 @@
 
 This guide is the single operator reference for publication, signing, and verification. Lupetto pushes the **validated OCI layout** from its one exact-build pipeline directly to a registry, reads it back by digest, and only then signs and attests that **same verified immutable reference**—never a mutable tag or local Docker ID.
 
-Observed runs are in the [verification record](verification.md#direct-oci-publication-and-version-6-record-evidence); they cover an isolated authenticated loopback HTTP registry with local/offline Cosign settings. **Production HTTPS/TUF/Rekor behavior has not been exercised**, so every production command below is a template.
+Observed runs are in the [verification record](verification.md#direct-oci-publication-and-version-6-record-evidence); they cover an isolated authenticated loopback HTTP registry with local/offline Cosign settings. The production publication, signing, and verification forms below were exercised against **one** authorized registry—Harbor v2.15.2 over publicly trusted HTTPS, a robot account in the `desktop` Docker credential helper, upstream TUF and public Rekor—see [production Harbor evidence](verification.md#production-harbor-registry-and-public-rekor-verification-2026-10-02). Other registries are unverified; the host names below are placeholders.
 
 ## Prerequisites
 
@@ -52,7 +52,7 @@ lupetto build nginx 1.30
 
 ## Publish the validated image
 
-**Templates, not exercised production commands.** Replace the authority/prefix with an authorized target:
+Replace the authority/prefix with an authorized target:
 
 ```bash
 lupetto build nginx 1.30 \
@@ -117,7 +117,7 @@ cosign attest --yes --key <key> [--signing-config <file>] [--allow-http-registry
 
 Immediately before attesting, Lupetto re-hashes the validated architecture SPDX and compares it with the recorded checksum. It never regenerates SPDX or attests the supplemental index document. Cosign v3.1.3's default registry mode (modern bundle/referrers) is used unchanged.
 
-### Production signing template (not exercised)
+### Production signing
 
 Use a non-loopback HTTPS registry, a protected key, and upstream default services:
 
@@ -130,6 +130,8 @@ unset COSIGN_PASSWORD
 ```
 
 Without a signing config, upstream HTTPS, TUF-provided services, and transparency-log defaults stay intact; Lupetto adds no insecure or log-bypass flags. A supplied signing config can change services and is not evidence of production transparency-log behavior.
+
+With upstream defaults, each signature and attestation is recorded in the **public Rekor** log. Entries are public and permanent and include the public key, digests, and timestamps; use a private Sigstore deployment (through a signing config) if that disclosure is unacceptable. Cosign v3.1.3 stores both as Sigstore bundles in OCI referrers on the image.
 
 ## Local HTTP/offline exception
 
@@ -161,7 +163,7 @@ Distribute and trust the public key separately; fetching a key from the same reg
 
 Use Cosign v3.1.3, a **trusted public key**, and the immutable reference from the build (`Immutable reference:` or `stages.publication.immutableReference`). Never substitute a tag or local image ID. Lupetto has no `verify` command.
 
-### Production templates (not exercised)
+### Production verification
 
 ```bash
 IMMUTABLE='registry.example.invalid/team/lupetto/images/actual-apk@sha256:REPLACE_WITH_PUSHED_DIGEST'
@@ -169,6 +171,8 @@ PUBLIC_KEY='/trusted/path/operator.pub'
 cosign verify --key "$PUBLIC_KEY" "$IMMUTABLE"
 cosign verify-attestation --key "$PUBLIC_KEY" --type spdxjson "$IMMUTABLE"
 ```
+
+Cosign v3.1.3 `verify` also returns verified **attestation** claims for the image, so its exit status alone does not prove an image signature. Require a returned claim whose `critical.type` is `https://sigstore.dev/cosign/sign/v1` and whose `critical.image.docker-manifest-digest` is the pushed digest.
 
 ### Local forms (exercised)
 

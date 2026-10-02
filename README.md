@@ -4,7 +4,7 @@ Lupetto is a standalone CLI for discovering Wolfi APK versions, selecting an exa
 
 The CLI does not require Explorer or a database. The optional `lupetto-explorer` backend, HTML dashboard, and combined non-root container are implemented and verified within the [recorded local scope](docs/verification.md#combined-container-checkpoint-5). Persistent SQLite catalog ingestion, historical snapshot queries, and runnable service recipes are deferred, not implemented commands. These images contain packages; installing PostgreSQL or nginx does **not** establish a configured, runnable service.
 
-This guide describes the current CLI/source contract. The [verification record](docs/verification.md) distinguishes observed interoperability from source behavior and unexercised scenarios. In particular, local HTTP/offline signing is not production HTTPS/transparency-log proof; production commands in the detailed guide are explicitly templates.
+This guide describes the current CLI/source contract. The [verification record](docs/verification.md) distinguishes observed interoperability from source behavior and unexercised scenarios. In particular, local HTTP/offline signing is not production HTTPS/transparency-log proof; the production signing and verification forms in the detailed guide were exercised against one authorized Harbor registry with public Rekor ([evidence](docs/verification.md#production-harbor-registry-and-public-rekor-verification-2026-10-02)), and other registries remain unverified.
 
 ## Prerequisites and installation
 
