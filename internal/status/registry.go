@@ -53,6 +53,12 @@ func (reader RemoteRegistry) options(ctx context.Context) []remote.Option {
 	return registry.ClientOptions(ctx, metadataTransport{transport}, reader.Keychain)
 }
 
+// RemoteOptions exposes the same guarded, metadata-bounded client options to
+// other read-only registry commands.
+func (reader RemoteRegistry) RemoteOptions(ctx context.Context) []remote.Option {
+	return reader.options(ctx)
+}
+
 type metadataTransport struct{ base http.RoundTripper }
 
 var blobEndpointPattern = regexp.MustCompile(`/blobs/sha256:[0-9a-f]+$`)

@@ -25,6 +25,7 @@ Go installs `lupetto` in `GOBIN`, or otherwise in the `bin` directory of `GOPATH
 | Default `build` | The above plus Docker on `PATH` and a running local Linux daemon (for loading). |
 | Publication | An authorized compatible registry/repository and credentials in Docker's client configuration. Docker itself is not needed with `--no-load`. |
 | Requested signing | Publication requirements plus exactly **Cosign v3.1.3** and the key/config inputs described in the [detailed guide](docs/registry-signing.md#sign-and-attest-the-verified-digest). |
+| `verify` | Exactly **Cosign v3.1.3**, a trusted Cosign public key, registry access with Docker client credentials when needed, and (outside the local HTTP exception) network access to upstream TUF/transparency-log services; no apko or Docker daemon. |
 
 ```bash
 lupetto help
@@ -76,6 +77,43 @@ lupetto inspect --json registry.example.invalid/team/curl@sha256:0123456789abcde
 Replace the example with a digest reference returned by a successful publication. Tags, implicit Docker Hub names, URLs, credentials in references, image indexes, and non-image artifacts are rejected. `inspect` reads only: no Docker daemon, build, signing, index, or security feed is required. It reuses status's Docker-config keychain, loopback-only HTTP guard, bounded digest-verified image reads, layer-overlay handling, and private digest-keyed installed-package cache. A cache hit avoids config/layer downloads; the manifest is still fetched by digest.
 
 The newline-terminated JSON is `kind: "inspect"`, `version: 1`, with `reference`, `digest`, `unidentified`, optional `identity` (`name`, exact APK `version`, `architecture`), optional `created` (UTC RFC 3339), and `packages` (`name`, `version`, `architecture`). Identity is taken only from validated Lupetto annotations, never inferred from tags or installed package names. Older/unannotated images can still report their complete installed set with `unidentified: true`; creation time is omitted if unavailable. Unsupported platforms, missing/malformed APK databases, hash mismatches, bounds violations, and cache failures exit 1 without JSON. Invalid invocation exits 2 without JSON. This is package evidence, not an SPDX document, signature verification, or vulnerability scan.
+
+## Verify signatures
+
+```bash
+lupetto verify --json --cosign-public-key /trusted/path/operator.pub \
+  registry.example.invalid/team/curl@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+
+LUPETTO_COSIGN_PUBLIC_KEY=/trusted/path/operator.pub \
+  lupetto verify --json --sbom-out ./curl.spdx.json \
+  registry.example.invalid/team/curl@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+```
+
+Usage (as printed by `lupetto help`): `lupetto verify [--json] [--cosign-public-key <file>] [--cosign-allow-http[=true|false]] [--sbom-out <file>] <registry-repository@sha256:digest>`.
+
+`verify` is read-only: it never builds, pushes, signs, or loads Docker. It reports whether one digest-addressed image carries a Cosign image signature and an SPDX attestation that verify against **exactly one trusted public key**. The reference follows `inspect`'s rules (tags, implicit Docker Hub names, URLs, and credentials are rejected). The key comes from `--cosign-public-key` or `LUPETTO_COSIGN_PUBLIC_KEY`; the flag overrides the environment, and an empty flag, duplicate flags, a missing key, private-key files, and anything other than one PEM `PUBLIC KEY` block (at most 64 KiB) are invocation errors. Exactly Cosign v3.1.3 is required.
+
+Lupetto first lists the image's Sigstore artifacts itself, with the same Docker-config keychain, loopback-only HTTP guard, metadata bounds, and sanitized errors as `status`/`inspect`: OCI referrers (referrers API or referrers-tag fallback, at most 128) with artifact type `application/vnd.dev.sigstore.bundle.v0.N+json`, classified by their `dev.sigstore.bundle.predicateType` annotation (sign type → signature candidate, `https://spdx.dev/Document` → attestation candidate, absent → both; other predicate types are ignored), plus legacy `sha256-<hex>.sig` / `.att` tags. Only then does it run `cosign verify --key` and `cosign verify-attestation --key --type spdxjson` on the digest reference, with the validated key bytes staged in a private temporary file. Cosign stdout (verified claims and DSSE envelopes) is read up to 64 MiB. Stderr is never printed or retained; on failure it is only matched against fixed network/TLS, HTTP 5xx, registry-authorization, and TUF patterns to report an outage as `error` instead of `invalid`. `signed`/`attested` come only from parsed verified payloads and exit status; error text can only turn a failure into `error`, never into a positive or `unsigned` verdict.
+
+| Section | State | Meaning |
+| --- | --- | --- |
+| `signature` | `unsigned` | No signature candidate; Cosign is not run. An attestation-only image is `unsigned`. |
+| | `signed` | Cosign exited 0 **and** returned a verified claim with `critical.type` `https://sigstore.dev/cosign/sign/v1` (or legacy `cosign container image signature`) whose `docker-manifest-digest` is the image digest. |
+| | `invalid` | A candidate exists but Cosign rejected it (non-zero exit not classified as an outage), or no verified sign claim names this digest. See the [limitations](docs/registry-signing.md#lupetto-verify). |
+| | `error` | Artifact listing failed, Cosign could not run or produced unparseable output, or Cosign failed because the registry, transparency log, or trust root was unreachable or refused access. Never reported as `unsigned`. |
+| `attestation` | `absent` | No SPDX attestation candidate; Cosign is not run. |
+| | `attested` | Cosign exited 0 and a verified in-toto statement has predicate type `https://spdx.dev/Document`, a subject `digest.sha256` equal to the image digest, and a JSON-object predicate. The first such statement is used. |
+| | `invalid` / `error` | As for `signature`. |
+
+The legacy simple-signing claim type (`cosign container image signature`, written by non-bundle signing to a `.sig` tag) also satisfies `signed`: in that format Cosign `verify` returns only image-signature claims.
+
+`--cosign-allow-http` (valueless means true; only `true`/`false`) is **required for, and restricted to,** literal localhost/loopback-IP registries. It adds `--allow-http-registry --insecure-ignore-tlog` and reports `transparencyLog: "skipped-local"`; otherwise Cosign keeps its defaults, including transparency-log verification, and the document reports `"verified"`. That field describes the verification mode, so a local result is never presented as production evidence. There is no environment input for this flag.
+
+`--sbom-out <file>` must name a path that does not exist (checked at invocation and again with an exclusive create) in an existing directory. Only when the attestation is `attested` does Lupetto write the exact verified predicate bytes there as a new mode-0600 file and report its absolute `path`; for any other state, no file is written and the command still exits 0. Cosign re-serializes the predicate when attesting, so the bytes and SHA-256 differ from the retained `sbom-<arch>.spdx.json`; compare them as parsed JSON.
+
+`--json` prints one indented, newline-terminated `kind: "verify"`, `version: 1` document: `reference`, `digest`, `checkedAt` (UTC RFC 3339), `trust.publicKeySHA256` (hex SHA-256 of the key's DER SubjectPublicKeyInfo), `transparencyLog`, `signature` (`state`, optional sanitized `error`, `artifacts` = candidate count), and `attestation` (`state`, optional `error`, `artifacts`, and, only when `attested`, `predicateType` and `sbom` with `sha256` of the exact predicate bytes, SPDX `packages` count, and `path` when written). Without `--json`, a short human summary is printed instead.
+
+Exit **0** means the check completed, whatever the states: consumers must read them. Invalid invocation (including key, reference, loopback/HTTP, and `--sbom-out` path errors) exits **2**; global failures (Cosign missing or not v3.1.3, key staging, cancellation, or an `--sbom-out` write failure) exit **1**. Exit 1/2 have stderr diagnostics and no JSON document. Registry failures become that section's `error` state.
 
 ## Compare published images with Wolfi
 

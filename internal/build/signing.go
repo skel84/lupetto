@@ -78,6 +78,12 @@ func requireCosignVersion(ctx context.Context, command CommandFunc) error {
 	return nil
 }
 
+// CosignPreflight runs the same exact-version check as build signing, through
+// the secret-safe adapter, for read-only commands that invoke Cosign.
+func CosignPreflight(ctx context.Context) error {
+	return requireCosignVersion(ctx, executeSigningCommand)
+}
+
 type signingOutcome struct {
 	signing, attestation string
 }

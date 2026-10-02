@@ -14,7 +14,8 @@ One local Go module contains the standalone CLI and optional Explorer backend. T
 | --- | --- | --- |
 | Index access and selection | Fetch and verify the signed APKINDEX, parse it, resolve names/providers and selectors to one exact APK. | `internal/wolfi` |
 | Build pipeline | Exact request → apko config and lock → OCI layout → installed-package and SPDX validation → optional load, publication, signing, attestation → version-6 record. | `internal/build` |
-| CLI | Parse arguments, render progress, print human or `--json` output, `doctor`, `discover`, `status`. | `cmd/lupetto` |
+| CLI | Parse arguments, render progress, print human or `--json` output, `doctor`, `discover`, `status`, `verify`. | `cmd/lupetto` |
+| Signature status | Read-only Cosign signature and SPDX-attestation verification of one registry digest against a configured public key; lists Sigstore artifacts through the shared registry keychain/guard. | `internal/verify` |
 | Status | Compare products-file tracks with the index, registry images (by annotation), and Wolfi security fixes; read-only. | `internal/status` |
 | Catalog | Import snapshots, retain provenance, query versions, resolve selectors historically. | Deferred |
 | Explorer | CLI-only adapter, cached comparison/discovery, safe HTTP routes and Go rendering seam, single supervised build with bounded live stderr and history. | Backend, embedded templates/static assets, and combined linux/amd64 container implemented (`cmd/lupetto-explorer`, `internal/explorer`, root `Containerfile`). |
@@ -30,6 +31,7 @@ internal/build/buildtest/   shared test fixtures (OCI layouts, in-process regist
 internal/wolfi/       signed index fetch/verification, parsing, selection, discovery ordering
 internal/registry/    shared registry settings/naming, Docker-config-only authentication, loopback HTTP guard, sanitized errors
 internal/status/      strict products YAML, registry/index/security comparison, digest-keyed installed-package cache
+internal/verify/      read-only signature/attestation status of one registry digest (`lupetto verify`)
 internal/wolfi/wolfitest/   shared test fixtures (signed index generation)
 cmd/lupetto-explorer/ flags, signal-aware HTTP/CLI shutdown
 internal/explorer/    own JSON decoding/view models, subprocess adapter, caches, job runner, HTTP safety/rendering seam
@@ -38,6 +40,7 @@ internal/explorer/web/ embedded dashboard templates/static assets, UI contract
 cmd/lupetto ──▶ internal/build ──▶ internal/wolfi
       └──────────────────────────────▶ internal/wolfi
       └────────▶ internal/status ──▶ internal/wolfi, internal/registry
+      └────────▶ internal/verify ──▶ internal/status, internal/registry
                  internal/build ──▶ internal/registry
 
 cmd/lupetto-explorer ──▶ internal/explorer ──(argv + JSON)──▶ lupetto executable
@@ -45,7 +48,7 @@ cmd/lupetto-explorer ──▶ internal/explorer ──(argv + JSON)──▶ lu
 
 - `internal/wolfi` imports nothing else from the module and owns the shared installed-APK-database parser; `internal/registry` likewise imports no in-module packages. `internal/build` and `internal/status` consume those shared boundaries independently, and status never imports the build pipeline.
 - `cmd/lupetto` makes no apko, Docker, Cosign, or registry calls itself; `doctor` only checks `PATH`. The CLI owns status table/JSON presentation, not comparison logic.
-- These packages are module-internal, not a public Go API. Explorer defines its own JSON decoding types and imports none of `internal/build`, `internal/wolfi`, `internal/status`, `internal/registry`, or `cmd/lupetto`; its `go list -deps` boundary test also verifies the CLI never imports Explorer.
+- These packages are module-internal, not a public Go API. Explorer defines its own JSON decoding types and imports none of `internal/build`, `internal/wolfi`, `internal/status`, `internal/registry`, `internal/verify`, `internal/images`, `internal/products`, or `cmd/lupetto`; its `go list -deps` boundary test also verifies the CLI never imports Explorer.
 
 ## Application and dependency boundaries
 
@@ -76,7 +79,7 @@ Catalog access is a separate decision. A colocated, UI-independent catalog packa
 | apko 1.4.5 | Subprocess with explicit argument arrays (`lock`, `build`). | Streamed live to stderr and captured on failure. |
 | Docker (loading only) | Subprocess: `image load`, `image inspect`, `image save` (identity fallback), `image tag`. | `load` output streamed; inspect output parsed internally. |
 | OCI registry | In-process go-containerregistry client: push from the OCI layout, digest-addressed readback; Docker-config-only keychain; loopback-only plain HTTP guard. | Sanitized to fixed classifications; registry bodies never surfaced. |
-| Cosign v3.1.3 | Separate secret-safe subprocess adapter; inherits `COSIGN_PASSWORD` from the environment. | All output discarded; only a bounded version probe is parsed. |
+| Cosign v3.1.3 | Separate secret-safe subprocess adapter; inherits `COSIGN_PASSWORD` from the environment. `verify` runs only `cosign verify` / `verify-attestation` with a public key. | Signing: all output discarded; only a bounded version probe is parsed. `verify`: bounded stdout parsed; stderr only pattern-matched to classify outages, never surfaced. |
 
 All subprocesses use argument arrays (no shell interpolation), propagate cancellation, and never receive secrets as arguments. Records never contain environment or credentials. Publication/signing workflows record only sanitized stage messages; local-only failure records may include captured apko or Docker load output (capped at 8 KiB), as the CLI already prints.
 

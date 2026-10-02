@@ -161,7 +161,25 @@ Distribute and trust the public key separately; fetching a key from the same reg
 
 ## Verify signature and SPDX attestation
 
-Use Cosign v3.1.3, a **trusted public key**, and the immutable reference from the build (`Immutable reference:` or `stages.publication.immutableReference`). Never substitute a tag or local image ID. Lupetto has no `verify` command.
+Use Cosign v3.1.3, a **trusted public key**, and the immutable reference from the build (`Immutable reference:` or `stages.publication.immutableReference`). Never substitute a tag or local image ID.
+
+### `lupetto verify`
+
+`lupetto verify` performs the claim checks below for you and reports a machine-readable verdict. Its full contract (states, JSON document, exits) is in the [operator guide](../README.md#verify-signatures).
+
+```bash
+lupetto verify --json --cosign-public-key "$PUBLIC_KEY" "$IMMUTABLE"
+LUPETTO_COSIGN_PUBLIC_KEY="$PUBLIC_KEY" lupetto verify --json --sbom-out ./verified.spdx.json "$IMMUTABLE"
+```
+
+- Trust is exactly one PEM public key (`--cosign-public-key`, overriding `LUPETTO_COSIGN_PUBLIC_KEY`); its DER SubjectPublicKeyInfo SHA-256 is reported as `trust.publicKeySHA256`. Keyless identities, multiple keys, and keys fetched from the registry are not supported.
+- Lupetto lists Sigstore bundle referrers and legacy `.sig`/`.att` tags itself through the Docker-config keychain and loopback-only HTTP guard. No signature artifact is `unsigned` (Cosign is not run); with an artifact, `signed` requires Cosign success **and** a verified `https://sigstore.dev/cosign/sign/v1` (or legacy `cosign container image signature`) claim naming the digest, otherwise `invalid`. The SPDX attestation is `attested` / `absent` / `invalid` likewise, additionally requiring the in-toto subject digest and the SPDX predicate type. Listing or Cosign execution failures, and Cosign failures caused by an unreachable registry, transparency log, or trust root, are `error`, never `unsigned`.
+- Production use keeps Cosign defaults, including transparency-log verification (`transparencyLog: "verified"`). For literal-loopback registries, `--cosign-allow-http` is required and adds `--allow-http-registry --insecure-ignore-tlog` (`transparencyLog: "skipped-local"`), mirroring the signing exception.
+- `--sbom-out` writes the verified SPDX predicate to a new mode-0600 file only for `attested`. Its bytes are Cosign's re-serialization, so compare it with the retained architecture SPDX as parsed JSON (step 3 below), not by file hash.
+- Cosign stdout is bounded (64 MiB) and parsed; stderr is never printed or retained and is only pattern-matched to tell outages from rejections; errors are sanitized stage classifications.
+- Limitations: `verify` uses Cosign's default trust (public Rekor/TUF), so images signed with a custom `--cosign-signing-config` (private transparency log or timestamp authority) on a non-loopback registry are reported `invalid`, not verified. A Cosign failure that matches no outage pattern is also `invalid`; Explorer therefore re-checks `invalid` results after minutes. A bundle referrer whose descriptor and manifest both lack the `dev.sigstore.bundle.predicateType` annotation counts as both a signature and an attestation candidate, so such an attestation-only image reports `invalid` rather than `unsigned`. `COSIGN_REPOSITORY` is removed from Cosign's environment so Cosign checks the same repository Lupetto lists.
+
+The manual Cosign forms below remain the reference procedure and the way to inspect claims directly.
 
 ### Production verification
 
