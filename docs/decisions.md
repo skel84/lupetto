@@ -286,6 +286,15 @@ Chosen so CI runners with an OIDC identity (Tekton/Kubernetes projected tokens, 
 - Not chosen: ambient-only keyless (environment or well-known paths without an explicit opt-in), interactive browser/device flows, KMS references, and a Lupetto-managed issuer or Fulcio configuration. Service endpoints continue to come from upstream defaults or an operator signing config.
 - Deferred: identity-based verification (`--certificate-identity[-regexp]` / `--certificate-oidc-issuer`) in `lupetto verify` and the Explorer signature status, which still trust exactly one public key. Also deferred: a live Fulcio/Rekor keyless exchange from CI; the hermetic adapter tests prove the argv contract, not Fulcio interoperability.
 
+## Status rebuild signal (2026-10-20)
+
+Chosen so a scheduled pipeline can act on `status` without re-implementing which states mean "rebuild". Contract in the [status JSON contract and exits](../README.md#status-json-contract-and-exits); evidence in [verification](verification.md#status-rebuild-signal-2026-10-20).
+
+- Opt-in `--exit-code`: 0 all tracks `current`; 3 any track `not-built`/`update-available`/`fixes-available`; 4 any track `error`. Output and exits 1/2 are unchanged, and the default stays exit 0 so Explorer and existing callers are unaffected.
+- Error outranks rebuild: a partial comparison is not a complete answer, so a scheduler must see it instead of quietly rebuilding a subset. The document still lists the rebuildable tracks.
+- Any state other than `current` and `error` counts as rebuild-needed, so a future state cannot silently read as up to date.
+- Not chosen: a `--json` track filter or a new schema field. Each track already carries `state`, so the status document stays at version 2.
+
 ## Proposed design choices
 
 | ID | Proposal | Tradeoff |

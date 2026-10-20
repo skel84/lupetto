@@ -132,6 +132,10 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 - [ ] Exercise a live keyless sign and attest from a CI runner with a projected OIDC token against an authorized registry, and verify by certificate identity with upstream Cosign. Not run: no authorized Fulcio-trusted CI identity was available in this checkout.
 - [ ] Identity-based verification (`--certificate-identity[-regexp]` / `--certificate-oidc-issuer`) in `lupetto verify` and the Explorer signature status.
 
+**Status rebuild signal round** ([decision](decisions.md#status-rebuild-signal-2026-10-20)):
+
+- [x] Add `lupetto status --exit-code` (0 current, 3 rebuild needed, 4 track error; default unchanged). Real runs against the live Wolfi index and an in-memory loopback registry exited 3 for a `not-built` track and 4 with an added unavailable selector, in table and `--json` form, with the full output still written and exit 0 without the flag; hermetic tests cover every state, error precedence and parsing ([evidence](verification.md#status-rebuild-signal-2026-10-20)).
+
 ### 4. Add Explorer as an optional application
 
 - [ ] Decide Explorer product/repository/module packaging without introducing a CLI dependency on Explorer.

@@ -1357,3 +1357,17 @@ This records the hermetic evidence for the [keyless signing decision](decisions.
 **Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test ./... -count=1` passed.
 
 Not exercised: a real Fulcio token exchange, Rekor entry, or registry push with a keyless signature; verification of a keyless signature by certificate identity; the container or Compose with the new variable. `lupetto verify` and the Explorer signature status still trust one public key and were not changed.
+
+## Status rebuild signal (2026-10-20)
+
+This records the evidence for the [status rebuild signal decision](decisions.md#status-rebuild-signal-2026-10-20) on darwin/arm64 with Go 1.27.1 (index architecture `aarch64`).
+
+| Check | Observed result |
+| --- | --- |
+| `cmd/lupetto` `TestStatusExitCodeSignalsRebuildAndErrors` | All-`current` and empty track lists exit 0; any `not-built`, `update-available`, or `fixes-available` exits 3; any `error` exits 4, including alongside a rebuildable track; table and `--json` output are written in every case; the same documents exit 0 without the flag. |
+| `cmd/lupetto` `TestParseStatus`, `TestStatusDispatchAndHelp` | A duplicate `--exit-code` and `--exit-code=true` are rejected; help names the flag. |
+| Real `status` run, live signed Wolfi index and security feed, go-containerregistry in-memory registry on `127.0.0.1:5055`, empty repository `lab`, `--severity-budget 0` | Products `busybox-static ["1"]`: track `not-built`; exit 0 without the flag, 3 with `--exit-code` and with `--exit-code --json`, empty stderr. Products `busybox-static ["1", "999"]`: `not-built` plus `error` (`unavailable index version for track`); exit 0 without the flag, 4 with it, empty stderr. |
+
+**Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test ./... -count=1` passed.
+
+Not exercised live: exit 0 with `--exit-code` (needs a published current image; covered by the hermetic test), and a Tekton or other scheduler consuming the signal.

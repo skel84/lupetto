@@ -171,6 +171,8 @@ Every installed package with a newer same-name/same-architecture indexed version
 
 Exit **0** means the global comparison completed, even when tracks are outdated or have errors: inspect every track's state. Invalid invocation/configuration/products YAML exits **2**; global failures (including signed-index verification and security-feed fetch/parse failures) exit **1**. Exit 1/2 has stderr diagnostics and no partial JSON document.
 
+`--exit-code` turns a computed status into a scheduling signal without changing its output or the JSON document: exit **0** when every track is `current`, **3** when any track is `not-built`, `update-available`, or `fixes-available` and none is `error`, and **4** when any track is `error` (even if others also need a rebuild). Exits 1 and 2 keep their meaning. A scheduled job gates on the exit code and selects what to build from the document, for example `jq '.tracks[] | select(.state != "current" and .state != "error")'`. Without the flag, a computed status always exits 0.
+
 ### Advisory severity
 
 Severity enrichment is best-effort metadata and **never changes track state, fix reachability, or APK version comparison**. Human output shows unique advisory counts by severity per track (including unevaluated warnings), plus an enrichment summary. `unknown` is not a clean-security result.
