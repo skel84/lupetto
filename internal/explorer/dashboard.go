@@ -528,14 +528,15 @@ func (s *Server) shell() ShellView {
 
 // publishSigningState says whether a "Build & publish" started now would be
 // signed. It reads only the inherited environment's presence and values, never
-// the key file: "" when builds or publication are not enabled, "key" when
-// LUPETTO_COSIGN_KEY is set, "refused" when it is not and
-// LUPETTO_REQUIRE_SIGNING is true (the CLI rejects the build), else "unsigned".
+// the key or token file: "" when builds or publication are not enabled, "key"
+// when LUPETTO_COSIGN_KEY or LUPETTO_COSIGN_IDENTITY_TOKEN_FILE (keyless) is
+// set, "refused" when neither is and LUPETTO_REQUIRE_SIGNING is true (the CLI
+// rejects the build), else "unsigned".
 func publishSigningState(builds bool, getenv func(string) string) string {
 	switch {
 	case !builds || getenv("LUPETTO_REGISTRY") == "" || getenv("LUPETTO_REPOSITORY") == "":
 		return ""
-	case getenv("LUPETTO_COSIGN_KEY") != "":
+	case getenv("LUPETTO_COSIGN_KEY") != "" || getenv("LUPETTO_COSIGN_IDENTITY_TOKEN_FILE") != "":
 		return "key"
 	case getenv("LUPETTO_REQUIRE_SIGNING") == "true":
 		return "refused"

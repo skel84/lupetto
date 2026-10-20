@@ -143,7 +143,17 @@ func signAndAttestDigest(ctx context.Context, command CommandFunc, result Result
 	if command == nil {
 		return fail("image signing", nil)
 	}
-	common := []string{"--yes", "--key", opts.Key}
+	common := []string{"--yes"}
+	if opts.Keyless() {
+		// Keyless: no --key; Cosign gets a short-lived Fulcio certificate for the
+		// identity in the token file. Ambient providers are disabled so the
+		// signer is exactly the supplied token and no interactive flow can
+		// start in a process whose output is discarded.
+		common = append(common, "--identity-token", opts.IdentityTokenFile, "--oidc-disable-ambient-providers")
+		buildMessage(ctx, "Cosign keyless signing with the supplied identity token file")
+	} else {
+		common = append(common, "--key", opts.Key)
+	}
 	if opts.Config != "" {
 		common = append(common, "--signing-config", opts.Config)
 		buildMessage(ctx, "Cosign uses an operator-supplied custom service configuration")

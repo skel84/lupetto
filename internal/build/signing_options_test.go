@@ -1,6 +1,8 @@
 package build
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -61,7 +63,11 @@ func TestResolveSigningStrictEnvironmentBoolean(t *testing.T) {
 
 func TestResolveSigningDoesNotInspectSecretsOrOverriddenEnvironment(t *testing.T) {
 	lookup := func(name string) (string, bool) {
-		t.Fatalf("explicit signing settings unexpectedly read environment %q", name)
+		// The identity token file has no explicit flag here, so its (non-secret
+		// path) environment input may be consulted; nothing else may be.
+		if name != IdentityTokenFileEnv {
+			t.Fatalf("explicit signing settings unexpectedly read environment %q", name)
+		}
 		return "", false
 	}
 	raw := SigningFlags{
@@ -84,7 +90,7 @@ func TestResolveSigningDoesNotInspectSecretsOrOverriddenEnvironment(t *testing.T
 	if _, err := ResolveSigning(SigningFlags{}, PublicationOptions{}, lookup); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(lookedUp, ",") != "LUPETTO_COSIGN_KEY,LUPETTO_COSIGN_SIGNING_CONFIG,LUPETTO_COSIGN_ALLOW_HTTP,LUPETTO_REQUIRE_SIGNING" {
+	if strings.Join(lookedUp, ",") != "LUPETTO_COSIGN_KEY,LUPETTO_COSIGN_SIGNING_CONFIG,"+IdentityTokenFileEnv+",LUPETTO_COSIGN_ALLOW_HTTP,LUPETTO_REQUIRE_SIGNING" {
 		t.Fatalf("unexpected environment reads: %q", lookedUp)
 	}
 }
@@ -180,5 +186,51 @@ func TestResolveSigningRequireSigning(t *testing.T) {
 	}
 	if strings.Contains(UnsignedPublicationWarning, "\n") || !strings.Contains(UnsignedPublicationWarning, "--cosign-key / LUPETTO_COSIGN_KEY") || !strings.Contains(UnsignedPublicationWarning, "--require-signing / LUPETTO_REQUIRE_SIGNING") {
 		t.Fatalf("warning must be one line naming both settings: %q", UnsignedPublicationWarning)
+	}
+}
+
+func TestResolveSigningKeylessIdentityTokenFile(t *testing.T) {
+	production := PublicationOptions{Registry: "registry.example", Repository: "team/images"}
+	loopback := PublicationOptions{Registry: "127.0.0.1:5000", Repository: "team/images"}
+	dir := t.TempDir()
+	token := filepath.Join(dir, "oidc-token")
+	if err := os.WriteFile(token, []byte("synthetic-token-never-read"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	flag := func(value string) OptionalString { return OptionalString{Value: value, Set: true} }
+	on := OptionalBool{Value: true, Set: true}
+	for _, tc := range []struct {
+		name      string
+		raw       SigningFlags
+		env       map[string]string
+		pub       PublicationOptions
+		want      SigningOptions
+		wantError bool
+	}{
+		{name: "flag token file", raw: SigningFlags{IdentityTokenFile: flag(token)}, pub: production, want: SigningOptions{IdentityTokenFile: token}},
+		{name: "environment token file", env: map[string]string{IdentityTokenFileEnv: token}, pub: production, want: SigningOptions{IdentityTokenFile: token}},
+		{name: "flag overrides environment", raw: SigningFlags{IdentityTokenFile: flag(token)}, env: map[string]string{IdentityTokenFileEnv: filepath.Join(dir, "missing")}, pub: production, want: SigningOptions{IdentityTokenFile: token}},
+		{name: "token with signing config", raw: SigningFlags{IdentityTokenFile: flag(token), Config: flag("config")}, pub: production, want: SigningOptions{IdentityTokenFile: token, Config: "config"}},
+		{name: "satisfies require-signing", raw: SigningFlags{IdentityTokenFile: flag(token), Require: on}, pub: production, want: SigningOptions{IdentityTokenFile: token}},
+		{name: "loopback consent like a key", raw: SigningFlags{IdentityTokenFile: flag(token), AllowHTTP: on}, pub: loopback, want: SigningOptions{IdentityTokenFile: token, AllowHTTP: true}},
+		{name: "key and token are exclusive", raw: SigningFlags{IdentityTokenFile: flag(token), Key: flag("key")}, pub: production, wantError: true},
+		{name: "environment key and flag token are exclusive", raw: SigningFlags{IdentityTokenFile: flag(token)}, env: map[string]string{"LUPETTO_COSIGN_KEY": "env-key"}, pub: production, wantError: true},
+		{name: "missing file is not a token", raw: SigningFlags{IdentityTokenFile: flag(filepath.Join(dir, "missing"))}, pub: production, wantError: true},
+		{name: "directory rejected", raw: SigningFlags{IdentityTokenFile: flag(dir)}, pub: production, wantError: true},
+		{name: "empty flag rejected", raw: SigningFlags{IdentityTokenFile: flag("")}, env: map[string]string{IdentityTokenFileEnv: token}, pub: production, wantError: true},
+		{name: "empty environment absent", env: map[string]string{IdentityTokenFileEnv: ""}},
+		{name: "requires publication", raw: SigningFlags{IdentityTokenFile: flag(token)}, wantError: true},
+		{name: "loopback without consent", raw: SigningFlags{IdentityTokenFile: flag(token)}, pub: loopback, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lookup := func(name string) (string, bool) { value, ok := tc.env[name]; return value, ok }
+			opts, err := ResolveSigning(tc.raw, tc.pub, lookup)
+			if (err != nil) != tc.wantError || (!tc.wantError && opts != tc.want) {
+				t.Fatalf("opts=%+v err=%v want=%+v error=%v", opts, err, tc.want, tc.wantError)
+			}
+			if !tc.wantError && opts.Enabled() != (opts.IdentityTokenFile != "") {
+				t.Fatalf("Enabled()=%v for %+v", opts.Enabled(), opts)
+			}
+		})
 	}
 }

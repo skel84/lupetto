@@ -128,3 +128,18 @@ func TestRunBuildSigningDefaultsRemainDisabled(t *testing.T) {
 		}
 	}
 }
+
+func TestParseBuildIdentityTokenFlag(t *testing.T) {
+	want := build.SigningFlags{IdentityTokenFile: build.OptionalString{Value: "token", Set: true}}
+	for _, args := range [][]string{{"nginx", "1.30", "--cosign-identity-token", "token"}, {"--cosign-identity-token=token", "nginx", "1.30"}} {
+		request, err := parseBuild(args)
+		if err != nil || request.signingFlags != want {
+			t.Fatalf("args=%q flags=%+v err=%v", args, request.signingFlags, err)
+		}
+	}
+	for _, args := range [][]string{{"nginx", "1.30", "--cosign-identity-token"}, {"nginx", "1.30", "--cosign-identity-token", "--json"}, {"nginx", "1.30", "--cosign-identity-token=a", "--cosign-identity-token=b"}} {
+		if _, err := parseBuild(args); err == nil {
+			t.Fatalf("args=%q accepted", args)
+		}
+	}
+}

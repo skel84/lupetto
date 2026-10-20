@@ -2,6 +2,7 @@ package build
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"lupetto/internal/registry"
@@ -17,7 +18,10 @@ type OptionalBool struct {
 
 type SigningFlags struct {
 	Key, Config OptionalString
-	AllowHTTP   OptionalBool
+	// IdentityTokenFile is --cosign-identity-token: a file holding an OIDC
+	// token for keyless (Fulcio) signing. Mutually exclusive with Key.
+	IdentityTokenFile OptionalString
+	AllowHTTP         OptionalBool
 	// Require is --require-signing. It is resolved and enforced here and is not
 	// part of SigningOptions: it only rejects unsigned publication.
 	Require OptionalBool
@@ -25,11 +29,18 @@ type SigningFlags struct {
 
 type SigningOptions struct {
 	Key, Config string
-	AllowHTTP   bool
+	// IdentityTokenFile selects keyless signing: Cosign receives the path,
+	// never the token, and obtains a short-lived Fulcio certificate.
+	IdentityTokenFile string
+	AllowHTTP         bool
 }
 
 func (opts SigningOptions) Enabled() bool {
-	return opts.Key != ""
+	return opts.Key != "" || opts.Keyless()
+}
+
+func (opts SigningOptions) Keyless() bool {
+	return opts.IdentityTokenFile != ""
 }
 
 func ResolveSigning(raw SigningFlags, pub PublicationOptions, lookupEnv func(string) (string, bool)) (SigningOptions, error) {
@@ -55,6 +66,10 @@ func ResolveSigning(raw SigningFlags, pub PublicationOptions, lookupEnv func(str
 	if err != nil {
 		return SigningOptions{}, err
 	}
+	tokenFile, err := resolveString(raw.IdentityTokenFile, IdentityTokenFileEnv, "--cosign-identity-token")
+	if err != nil {
+		return SigningOptions{}, err
+	}
 	allowHTTP, err := resolveBool(raw.AllowHTTP, "LUPETTO_COSIGN_ALLOW_HTTP", lookupEnv)
 	if err != nil {
 		return SigningOptions{}, err
@@ -63,7 +78,7 @@ func ResolveSigning(raw SigningFlags, pub PublicationOptions, lookupEnv func(str
 	if err != nil {
 		return SigningOptions{}, err
 	}
-	opts := SigningOptions{Key: key, Config: config, AllowHTTP: allowHTTP}
+	opts := SigningOptions{Key: key, Config: config, IdentityTokenFile: tokenFile, AllowHTTP: allowHTTP}
 	if err := validateSigningOptions(opts, pub); err != nil {
 		return SigningOptions{}, err
 	}
@@ -76,11 +91,14 @@ func ResolveSigning(raw SigningFlags, pub PublicationOptions, lookupEnv func(str
 // RequireSigningEnv is the environment input of --require-signing.
 const RequireSigningEnv = "LUPETTO_REQUIRE_SIGNING"
 
-var errUnsignedPublicationRefused = fmt.Errorf("unsigned publication refused: signing is required (--require-signing / %s) but no Cosign key is set (--cosign-key / LUPETTO_COSIGN_KEY)", RequireSigningEnv)
+// IdentityTokenFileEnv is the environment input of --cosign-identity-token.
+const IdentityTokenFileEnv = "LUPETTO_COSIGN_IDENTITY_TOKEN_FILE"
+
+var errUnsignedPublicationRefused = fmt.Errorf("unsigned publication refused: signing is required (--require-signing / %s) but neither a Cosign key (--cosign-key / LUPETTO_COSIGN_KEY) nor an identity token file (--cosign-identity-token / %s) is set", RequireSigningEnv, IdentityTokenFileEnv)
 
 // UnsignedPublicationWarning is printed once on stderr before a build that
 // publishes without a Cosign key. It is not part of the build record.
-const UnsignedPublicationWarning = "warning: publishing without signing: the image will be pushed with no Cosign signature or SPDX attestation; set --cosign-key / LUPETTO_COSIGN_KEY to sign, or --require-signing / " + RequireSigningEnv + "=true to refuse unsigned publication"
+const UnsignedPublicationWarning = "warning: publishing without signing: the image will be pushed with no Cosign signature or SPDX attestation; set --cosign-key / LUPETTO_COSIGN_KEY or --cosign-identity-token / " + IdentityTokenFileEnv + " to sign, or --require-signing / " + RequireSigningEnv + "=true to refuse unsigned publication"
 
 // UnsignedPublication reports whether a resolved build publishes without
 // signing, which also means no SPDX attestation reaches the registry.
@@ -116,9 +134,21 @@ func validateSigningOptions(opts SigningOptions, pub PublicationOptions) error {
 	}
 	if !opts.Enabled() {
 		if opts.Config != "" || opts.AllowHTTP {
-			return fmt.Errorf("Cosign signing config and enabled HTTP allowance require --cosign-key / LUPETTO_COSIGN_KEY")
+			return fmt.Errorf("Cosign signing config and enabled HTTP allowance require --cosign-key / LUPETTO_COSIGN_KEY or --cosign-identity-token / %s", IdentityTokenFileEnv)
 		}
 		return nil
+	}
+	if opts.Key != "" && opts.Keyless() {
+		return fmt.Errorf("--cosign-key and --cosign-identity-token are mutually exclusive")
+	}
+	if opts.Keyless() {
+		// Cosign treats a nonexistent path as the literal token; insist on a
+		// regular file so a typo cannot become a bogus token sent to Fulcio.
+		// Only metadata is read, never the token.
+		info, err := os.Stat(opts.IdentityTokenFile)
+		if err != nil || !info.Mode().IsRegular() {
+			return fmt.Errorf("--cosign-identity-token / %s must name a readable regular file", IdentityTokenFileEnv)
+		}
 	}
 	if !pub.Enabled() {
 		return fmt.Errorf("signing requires publication with both registry and repository settings")

@@ -336,3 +336,34 @@ func TestSigningDisabledNeverCallsCosign(t *testing.T) {
 		t.Fatalf("outcome=%+v err=%v", outcome, err)
 	}
 }
+
+func TestSignAndAttestKeylessPassesTokenPathNeverTokenAndDisablesAmbientProviders(t *testing.T) {
+	result := signingTestResult(t)
+	token := filepath.Join(t.TempDir(), "oidc-token")
+	if err := os.WriteFile(token, []byte(buildtest.SigningCanary), 0600); err != nil {
+		t.Fatal(err)
+	}
+	opts := SigningOptions{IdentityTokenFile: token}
+	var calls [][]string
+	command := func(ctx context.Context, executable string, args ...string) ([]byte, error) {
+		for _, arg := range args {
+			if strings.Contains(arg, buildtest.SigningCanary) || arg == "--key" {
+				t.Fatalf("keyless invocation leaked the token or used --key: %q", args)
+			}
+		}
+		calls = append(calls, append([]string(nil), args...))
+		return nil, nil
+	}
+	outcome, err := signAndAttestDigest(context.Background(), command, result, opts)
+	if err != nil || outcome.signing != "signed" || outcome.attestation != "attested" {
+		t.Fatalf("outcome=%+v err=%v", outcome, err)
+	}
+	common := []string{"--yes", "--identity-token", token, "--oidc-disable-ambient-providers"}
+	sign := append([]string{"sign"}, common...)
+	sign = append(sign, result.Publication.ImmutableReference)
+	attest := append([]string{"attest"}, common...)
+	attest = append(attest, "--type", "spdxjson", "--predicate", result.SPDXPath, result.Publication.ImmutableReference)
+	if !reflect.DeepEqual(calls, [][]string{sign, attest}) {
+		t.Fatalf("calls=%q want=%q", calls, [][]string{sign, attest})
+	}
+}

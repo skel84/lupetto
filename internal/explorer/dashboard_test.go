@@ -329,7 +329,7 @@ func TestDashboardBuildModesStagesAndMerge(t *testing.T) {
 }
 
 func TestDashboardLocalEnvironmentAndDuplicateForms(t *testing.T) {
-	for _, key := range []string{"LUPETTO_REGISTRY", "LUPETTO_REPOSITORY", "LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP", "LUPETTO_REQUIRE_SIGNING", "DOCKER_HOST", "DOCKER_CONFIG"} {
+	for _, key := range []string{"LUPETTO_REGISTRY", "LUPETTO_REPOSITORY", "LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_IDENTITY_TOKEN_FILE", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP", "LUPETTO_REQUIRE_SIGNING", "DOCKER_HOST", "DOCKER_CONFIG"} {
 		t.Setenv(key, "synthetic")
 	}
 	config := goodFake()
@@ -744,7 +744,7 @@ func TestDashboardPublishLoadDecisionAndArgs(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Setenv("LUPETTO_REGISTRY", "127.0.0.1:5000")
 			t.Setenv("LUPETTO_REPOSITORY", "tests/images")
-			for _, key := range []string{"LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP", "DOCKER_HOST", "DOCKER_CONFIG"} {
+			for _, key := range []string{"LUPETTO_COSIGN_KEY", "LUPETTO_COSIGN_IDENTITY_TOKEN_FILE", "LUPETTO_COSIGN_SIGNING_CONFIG", "LUPETTO_COSIGN_ALLOW_HTTP", "DOCKER_HOST", "DOCKER_CONFIG"} {
 				t.Setenv(key, "synthetic")
 			}
 			// Publish builds inherit the signing requirement unchanged.
