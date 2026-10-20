@@ -42,7 +42,7 @@ func TestVerifyCLI(t *testing.T) {
 		return func(key string) (string, bool) { value, ok := values[key]; return value, ok }
 	}
 	expectFingerprint := func(path string) string {
-		request, err := verify.NewRequest(remote, path, false, "")
+		request, err := verify.NewRequest(remote, path, verify.Identity{}, false, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -141,5 +141,23 @@ func TestVerifyCLI(t *testing.T) {
 	stdout.Reset()
 	if code := run(context.Background(), []string{"help"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "lupetto verify [--json] [--cosign-public-key <file>]") {
 		t.Fatalf("help %d %s", code, &stdout)
+	}
+}
+
+func TestVerifyIdentityFlagsOverrideEnvironment(t *testing.T) {
+	reference := "registry.example.invalid/team/app@sha256:" + strings.Repeat("a", 64)
+	env := map[string]string{"LUPETTO_COSIGN_CERTIFICATE_IDENTITY": "env-identity", "LUPETTO_COSIGN_CERTIFICATE_OIDC_ISSUER": "https://env.example.invalid"}
+	lookup := func(name string) (string, bool) { value, ok := env[name]; return value, ok }
+	check := func(context.Context, verify.Request) (verify.Document, error) {
+		return verify.Document{Kind: "verify", Version: 1}, nil
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runVerifyWith(context.Background(), []string{"--certificate-oidc-issuer=https://flag.example.invalid", reference}, &stdout, &stderr, lookup, check); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, &stderr)
+	}
+	// A key flag on top of an identity from the environment is two trust inputs.
+	stderr.Reset()
+	if code := runVerifyWith(context.Background(), []string{"--cosign-public-key", "key.pub", reference}, &stdout, &stderr, lookup, check); code != 2 || !strings.Contains(stderr.String(), "not both") {
+		t.Fatalf("code=%d stderr=%s", code, &stderr)
 	}
 }

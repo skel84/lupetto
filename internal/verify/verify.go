@@ -1,5 +1,6 @@
 // Package verify classifies a registry image's Cosign signature and SPDX
-// attestation against one explicitly trusted public key. It reads only:
+// attestation against one explicitly trusted public key or one keyless
+// certificate identity policy. It reads only:
 // Sigstore artifacts are listed through Lupetto's registry client and verified
 // claims are parsed from Cosign v3.1.3 stdout; Cosign diagnostics are discarded.
 package verify
@@ -81,14 +82,32 @@ type Document struct {
 	Attestation     Attestation `json:"attestation"`
 }
 
+// Trust is either a public-key fingerprint or a keyless identity policy.
 type Trust struct {
-	PublicKeySHA256 string `json:"publicKeySHA256"`
+	PublicKeySHA256           string `json:"publicKeySHA256,omitempty"`
+	CertificateIdentity       string `json:"certificateIdentity,omitempty"`
+	CertificateIdentityRegexp string `json:"certificateIdentityRegexp,omitempty"`
+	CertificateOIDCIssuer     string `json:"certificateOIDCIssuer,omitempty"`
 }
 
 type Signature struct {
 	State     string `json:"state"`
 	Error     string `json:"error,omitempty"`
 	Artifacts int    `json:"artifacts"`
+	// Identity is the verified certificate subject and issuer of a keyless
+	// signature that matched the policy.
+	Identity *CertificateIdentity `json:"identity,omitempty"`
+}
+
+type CertificateIdentity struct {
+	Subject string `json:"subject"`
+	Issuer  string `json:"issuer"`
+}
+
+// Identity is a keyless trust policy: the certificate subject, exactly or as
+// a Go regexp, and the exact OIDC issuer.
+type Identity struct {
+	Exact, Regexp, Issuer string
 }
 
 type Attestation struct {
@@ -112,6 +131,7 @@ type Request struct {
 	SBOMOut   string
 	keyPEM    []byte
 	keySHA256 string
+	identity  Identity
 }
 
 // CosignFunc runs Cosign and returns its bounded stdout and exit code. A
@@ -135,9 +155,10 @@ func ParseReference(reference string) (name.Digest, error) {
 }
 
 // NewRequest validates everything that does not need the network: the
-// reference, the loopback-only HTTP exception, the public key, and that the
-// SBOM output path does not already exist.
-func NewRequest(reference, publicKeyPath string, allowHTTP bool, sbomOut string) (Request, error) {
+// reference, the loopback-only HTTP exception, exactly one trust input (the
+// public key or the identity policy), and that the SBOM output path does not
+// already exist.
+func NewRequest(reference, publicKeyPath string, identity Identity, allowHTTP bool, sbomOut string) (Request, error) {
 	ref, err := ParseReference(reference)
 	if err != nil {
 		return Request{}, err
@@ -149,14 +170,28 @@ func NewRequest(reference, publicKeyPath string, allowHTTP bool, sbomOut string)
 	if loopback && !allowHTTP {
 		return Request{}, errors.New("verifying a literal-loopback registry reference requires --cosign-allow-http=true")
 	}
-	if publicKeyPath == "" {
-		return Request{}, errors.New("verify requires --cosign-public-key / LUPETTO_COSIGN_PUBLIC_KEY")
+	request := Request{Reference: ref, AllowHTTP: allowHTTP}
+	switch keyless := identity != (Identity{}); {
+	case publicKeyPath != "" && keyless:
+		return Request{}, errors.New("verify trusts either a public key or a certificate identity, not both")
+	case keyless:
+		if (identity.Exact == "") == (identity.Regexp == "") {
+			return Request{}, errors.New("keyless verify requires exactly one of --certificate-identity or --certificate-identity-regexp")
+		}
+		if identity.Issuer == "" {
+			return Request{}, errors.New("keyless verify requires --certificate-oidc-issuer")
+		}
+		if _, err := regexp.Compile(identity.Regexp); err != nil {
+			return Request{}, errors.New("--certificate-identity-regexp is not a valid Go regular expression")
+		}
+		request.identity = identity
+	case publicKeyPath == "":
+		return Request{}, errors.New("verify requires --cosign-public-key / LUPETTO_COSIGN_PUBLIC_KEY, or --certificate-identity[-regexp] with --certificate-oidc-issuer")
+	default:
+		if request.keyPEM, request.keySHA256, err = loadPublicKey(publicKeyPath); err != nil {
+			return Request{}, err
+		}
 	}
-	keyPEM, keySHA, err := loadPublicKey(publicKeyPath)
-	if err != nil {
-		return Request{}, err
-	}
-	request := Request{Reference: ref, AllowHTTP: allowHTTP, keyPEM: keyPEM, keySHA256: keySHA}
 	if sbomOut != "" {
 		absolute, err := filepath.Abs(sbomOut)
 		if err != nil {
@@ -220,7 +255,7 @@ func Run(ctx context.Context, request Request, preflight func(context.Context) e
 // RunWith returns a document whenever the check completed, including
 // unsigned, invalid, and per-section error states. Errors are global failures.
 func RunWith(ctx context.Context, request Request, services Services) (Document, error) {
-	if request.keySHA256 == "" || len(request.keyPEM) == 0 {
+	if (request.keySHA256 == "" || len(request.keyPEM) == 0) && request.identity == (Identity{}) {
 		return Document{}, errors.New("verify request was not validated")
 	}
 	if services.Now == nil {
@@ -232,16 +267,28 @@ func RunWith(ctx context.Context, request Request, services Services) (Document,
 	if err := services.Preflight(ctx); err != nil {
 		return Document{}, err
 	}
-	// Hand Cosign exactly the validated key bytes that were fingerprinted.
-	keyFile, cleanup, err := writeKeyFile(request.keyPEM)
-	if err != nil {
-		return Document{}, err
-	}
-	defer cleanup()
-
 	ref := request.Reference
 	document := Document{Kind: Kind, Version: Version, Reference: ref.Name(), Digest: ref.DigestStr(),
-		CheckedAt: services.Now().UTC(), Trust: Trust{PublicKeySHA256: request.keySHA256}, TransparencyLog: "verified"}
+		CheckedAt: services.Now().UTC(), TransparencyLog: "verified"}
+	var trust []string
+	if identity := request.identity; identity != (Identity{}) {
+		document.Trust = Trust{CertificateIdentity: identity.Exact, CertificateIdentityRegexp: identity.Regexp, CertificateOIDCIssuer: identity.Issuer}
+		if identity.Exact != "" {
+			trust = []string{"--certificate-identity", identity.Exact}
+		} else {
+			trust = []string{"--certificate-identity-regexp", identity.Regexp}
+		}
+		trust = append(trust, "--certificate-oidc-issuer", identity.Issuer)
+	} else {
+		// Hand Cosign exactly the validated key bytes that were fingerprinted.
+		keyFile, cleanup, err := writeKeyFile(request.keyPEM)
+		if err != nil {
+			return Document{}, err
+		}
+		defer cleanup()
+		document.Trust.PublicKeySHA256 = request.keySHA256
+		trust = []string{"--key", keyFile}
+	}
 	var local []string
 	if request.AllowHTTP {
 		document.TransparencyLog = "skipped-local"
@@ -264,9 +311,9 @@ func RunWith(ctx context.Context, request Request, services Services) (Document,
 	if found.signatures == 0 {
 		document.Signature.State = StateUnsigned
 	} else {
-		args := append([]string{"verify", "--key", keyFile}, local...)
+		args := append(append([]string{"verify"}, trust...), local...)
 		output, exit, err := services.Cosign(ctx, append(args, ref.Name())...)
-		document.Signature.State, document.Signature.Error = classifySignature(ctx, output, exit, err, ref.DigestStr())
+		document.Signature.State, document.Signature.Error, document.Signature.Identity = classifySignature(ctx, output, exit, err, ref.DigestStr())
 	}
 	if err := ctx.Err(); err != nil {
 		return Document{}, err
@@ -274,7 +321,7 @@ func RunWith(ctx context.Context, request Request, services Services) (Document,
 	if found.attestations == 0 {
 		document.Attestation.State = StateAbsent
 	} else {
-		args := append([]string{"verify-attestation", "--key", keyFile, "--type", "spdxjson"}, local...)
+		args := append(append(append([]string{"verify-attestation"}, trust...), "--type", "spdxjson"), local...)
 		output, exit, err := services.Cosign(ctx, append(args, ref.Name())...)
 		var state, message string
 		state, message, predicate = classifyAttestation(ctx, output, exit, err, ref.DigestStr())
@@ -445,9 +492,9 @@ func cosignOutcome(ctx context.Context, command string, exit int, err error) (st
 	return "", "", true
 }
 
-func classifySignature(ctx context.Context, output []byte, exit int, err error, digest string) (string, string) {
+func classifySignature(ctx context.Context, output []byte, exit int, err error, digest string) (string, string, *CertificateIdentity) {
 	if state, message, ok := cosignOutcome(ctx, "verify", exit, err); !ok {
-		return state, message
+		return state, message, nil
 	}
 	type claim struct {
 		Critical struct {
@@ -456,7 +503,14 @@ func classifySignature(ctx context.Context, output []byte, exit int, err error, 
 				Digest string `json:"docker-manifest-digest"`
 			} `json:"image"`
 		} `json:"critical"`
+		// Cosign adds the verified certificate's subject and issuer for
+		// keyless signatures; key signatures have none.
+		Optional struct {
+			Subject string `json:"Subject"`
+			Issuer  string `json:"Issuer"`
+		} `json:"optional"`
 	}
+	var identity *CertificateIdentity
 	decoder := json.NewDecoder(bytes.NewReader(output))
 	matched, signClaims := false, 0
 	for {
@@ -464,7 +518,7 @@ func classifySignature(ctx context.Context, output []byte, exit int, err error, 
 		if err := decoder.Decode(&claims); errors.Is(err, io.EOF) {
 			break
 		} else if err != nil {
-			return StateError, "Cosign verify output could not be parsed"
+			return StateError, "Cosign verify output could not be parsed", nil
 		}
 		for _, c := range claims {
 			if c.Critical.Type != SignPredicateType && c.Critical.Type != LegacySignClaimType {
@@ -473,16 +527,19 @@ func classifySignature(ctx context.Context, output []byte, exit int, err error, 
 			signClaims++
 			if c.Critical.Image.Digest == digest {
 				matched = true
+				if identity == nil && c.Optional.Subject != "" {
+					identity = &CertificateIdentity{Subject: c.Optional.Subject, Issuer: c.Optional.Issuer}
+				}
 			}
 		}
 	}
 	switch {
 	case matched:
-		return StateSigned, ""
+		return StateSigned, "", identity
 	case signClaims != 0:
-		return StateInvalid, "verified signature claims name a different digest"
+		return StateInvalid, "verified signature claims name a different digest", nil
 	default:
-		return StateInvalid, "no verified " + SignPredicateType + " claim for this digest"
+		return StateInvalid, "no verified " + SignPredicateType + " claim for this digest", nil
 	}
 }
 

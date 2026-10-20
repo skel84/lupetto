@@ -178,7 +178,7 @@ func envelope(predicateType, subjectDigest, predicate string) []byte {
 func (f *fixture) run(cosign *fakeCosign, sbomOut string) (Document, error) {
 	f.t.Helper()
 	key, _ := writePublicKey(f.t)
-	request, err := NewRequest(f.reference(), key, true, sbomOut)
+	request, err := NewRequest(f.reference(), key, Identity{}, true, sbomOut)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -351,7 +351,7 @@ func TestListingErrorIsError(t *testing.T) {
 	t.Cleanup(server.Close)
 	reference := strings.TrimPrefix(server.URL, "http://") + "/team/app@sha256:" + strings.Repeat("a", 64)
 	key, _ := writePublicKey(t)
-	request, err := NewRequest(reference, key, true, "")
+	request, err := NewRequest(reference, key, Identity{}, true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +368,7 @@ func TestListingErrorIsError(t *testing.T) {
 func TestPreflightFailureIsGlobal(t *testing.T) {
 	f := newFixture(t)
 	key, _ := writePublicKey(t)
-	request, err := NewRequest(f.reference(), key, true, "")
+	request, err := NewRequest(f.reference(), key, Identity{}, true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +384,7 @@ func TestPreflightFailureIsGlobal(t *testing.T) {
 func TestNewRequestValidation(t *testing.T) {
 	key, fingerprint := writePublicKey(t)
 	digest := "@sha256:" + strings.Repeat("a", 64)
-	request, err := NewRequest("registry.example.invalid/team/app"+digest, key, false, "")
+	request, err := NewRequest("registry.example.invalid/team/app"+digest, key, Identity{}, false, "")
 	if err != nil || request.PublicKeySHA256() != fingerprint || request.AllowHTTP {
 		t.Fatalf("%+v %v", request, err)
 	}
@@ -412,11 +412,11 @@ func TestNewRequestValidation(t *testing.T) {
 		{"registry.example.invalid/team/app" + digest, false, link},
 		{"registry.example.invalid/team/app" + digest, false, filepath.Join(t.TempDir(), "missing", "sbom.json")},
 	} {
-		if _, err := NewRequest(tc.reference, key, tc.allowHTTP, tc.sbomOut); err == nil {
+		if _, err := NewRequest(tc.reference, key, Identity{}, tc.allowHTTP, tc.sbomOut); err == nil {
 			t.Fatalf("accepted %+v", tc)
 		}
 	}
-	if request, err := NewRequest("[::1]:5000/team/app"+digest, key, true, ""); err != nil || !request.AllowHTTP {
+	if request, err := NewRequest("[::1]:5000/team/app"+digest, key, Identity{}, true, ""); err != nil || !request.AllowHTTP {
 		t.Fatalf("loopback IPv6: %v", err)
 	}
 }
@@ -518,4 +518,63 @@ func mustDigest(t *testing.T, reference string) name.Digest {
 		t.Fatal(err)
 	}
 	return parsed
+}
+
+func TestKeylessIdentityTrust(t *testing.T) {
+	f := newFixture(t)
+	f.referrers(f.bundle(SignPredicateType, true), f.bundle(SPDXPredicateType, true))
+	subject, issuer := "https://ci.example.invalid/workflows/release@refs/heads/main", "https://issuer.example.invalid"
+	claims, _ := json.Marshal([]map[string]any{{"critical": map[string]any{"image": map[string]any{"docker-manifest-digest": f.digest}, "type": LegacySignClaimType}, "optional": map[string]any{"Subject": subject, "Issuer": issuer}}})
+	cosign := &fakeCosign{results: map[string]func() ([]byte, int, error){
+		"verify":             returns(claims, 0, nil),
+		"verify-attestation": returns(envelope(SPDXPredicateType, f.digest, spdxPredicate), 0, nil),
+	}}
+	request, err := NewRequest(f.reference(), "", Identity{Regexp: "^https://ci[.]example[.]invalid/", Issuer: issuer}, true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := RunWith(context.Background(), request, Services{Cosign: cosign.run, Preflight: func(context.Context) error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if document.Signature.State != StateSigned || document.Attestation.State != StateAttested || document.Signature.Identity == nil || *document.Signature.Identity != (CertificateIdentity{subject, issuer}) {
+		t.Fatalf("%+v", document)
+	}
+	if document.Trust != (Trust{CertificateIdentityRegexp: "^https://ci[.]example[.]invalid/", CertificateOIDCIssuer: issuer}) {
+		t.Fatalf("trust %+v", document.Trust)
+	}
+	policy := "--certificate-identity-regexp ^https://ci[.]example[.]invalid/ --certificate-oidc-issuer " + issuer
+	for _, call := range cosign.calls {
+		args := strings.Join(call.args, " ")
+		if !strings.Contains(args, policy) || strings.Contains(args, "--key") {
+			t.Fatalf("args %s", args)
+		}
+	}
+	if len(cosign.calls) != 2 {
+		t.Fatalf("calls %v", cosign.calls)
+	}
+}
+
+func TestNewRequestTrustSelection(t *testing.T) {
+	key, _ := writePublicKey(t)
+	reference := "registry.example.invalid/team/app@sha256:" + strings.Repeat("a", 64)
+	issuer := "https://issuer.example.invalid"
+	for _, tc := range []struct {
+		key      string
+		identity Identity
+	}{
+		{"", Identity{}},
+		{key, Identity{Exact: "ci", Issuer: issuer}},
+		{"", Identity{Exact: "ci"}},
+		{"", Identity{Issuer: issuer}},
+		{"", Identity{Exact: "ci", Regexp: "ci", Issuer: issuer}},
+		{"", Identity{Regexp: "(", Issuer: issuer}},
+	} {
+		if _, err := NewRequest(reference, tc.key, tc.identity, false, ""); err == nil {
+			t.Fatalf("accepted key=%q identity=%+v", tc.key, tc.identity)
+		}
+	}
+	if _, err := NewRequest(reference, "", Identity{Exact: "ci", Issuer: issuer}, false, ""); err != nil {
+		t.Fatal(err)
+	}
 }
