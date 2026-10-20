@@ -1405,6 +1405,8 @@ This records the evidence for the [keyless identity verification decision](decis
 | Same digest with identity regexp `^https://github.com/someone-else/`, and separately with issuer `https://accounts.google.com` | Signature `invalid` (Cosign exit 12) and attestation `invalid` (exit 1) in both; exit 0 as a completed check. |
 | `LUPETTO_COSIGN_PUBLIC_KEY=/nonexistent` plus `--certificate-identity`/`--certificate-oidc-issuer` | Exit 2, "verify trusts either a public key or a certificate identity, not both", before any key read or network access. |
 
+| Real `lupetto verify --certificate-identity-regexp '^https://github.com/skel84/lupetto/' --certificate-oidc-issuer https://token.actions.githubusercontent.com ghcr.io/skel84/lupetto@sha256:d71271fc…831b` (the v0.1.0 release image, signed keylessly by this repository's release workflow) | Exit 0; transparency log `verified`; signature `signed` (1 artifact); signer `https://github.com/skel84/lupetto/.github/workflows/release.yml@refs/tags/v0.1.0`; SPDX attestation `absent` (the release workflow signs only). The same digest with regexp `^https://github.com/someone-else/` reported `invalid`. The image pulls anonymously. |
+
 **Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test ./... -count=1` passed.
 
-Not exercised: a Lupetto-built keyless signature (needs an authorized Fulcio-trusted CI identity), an OCI bundle referrer signed keylessly (the public image uses legacy `.sig`/`.att` tags), the Explorer page in a real browser, and the container or Compose with the new variables.
+Not exercised: a keyless signature made by `lupetto build --cosign-identity-token` (the release image is signed by the workflow's own `cosign sign`), an OCI bundle referrer signed keylessly (the public image uses legacy `.sig`/`.att` tags), the Explorer page in a real browser, and the container or Compose with the new variables.
