@@ -1341,3 +1341,19 @@ Hermetic regressions: `internal/build` (`TestResolveSigningRequireSigning`: prec
 **Gates.** `gofmt -l .` empty. `go vet` passed for `cmd/lupetto`, `cmd/lupetto-explorer`, and `internal/explorer`; `go vet ./internal/build` reports only the existing unkeyed-composite findings in the unchanged `internal/build/registry_test.go` and passes with `-composites=false`. `go test ./... -count=1` passed. `go test -race ./... -count=1` passed every package except the unchanged `internal/images`, where `TestImagesDockerUnavailableAndEmpty` or `TestImagesHistoryAndDocker` hit its 10 s fake-Docker timeout while unrelated host builds kept the load average between 35 and 88; `go test -race ./internal/images -count=1` and `-count=3` passed on their own.
 
 Not exercised: signing (covered by earlier evidence; the warning is absent from signed builds in the pipeline test), the container or Compose with the new variable, and a real Harbor publish. An invalid `LUPETTO_REQUIRE_SIGNING` value in Explorer's environment shows the unsigned notice; the CLI then rejects the publish build with exit 2.
+
+## Keyless signing option (2026-10-20)
+
+This records the hermetic evidence for the [keyless signing decision](decisions.md#keyless-signing-with-an-identity-token-file-2026-10-20) on darwin/arm64 with Go 1.27.1. No Cosign, apko, Docker, registry, or Fulcio/Rekor service was invoked: every check below runs through the fake command adapter or the pure option resolver.
+
+| Check | Observed result |
+| --- | --- |
+| `internal/build` `TestResolveSigningKeylessIdentityTokenFile` | A flag or environment token file enables signing with no key; a flag overrides the environment path; config, loopback consent, and `--require-signing` behave as with a key; a key and a token together, a nonexistent path, a directory, an explicitly empty flag, a token without publication, and loopback without consent are rejected before any work. |
+| `internal/build` `TestSignAndAttestKeylessPassesTokenPathNeverTokenAndDisablesAmbientProviders` | The token file holds the signing canary; `sign` and `attest` received exactly `--yes --identity-token <path> --oidc-disable-ambient-providers` plus the immutable reference (and `--type spdxjson --predicate`), no argument equaled `--key`, and no argument contained the canary. |
+| `internal/build` `TestResolveSigningDoesNotInspectSecretsOrOverriddenEnvironment` | Updated: `LUPETTO_COSIGN_IDENTITY_TOKEN_FILE` is the only environment name consulted when key, config, HTTP consent, and requirement are explicit; `COSIGN_PASSWORD` is still never read. |
+| `cmd/lupetto` `TestParseBuildIdentityTokenFlag` | Separate and inline forms parse into `SigningFlags.IdentityTokenFile`; a missing value, a following flag as value, and duplicates are rejected. `sbom` continues to reject the flag with the other signing flags. |
+| `internal/explorer` `TestPublishSigningState`, local-build environment tests | A set token file yields the same `key` state as a key (no unsigned or refused notice); an empty value is `unsigned`. Local-mode builds exclude `LUPETTO_COSIGN_IDENTITY_TOKEN_FILE` with the other publication/signing variables. |
+
+**Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test ./... -count=1` passed.
+
+Not exercised: a real Fulcio token exchange, Rekor entry, or registry push with a keyless signature; verification of a keyless signature by certificate identity; the container or Compose with the new variable. `lupetto verify` and the Explorer signature status still trust one public key and were not changed.

@@ -126,6 +126,12 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 
 - [x] Warn on unsigned publication and add `--require-signing` / `LUPETTO_REQUIRE_SIGNING`. A real `--no-load` BusyBox publish to an owned loopback `registry:2` without a key exited 0 with the warning as the first stderr line only (not in `--json` stdout, record unchanged: publication `published`, signing/attestation `skipped`); `LUPETTO_REQUIRE_SIGNING=true` and `--require-signing` each exited 2 with the refusal, empty stdout and no new workspace; a non-publishing build with the requirement exited 0 with no warning. Explorer with builds and publication enabled showed the unsigned notice (and the refused notice with the requirement) on Images, catalog and a publish image detail in headless Chrome at 1440 and 390 px without horizontal scroll; a refused dashboard publish build failed with exit 2 and no workspace. [Evidence](verification.md#unsigned-publication-warning-and-signing-requirement-2026-10-02).
 
+**Keyless signing round** ([decision](decisions.md#keyless-signing-with-an-identity-token-file-2026-10-20)):
+
+- [x] Add `--cosign-identity-token` / `LUPETTO_COSIGN_IDENTITY_TOKEN_FILE` as a keyless alternative to the key: path-only pass-through with `--identity-token` and `--oidc-disable-ambient-providers`, mutual exclusion with the key, regular-file precheck, Explorer notice and local-build exclusion. Hermetic adapter/parser/Explorer tests only ([evidence](verification.md#keyless-signing-option-2026-10-20)).
+- [ ] Exercise a live keyless sign and attest from a CI runner with a projected OIDC token against an authorized registry, and verify by certificate identity with upstream Cosign. Not run: no authorized Fulcio-trusted CI identity was available in this checkout.
+- [ ] Identity-based verification (`--certificate-identity[-regexp]` / `--certificate-oidc-issuer`) in `lupetto verify` and the Explorer signature status.
+
 ### 4. Add Explorer as an optional application
 
 - [ ] Decide Explorer product/repository/module packaging without introducing a CLI dependency on Explorer.

@@ -24,6 +24,7 @@ Keep keys, signing configuration, and passwords outside the repository, shell hi
 | `--registry` | `LUPETTO_REGISTRY` | Registry authority, e.g. `registry.example.invalid:5443`. |
 | `--repository` | `LUPETTO_REPOSITORY` | Lower-case nested prefix, e.g. `team/lupetto/images`. |
 | `--cosign-key` | `LUPETTO_COSIGN_KEY` | Key that requests signing. |
+| `--cosign-identity-token` | `LUPETTO_COSIGN_IDENTITY_TOKEN_FILE` | File holding an OIDC identity token; requests [keyless signing](#keyless-signing-with-an-identity-token). Mutually exclusive with the key. |
 | `--cosign-signing-config` | `LUPETTO_COSIGN_SIGNING_CONFIG` | Optional upstream signing-config file; requires a key. |
 | `--cosign-allow-http` | `LUPETTO_COSIGN_ALLOW_HTTP` | Explicit HTTP consent for Cosign; literal loopback only. |
 | `--require-signing` | `LUPETTO_REQUIRE_SIGNING` | Refuse publication without a key (see [unsigned publication](#unsigned-publication)). |
@@ -35,15 +36,15 @@ Each explicit flag overrides **only its own** environment input, so a registry f
 These are rejected before tool checks, workspace creation, network access, or building:
 
 - Exactly one of registry/repository set. (Both absent skips publication.)
-- A key without complete publication settings; a signing config or HTTP consent without a key. There is no implicit keyless signing.
-- Publication without a key while `--require-signing` / `LUPETTO_REQUIRE_SIGNING` is effectively true.
+- A key or identity token file without complete publication settings; a signing config or HTTP consent without either. Keyless signing is never implicit: it needs an explicit identity token file, a key and a token file together are an error, and the token path must name an existing regular file (only its metadata is checked; the token is never read by Lupetto).
+- Publication without a key or identity token file while `--require-signing` / `LUPETTO_REQUIRE_SIGNING` is effectively true.
 - An environment boolean other than `true` or `false`, or a boolean flag with another value.
 - HTTP consent for a non-loopback authority (a DNS name that merely resolves to loopback does not count), or signing to a literal-loopback authority **without** HTTP consent.
 - Invalid authorities or prefixes. Registry is an authority, not a URL: DNS name, IPv4, or bracketed IPv6, optional port 1–65535; a single-label name needs a port unless it is `localhost`. Repository has no leading/trailing/repeated slash, `.`/`..`, tag, or digest. Nothing is truncated or normalized into another target.
 
 After the APK is selected (so after the workspace exists and the index is fetched) but before composition, loading, or publication, the complete reference is checked: it must parse to the same registry, repository, and tag in both `github.com/distribution/reference` and go-containerregistry (the only accepted difference is `docker.io` ↔ `index.docker.io`) and fit the length limits. A failure there is a `build`-stage failure with a `failure.json`.
 
-`--no-load` is valid with publication and signing. `sbom` ignores all six environment inputs and rejects their flags (including false/empty forms).
+`--no-load` is valid with publication and signing. `sbom` ignores all seven environment inputs and rejects their flags (including false/empty forms).
 
 For an intentionally local-only build, clear the stage-requesting settings:
 
@@ -98,7 +99,7 @@ Errors report the stage plus, at most, a fixed classification: an HTTP status wi
 
 ## Sign and attest the verified digest
 
-Signing requires a key and exactly Cosign v3.1.3. An optional upstream signing-config file can accompany the key; it configures services, not identity. Lupetto has no key store, keyless mode, or KMS guarantee.
+Signing requires exactly Cosign v3.1.3 and either a key or an [identity token file](#keyless-signing-with-an-identity-token). An optional upstream signing-config file can accompany either; it configures services, not identity. Lupetto has no key store or KMS guarantee.
 
 Supply `COSIGN_PASSWORD` only through the process environment. In Bash, prompt without echoing:
 
@@ -118,20 +119,44 @@ cosign attest --yes --key <key> [--signing-config <file>] [--allow-http-registry
   --type spdxjson --predicate <validated-architecture-SPDX> <immutable-reference>
 ```
 
+With an identity token file instead of a key, `--key <key>` is replaced by `--identity-token <file> --oidc-disable-ambient-providers` in both commands.
+
 Immediately before attesting, Lupetto re-hashes the validated architecture SPDX and compares it with the recorded checksum. It never regenerates SPDX or attests the supplemental index document. Cosign v3.1.3's default registry mode (modern bundle/referrers) is used unchanged.
+
+### Keyless signing with an identity token
+
+Keyless signing is for non-interactive CI where the runner has an OIDC identity: a Tekton or Kubernetes projected service-account token, a GitHub Actions job token, or any other issuer that the Fulcio instance trusts. Lupetto passes **the path**, never the token, and Cosign exchanges the token for a short-lived Fulcio certificate bound to that identity. Ambient providers are disabled so the signer is exactly the supplied token.
+
+```bash
+lupetto build nginx 1.30 --no-load \
+  --registry registry.example.invalid --repository team/lupetto/images \
+  --cosign-identity-token /var/run/sigstore/oidc-token
+```
+
+The file must be an existing regular file; Lupetto checks only that, because upstream Cosign treats a nonexistent path as the literal token and a typo would otherwise be sent to Fulcio. Token files are short-lived credentials: mount them read-only, scope their audience to `sigstore` (or the audience the Fulcio instance expects), and never commit or log them. Upstream Fulcio, Rekor, and TUF defaults stay intact unless a signing config is supplied; the production and transparency-log caveats above apply unchanged, and with public Sigstore the certificate's identity and issuer become public in Rekor.
+
+Keyless signatures are verified by **identity**, not by a public key:
+
+```bash
+cosign verify <immutable-reference> \
+  --certificate-oidc-issuer <issuer URL> \
+  --certificate-identity <subject, or --certificate-identity-regexp>
+```
+
+`lupetto verify` and the Explorer signature status currently trust exactly one public key and do not evaluate certificate identities; a keyless-signed image is reported from that key's point of view. Identity-based verification in Lupetto is deferred; see [decisions](decisions.md#keyless-signing-with-an-identity-token-file-2026-10-20). Keyless signing has so far been exercised only with the hermetic command-adapter tests ([verification](verification.md#keyless-signing-option-2026-10-20)); a live Fulcio exchange from CI has not yet been recorded.
 
 ### Unsigned publication
 
 A build that publishes without a key pushes and verifies the image but creates **no signature and no SPDX attestation**, so the registry holds no SBOM from Lupetto (a registry's own scanner SBOM, such as Harbor's Trivy, is not the signed, lock-validated attestation). Such a build prints one warning line on stderr before it starts:
 
 ```text
-lupetto: warning: publishing without signing: the image will be pushed with no Cosign signature or SPDX attestation; set --cosign-key / LUPETTO_COSIGN_KEY to sign, or --require-signing / LUPETTO_REQUIRE_SIGNING=true to refuse unsigned publication
+lupetto: warning: publishing without signing: the image will be pushed with no Cosign signature or SPDX attestation; set --cosign-key / LUPETTO_COSIGN_KEY or --cosign-identity-token / LUPETTO_COSIGN_IDENTITY_TOKEN_FILE to sign, or --require-signing / LUPETTO_REQUIRE_SIGNING=true to refuse unsigned publication
 ```
 
 The outcome, exit code, stdout, `--json` document, and version-6 record are unchanged; the warning is not part of the record. To make unsigned publication an error instead, set `--require-signing` or `LUPETTO_REQUIRE_SIGNING=true`: a publishing build without a key then exits **2** before any tool, network, or workspace work:
 
 ```text
-lupetto: unsigned publication refused: signing is required (--require-signing / LUPETTO_REQUIRE_SIGNING) but no Cosign key is set (--cosign-key / LUPETTO_COSIGN_KEY)
+lupetto: unsigned publication refused: signing is required (--require-signing / LUPETTO_REQUIRE_SIGNING) but neither a Cosign key (--cosign-key / LUPETTO_COSIGN_KEY) nor an identity token file (--cosign-identity-token / LUPETTO_COSIGN_IDENTITY_TOKEN_FILE) is set
 ```
 
 The requirement has no effect on builds that do not publish, and `--require-signing=false` overrides the environment for one build. Explorer's publish builds inherit it; see the [Explorer notes](../README.md#optional-explorer-server). Observed behavior is recorded in the [verification record](verification.md#unsigned-publication-warning-and-signing-requirement-2026-10-02).
