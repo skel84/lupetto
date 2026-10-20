@@ -50,6 +50,8 @@ func signatureEnv(t *testing.T, key bool) string {
 		keyPath = filepath.Join(t.TempDir(), "trusted-cosign.pub")
 	}
 	t.Setenv("LUPETTO_COSIGN_PUBLIC_KEY", keyPath)
+	t.Setenv("LUPETTO_COSIGN_CERTIFICATE_IDENTITY", "")
+	t.Setenv("LUPETTO_COSIGN_CERTIFICATE_IDENTITY_REGEXP", "")
 	t.Setenv("LUPETTO_COSIGN_ALLOW_HTTP", "")
 	t.Setenv("COSIGN_PASSWORD", "hunter2-secret")
 	t.Setenv("TMPDIR", t.TempDir())
@@ -139,6 +141,34 @@ func TestSignaturesWithoutTrustAreNeverVerified(t *testing.T) {
 	}
 	if lines := callLines(t, calls, "verify"); len(lines) != 0 {
 		t.Fatalf("verify ran without trust: %v", lines)
+	}
+}
+
+func TestKeylessSignerIdentityIsCheckedAndShown(t *testing.T) {
+	signatureEnv(t, false)
+	t.Setenv("LUPETTO_COSIGN_CERTIFICATE_IDENTITY_REGEXP", "^https://ci[.]example[.]invalid/")
+	t.Setenv("LUPETTO_COSIGN_CERTIFICATE_OIDC_ISSUER", "https://issuer.example.invalid")
+	track := signatureTrack("a")
+	reference := track.Repository + "@" + testDigest("a")
+	var d VerifyDocument
+	if err := json.Unmarshal([]byte(verifyDoc(reference, "signed", "absent", "", "verified")), &d); err != nil {
+		t.Fatal(err)
+	}
+	d.Trust = VerifyTrust{CertificateIdentityRegexp: "^https://ci[.]example[.]invalid/", CertificateOIDCIssuer: "https://issuer.example.invalid"}
+	d.Signature.Identity = &VerifyIdentity{Subject: "https://ci.example.invalid/release@refs/heads/main", Issuer: "https://issuer.example.invalid"}
+	data, _ := json.Marshal(d)
+	config := goodFake()
+	config.Verify = map[string]string{reference: string(data)}
+	server, _, _ := testServer(t, config, false)
+	server.status.finish(&StatusDocument{Kind: "status", Version: 2, Tracks: []Track{track}}, nil)
+	eventually(t, func() bool {
+		return signatureStates(imageJSON(t, server, "/images/cmd:curl/1?format=json"))["a"] == "signed"
+	})
+	if view := imageJSON(t, server, "/images/cmd:curl/1?format=json").Product.Signatures[testDigest("a")]; view.Signer != d.Signature.Identity.Subject || view.KeySHA256 != "" {
+		t.Fatalf("view %+v", view)
+	}
+	if html := request(server, "GET", "/images/cmd:curl/1", nil).Body.String(); !strings.Contains(html, "signer <span class=\"mono\">https://ci.example.invalid/release@refs/heads/main</span>") {
+		t.Fatal("signer not rendered")
 	}
 }
 

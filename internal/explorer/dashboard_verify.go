@@ -19,7 +19,8 @@ import (
 )
 
 // Signature status comes only from `lupetto verify --json`. Results are cached
-// per process by (configured key path, digest reference); verification runs in
+// per process by (configured key path, digest reference); the trust inputs
+// are fixed for the process lifetime; verification runs in
 // the background with at most verifyWorkers CLI processes and one check per
 // reference at a time. Pages never wait for it.
 const (
@@ -61,8 +62,10 @@ type signatureCache struct {
 
 func newSignatureCache() signatureCache {
 	keyPath := os.Getenv("LUPETTO_COSIGN_PUBLIC_KEY")
+	// The CLI validates the trust inputs; any configured one enables checks.
+	identity := os.Getenv("LUPETTO_COSIGN_CERTIFICATE_IDENTITY") + os.Getenv("LUPETTO_COSIGN_CERTIFICATE_IDENTITY_REGEXP")
 	return signatureCache{
-		enabled:   strings.TrimSpace(keyPath) != "",
+		enabled:   strings.TrimSpace(keyPath+identity) != "",
 		keyPath:   keyPath,
 		allowHTTP: os.Getenv("LUPETTO_COSIGN_ALLOW_HTTP") == "true",
 		entries:   map[verifyKey]*verifyEntry{},
@@ -75,7 +78,7 @@ func (c *signatureCache) config() SignatureConfigView {
 	if c.enabled {
 		return SignatureConfigView{Enabled: true}
 	}
-	return SignatureConfigView{Reason: "No trusted public key is configured (LUPETTO_COSIGN_PUBLIC_KEY is not set), so signatures are not checked."}
+	return SignatureConfigView{Reason: "No trusted public key or signer identity is configured (LUPETTO_COSIGN_PUBLIC_KEY is not set, nor LUPETTO_COSIGN_CERTIFICATE_IDENTITY or LUPETTO_COSIGN_CERTIFICATE_IDENTITY_REGEXP), so signatures are not checked."}
 }
 
 // verifyTTL keeps positive results long. Invalid is kept short too: a
@@ -295,6 +298,9 @@ func (s *Server) signatureView(track Track, image Image) *SignatureView {
 		d := entry.doc
 		view.CheckedAt = d.CheckedAt
 		view.KeySHA256 = d.Trust.PublicKeySHA256
+		if d.Signature.Identity != nil {
+			view.Signer = d.Signature.Identity.Subject
+		}
 		view.TransparencyLog = d.TransparencyLog
 		view.LocalOnly = d.TransparencyLog == "skipped-local"
 		view.State = d.Signature.State

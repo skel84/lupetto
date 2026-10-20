@@ -102,13 +102,25 @@ type VerifyDocument struct {
 	Signature       VerifySignature   `json:"signature"`
 	Attestation     VerifyAttestation `json:"attestation"`
 }
+
+// VerifyTrust is a key fingerprint or, for keyless trust, the identity policy.
 type VerifyTrust struct {
-	PublicKeySHA256 string `json:"publicKeySHA256"`
+	PublicKeySHA256           string `json:"publicKeySHA256,omitempty"`
+	CertificateIdentity       string `json:"certificateIdentity,omitempty"`
+	CertificateIdentityRegexp string `json:"certificateIdentityRegexp,omitempty"`
+	CertificateOIDCIssuer     string `json:"certificateOIDCIssuer,omitempty"`
 }
 type VerifySignature struct {
-	State     string `json:"state"`
-	Error     string `json:"error,omitempty"`
-	Artifacts int    `json:"artifacts"`
+	State     string          `json:"state"`
+	Error     string          `json:"error,omitempty"`
+	Artifacts int             `json:"artifacts"`
+	Identity  *VerifyIdentity `json:"identity,omitempty"`
+}
+
+// VerifyIdentity is the verified certificate subject of a keyless signature.
+type VerifyIdentity struct {
+	Subject string `json:"subject"`
+	Issuer  string `json:"issuer"`
 }
 type VerifyAttestation struct {
 	State         string      `json:"state"`
@@ -137,6 +149,7 @@ type SignatureView struct {
 	TransparencyLog   string    `json:"transparencyLog,omitempty"`
 	LocalOnly         bool      `json:"localOnly"`
 	KeySHA256         string    `json:"keySHA256,omitempty"`
+	Signer            string    `json:"signer,omitempty"`
 	CheckedAt         time.Time `json:"checkedAt"`
 	Rechecking        bool      `json:"rechecking"`
 }

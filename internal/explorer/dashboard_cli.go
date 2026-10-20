@@ -95,7 +95,8 @@ func (c *CLI) Products(ctx context.Context, products, action, name string, selec
 
 // Verify runs `lupetto verify --json [--cosign-allow-http] [--sbom-out <new
 // file>] <reference>`. Trust reaches the CLI only through the inherited
-// LUPETTO_COSIGN_PUBLIC_KEY environment variable, never as an argument.
+// LUPETTO_COSIGN_PUBLIC_KEY or LUPETTO_COSIGN_CERTIFICATE_* environment
+// variables, never as an argument.
 // allowHTTP adds the local-only flag, and only for a literal loopback registry.
 func (c *CLI) Verify(ctx context.Context, reference, sbomOut string, allowHTTP bool) (*VerifyDocument, error) {
 	if len(reference) > 1024 || !digestReferencePattern.MatchString(reference) {
