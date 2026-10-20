@@ -123,6 +123,32 @@ func TestStatusGlobalFailureAndHumanOutput(t *testing.T) {
 	}
 }
 
+func TestTargetArchFlags(t *testing.T) {
+	for value, want := range map[string]string{"arm64": "aarch64", "aarch64": "aarch64", "amd64": "x86_64", "x86_64": "x86_64"} {
+		built, err := parseBuild([]string{"busybox", "1", "--arch", value})
+		inline, err2 := parseBuild([]string{"--arch=" + value, "busybox", "1"})
+		discovered, err3 := parseDiscover([]string{"--arch", value, "busybox"})
+		statused, err4 := parseStatus([]string{"--products=p", "--arch=" + value})
+		if err != nil || err2 != nil || err3 != nil || err4 != nil || built.Arch != want || inline.Arch != want || discovered.arch != want || statused.arch != want {
+			t.Fatalf("%s: %q %q %q %q %v %v %v %v", value, built.Arch, inline.Arch, discovered.arch, statused.arch, err, err2, err3, err4)
+		}
+	}
+	if request, _ := parseBuild([]string{"busybox", "1"}); request.Arch != "" {
+		t.Fatalf("default arch=%q, want host default", request.Arch)
+	}
+	for _, bad := range [][]string{{"--arch", "riscv64"}, {"--arch="}, {"--arch"}, {"--arch=arm64", "--arch=arm64"}} {
+		if _, err := parseBuild(append([]string{"busybox", "1"}, bad...)); err == nil {
+			t.Fatalf("build accepted %q", bad)
+		}
+		if _, err := parseDiscover(append([]string{"busybox"}, bad...)); err == nil {
+			t.Fatalf("discover accepted %q", bad)
+		}
+		if _, err := parseStatus(append([]string{"--products=p"}, bad...)); err == nil {
+			t.Fatalf("status accepted %q", bad)
+		}
+	}
+}
+
 func TestStatusExitCodeSignalsRebuildAndErrors(t *testing.T) {
 	args := []string{"--products", statusProductsFixture(t), "--registry=127.0.0.1:5000", "--repository=team"}
 	for _, tc := range []struct {

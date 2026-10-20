@@ -103,9 +103,12 @@ func RunWith(ctx context.Context, request Request, services Services) (Result, e
 		}
 	}
 	buildStage(ctx, "Checking build tools")
-	arch, err := wolfi.TargetArch()
-	if err != nil {
-		return buildFail(err)
+	arch := request.Arch
+	if arch == "" {
+		var err error
+		if arch, err = wolfi.TargetArch(); err != nil {
+			return buildFail(err)
+		}
 	}
 	if err := RequireApkoVersion(ctx, services.Command); err != nil {
 		return buildFail(err)

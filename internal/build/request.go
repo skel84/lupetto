@@ -7,6 +7,8 @@ type Request struct {
 	PackageName string
 	Selector    string
 	Version     string
+	// Arch is the Wolfi target architecture; empty means the host's.
+	Arch        string
 	NoLoad      bool
 	Publication PublicationOptions
 	Signing     SigningOptions

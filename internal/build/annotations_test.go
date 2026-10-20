@@ -17,10 +17,13 @@ import (
 )
 
 func TestBuildIdentityAnnotationsAndScopedEpoch(t *testing.T) {
-	arch, err := wolfi.TargetArch()
+	host, err := wolfi.TargetArch()
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Request the other architecture: the index, lock, build, and annotations
+	// must all follow the requested target, never the host.
+	arch := map[string]string{"x86_64": "aarch64", "aarch64": "x86_64"}[host]
 	index, key := wolfitest.MakeSignedIndexFor(t, fmt.Sprintf("P:nginx-stable\nV:1.30.2-r0\nA:%s\nC:exact\np:nginx=1.30.2-r0\n\n", arch))
 	for _, noLoad := range []bool{false, true} {
 		t.Run(fmt.Sprintf("no-load=%v", noLoad), func(t *testing.T) {
@@ -42,10 +45,16 @@ func TestBuildIdentityAnnotationsAndScopedEpoch(t *testing.T) {
 					case "version":
 						return []byte("GitVersion:    " + ApkoVersion + "\n"), nil
 					case "lock":
+						if args[1] != "--arch" || args[2] != arch {
+							t.Fatalf("lock args=%v", args)
+						}
 						data, _ := json.Marshal(map[string]any{"contents": map[string]any{"packages": []any{map[string]string{"name": "nginx-stable", "version": "1.30.2-r0", "architecture": arch, "checksum": "exact"}}}})
 						return nil, os.WriteFile(args[4], data, 0600)
 					case "build":
 						buildCalled = true
+						if args[3] != "--arch" || args[4] != arch {
+							t.Fatalf("build args=%v", args)
+						}
 						data, err := os.ReadFile(args[len(args)-3])
 						if err != nil {
 							t.Fatal(err)
@@ -79,8 +88,8 @@ func TestBuildIdentityAnnotationsAndScopedEpoch(t *testing.T) {
 					}
 				},
 			}
-			result, err := RunWith(context.Background(), Request{PackageName: "nginx", Version: "1.30.2-r0", NoLoad: noLoad}, services)
-			if !buildCalled || !errors.Is(err, stopped) || result.Build != "failed" {
+			result, err := RunWith(context.Background(), Request{PackageName: "nginx", Version: "1.30.2-r0", Arch: arch, NoLoad: noLoad}, services)
+			if !buildCalled || !errors.Is(err, stopped) || result.Build != "failed" || result.Arch != arch {
 				t.Fatalf("called=%v result=%+v err=%v", buildCalled, result, err)
 			}
 		})

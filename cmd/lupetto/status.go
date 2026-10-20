@@ -13,14 +13,16 @@ import (
 	"lupetto/internal/build"
 	"lupetto/internal/registry"
 	"lupetto/internal/status"
+	"lupetto/internal/wolfi"
 )
 
-const statusUsage = "\n\nRead-only registry comparison:\n  lupetto status --products <file> [--registry <authority> --repository <prefix>] [--json] [--severity-budget <duration>] [--exit-code]\nStatus requires both registry/repository settings, reusing independent flag/LUPETTO_* environment precedence.\nProducts YAML version 1 lists package names/providers and dotted numeric selectors; unknown fields are rejected.\nStatus --json prints a kind=status, version=2 document with index, image, installed-package, and severity-enriched security-fix facts.\nSeverity fetching defaults to 20s; --severity-budget 0 uses cache only (otherwise use a Go duration, e.g. 10s).\nStatus reads only; it never builds, publishes, signs, or loads Docker.\nThe Wolfi security feed is unsigned HTTPS and lists fixed vulnerabilities only, not a vulnerability scan.\nStatus exit 0 means computed (including track errors/updates); invocation errors exit 2, global failures exit 1.\nWith --exit-code, a computed status exits 0 when every track is current, 3 when any track needs a rebuild (not-built, update-available, fixes-available), and 4 when any track has an error."
+const statusUsage = "\n\nRead-only registry comparison:\n  lupetto status --products <file> [--registry <authority> --repository <prefix>] [--arch <arch>] [--json] [--severity-budget <duration>] [--exit-code]\nStatus requires both registry/repository settings, reusing independent flag/LUPETTO_* environment precedence.\nProducts YAML version 1 lists package names/providers and dotted numeric selectors; unknown fields are rejected.\nStatus --json prints a kind=status, version=2 document with index, image, installed-package, and severity-enriched security-fix facts.\nSeverity fetching defaults to 20s; --severity-budget 0 uses cache only (otherwise use a Go duration, e.g. 10s).\nStatus compares the host architecture's index and images unless --arch selects x86_64 (amd64) or aarch64 (arm64).\nStatus reads only; it never builds, publishes, signs, or loads Docker.\nThe Wolfi security feed is unsigned HTTPS and lists fixed vulnerabilities only, not a vulnerability scan.\nStatus exit 0 means computed (including track errors/updates); invocation errors exit 2, global failures exit 1.\nWith --exit-code, a computed status exits 0 when every track is current, 3 when any track needs a rebuild (not-built, update-available, fixes-available), and 4 when any track has an error."
 
 type statusRequest struct {
 	products         string
 	json             bool
 	exitCode         bool
+	arch             string
 	publicationFlags registry.PublicationFlags
 	severityBudget   time.Duration
 	severitySet      bool
@@ -46,8 +48,8 @@ func parseStatus(args []string) (statusRequest, error) {
 		}
 		flag, value, inline := strings.Cut(arg, "=")
 		switch flag {
-		case "--products", "--registry", "--repository", "--severity-budget":
-			if (flag == "--products" && request.products != "") || (flag == "--registry" && request.publicationFlags.Registry.Set) || (flag == "--repository" && request.publicationFlags.Repository.Set) || (flag == "--severity-budget" && request.severitySet) {
+		case "--products", "--registry", "--repository", "--severity-budget", "--arch":
+			if (flag == "--arch" && request.arch != "") || (flag == "--products" && request.products != "") || (flag == "--registry" && request.publicationFlags.Registry.Set) || (flag == "--repository" && request.publicationFlags.Repository.Set) || (flag == "--severity-budget" && request.severitySet) {
 				return statusRequest{}, fmt.Errorf("%s may be specified only once", flag)
 			}
 			if !inline {
@@ -67,6 +69,12 @@ func parseStatus(args []string) (statusRequest, error) {
 				request.publicationFlags.Registry = registry.OptionalString{Value: value, Set: true}
 			case "--repository":
 				request.publicationFlags.Repository = registry.OptionalString{Value: value, Set: true}
+			case "--arch":
+				arch, err := wolfi.ParseArch(value)
+				if err != nil {
+					return statusRequest{}, err
+				}
+				request.arch = arch
 			case "--severity-budget":
 				budget, err := time.ParseDuration(value)
 				if err != nil || budget < 0 || budget > 5*time.Minute {
@@ -75,7 +83,7 @@ func parseStatus(args []string) (statusRequest, error) {
 				request.severityBudget, request.severitySet = budget, true
 			}
 		default:
-			return statusRequest{}, fmt.Errorf("status accepts only --products, --registry, --repository, --severity-budget, --json, and --exit-code")
+			return statusRequest{}, fmt.Errorf("status accepts only --products, --registry, --repository, --severity-budget, --arch, --json, and --exit-code")
 		}
 	}
 	if request.products == "" {
@@ -106,7 +114,11 @@ func runStatusWith(ctx context.Context, args []string, stdout, stderr io.Writer,
 		fmt.Fprintf(stderr, "lupetto: %s\n", build.PlainText(err.Error()))
 		return 2
 	}
-	document, err := compute(status.WithSeverityBudget(ctx, request.severityBudget), products, options)
+	ctx = status.WithSeverityBudget(ctx, request.severityBudget)
+	if request.arch != "" {
+		ctx = status.WithArchitecture(ctx, request.arch)
+	}
+	document, err := compute(ctx, products, options)
 	if err != nil {
 		fmt.Fprintf(stderr, "lupetto: %s\n", build.PlainText(err.Error()))
 		return 1

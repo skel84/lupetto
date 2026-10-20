@@ -35,12 +35,21 @@ func ValidateOptions(options Options) error {
 	return nil
 }
 
+type architectureKey struct{}
+
+// WithArchitecture selects the Wolfi architecture Run compares; without it
+// Run uses the host architecture.
+func WithArchitecture(ctx context.Context, arch string) context.Context {
+	return context.WithValue(ctx, architectureKey{}, arch)
+}
+
 func Run(ctx context.Context, products Products, options Options) (Document, error) {
 	budget := DefaultSeverityBudget
 	if configured, ok := ctx.Value(severityBudgetKey{}).(time.Duration); ok {
 		budget = configured
 	}
-	return RunWith(ctx, products, options, Services{SeverityBudget: budget})
+	arch, _ := ctx.Value(architectureKey{}).(string)
+	return RunWith(ctx, products, options, Services{SeverityBudget: budget, Architecture: arch})
 }
 
 // RunWith returns a computed document even when individual tracks fail. Only

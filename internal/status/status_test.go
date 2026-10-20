@@ -238,3 +238,11 @@ func TestTrackFailuresDoNotLeakErrorsOrDiscardCacheFailures(t *testing.T) {
 		})
 	}
 }
+
+func TestRunUsesRequestedArchitecture(t *testing.T) {
+	ctx := WithArchitecture(context.Background(), "riscv64")
+	products := Products{Version: 1, Products: []Product{{Package: "busybox", Selectors: []string{"1"}}}}
+	if _, err := Run(ctx, products, Options{Registry: "127.0.0.1:5000", Repository: "team"}); err == nil || err.Error() != "unsupported status architecture" {
+		t.Fatalf("err=%v, want the requested architecture to reach RunWith", err)
+	}
+}

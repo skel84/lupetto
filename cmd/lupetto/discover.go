@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"lupetto/internal/wolfi"
 )
@@ -12,6 +13,7 @@ import (
 type discoverRequest struct {
 	name string
 	json bool
+	arch string
 }
 
 type discoverDocument struct {
@@ -31,8 +33,21 @@ type discoverPackage struct {
 
 func parseDiscover(args []string) (discoverRequest, error) {
 	var request discoverRequest
-	for _, arg := range args {
-		if arg == "--json" && !request.json {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if value, inline := strings.CutPrefix(arg, "--arch="); (inline || arg == "--arch") && request.arch == "" {
+			if !inline {
+				if i++; i == len(args) {
+					return discoverRequest{}, fmt.Errorf("--arch requires a value")
+				}
+				value = args[i]
+			}
+			arch, err := wolfi.ParseArch(value)
+			if err != nil {
+				return discoverRequest{}, err
+			}
+			request.arch = arch
+		} else if arg == "--json" && !request.json {
 			request.json = true
 		} else if request.name == "" && wolfi.RequestedNamePattern.MatchString(arg) {
 			request.name = arg
@@ -56,7 +71,10 @@ func runDiscoverWith(ctx context.Context, args []string, stdout, stderr io.Write
 		fmt.Fprintf(stderr, "lupetto: %v\n", err)
 		return 2
 	}
-	arch, err := targetArch()
+	arch, err := request.arch, error(nil)
+	if arch == "" {
+		arch, err = targetArch()
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "lupetto: %v\n", err)
 		return 1

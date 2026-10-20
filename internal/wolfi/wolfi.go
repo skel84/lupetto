@@ -60,6 +60,18 @@ func TargetArch() (string, error) {
 	}
 }
 
+// ParseArch maps an explicit --arch value, in Wolfi or OCI spelling, to the
+// Wolfi architecture. Callers keep an empty value meaning the host.
+func ParseArch(value string) (string, error) {
+	switch value {
+	case "x86_64", "amd64":
+		return "x86_64", nil
+	case "aarch64", "arm64":
+		return "aarch64", nil
+	}
+	return "", fmt.Errorf("--arch must be x86_64 (amd64) or aarch64 (arm64)")
+}
+
 // GetPublicFile fetches a public URL, refusing bodies over maxBytes.
 func GetPublicFile(ctx context.Context, url string, maxBytes int64) ([]byte, error) {
 	client := &http.Client{Timeout: 90 * time.Second}
