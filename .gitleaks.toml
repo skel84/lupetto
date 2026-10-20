@@ -1,0 +1,14 @@
+# gitleaks configuration. Known non-secrets that the default rules flag.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public hashes and test fixtures"
+regexes = [
+  # SHA-256 of the public Wolfi signing key, pinned in source.
+  '''f0031424cf46f7db780ce63a45f0fd6aa6f85f601e6bb3b7a91fe3d4d5b7d2cc''',
+  # Synthetic credential-helper fixture name.
+  '''fixture-1\.0_safe''',
+  # Cosign flag names in argument-parsing tests.
+  '''--cosign-(key|signing-config)=?''',
+]

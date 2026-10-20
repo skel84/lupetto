@@ -1,0 +1,34 @@
+# Tag v* -> build the combined Explorer image from Containerfile, push it to
+# GHCR by digest, and sign it keylessly with the workflow's OIDC identity.
+# Consumers verify with:
+#   cosign verify ghcr.io/<owner>/lupetto@sha256:... \
+#     --certificate-identity-regexp '^https://github.com/<owner>/lupetto/' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Containerfile
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+      - uses: sigstore/cosign-installer@v3
+      - run: cosign sign --yes "ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}"
