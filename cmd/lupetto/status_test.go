@@ -27,6 +27,7 @@ func TestParseStatus(t *testing.T) {
 	for _, args := range [][]string{
 		nil, {"--json"}, {"products.yaml"}, {"--products"}, {"--products="},
 		{"--products=p", "--products=q"}, {"--products=p", "--json", "--json"},
+		{"--products=p", "--exit-code", "--exit-code"}, {"--products=p", "--exit-code=true"},
 		{"--products=p", "--json=true"}, {"--products=p", "--registry"},
 		{"--products=p", "--registry="}, {"--products=p", "--repository="},
 		{"--products=p", "--registry=a", "--registry=b"},
@@ -122,6 +123,41 @@ func TestStatusGlobalFailureAndHumanOutput(t *testing.T) {
 	}
 }
 
+func TestStatusExitCodeSignalsRebuildAndErrors(t *testing.T) {
+	args := []string{"--products", statusProductsFixture(t), "--registry=127.0.0.1:5000", "--repository=team"}
+	for _, tc := range []struct {
+		states []string
+		want   int
+	}{
+		{[]string{"current", "current"}, 0},
+		{nil, 0},
+		{[]string{"current", "not-built"}, 3},
+		{[]string{"update-available"}, 3},
+		{[]string{"fixes-available", "current"}, 3},
+		{[]string{"update-available", "error"}, 4},
+		{[]string{"error", "current"}, 4},
+	} {
+		tracks := []status.Track{}
+		for _, state := range tc.states {
+			tracks = append(tracks, status.Track{Package: "nginx", Selector: "1.30", State: state})
+		}
+		compute := func(context.Context, status.Products, status.Options) (status.Document, error) {
+			return status.Document{Kind: "status", Version: 2, Tracks: tracks}, nil
+		}
+		for _, extra := range [][]string{{"--exit-code"}, {"--exit-code", "--json"}} {
+			var stdout, stderr bytes.Buffer
+			if code := runStatusWith(context.Background(), append(append([]string{}, args...), extra...), &stdout, &stderr, compute); code != tc.want || stdout.Len() == 0 || stderr.Len() != 0 {
+				t.Fatalf("states=%q args=%q code=%d want=%d stdout=%q stderr=%q", tc.states, extra, code, tc.want, stdout.String(), stderr.String())
+			}
+		}
+		// Without the opt-in, a computed status keeps exit 0 for existing consumers.
+		var stdout, stderr bytes.Buffer
+		if code := runStatusWith(context.Background(), append(append([]string{}, args...), "--json"), &stdout, &stderr, compute); code != 0 {
+			t.Fatalf("states=%q without --exit-code: code=%d", tc.states, code)
+		}
+	}
+}
+
 func TestStatusDispatchAndHelp(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run(context.Background(), []string{"status", "--json"}, &stdout, &stderr); code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "status requires --products") {
@@ -132,7 +168,7 @@ func TestStatusDispatchAndHelp(t *testing.T) {
 	if code := run(context.Background(), []string{"--help"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	for _, phrase := range []string{"lupetto status --products <file>", "version=2 document", "--severity-budget", "unknown fields are rejected", "unsigned HTTPS", "including track errors/updates", "global failures exit 1"} {
+	for _, phrase := range []string{"lupetto status --products <file>", "version=2 document", "--severity-budget", "unknown fields are rejected", "unsigned HTTPS", "including track errors/updates", "global failures exit 1", "--exit-code"} {
 		if !strings.Contains(stdout.String(), phrase) {
 			t.Fatalf("help missing %q", phrase)
 		}

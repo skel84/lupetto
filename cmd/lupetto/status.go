@@ -15,11 +15,12 @@ import (
 	"lupetto/internal/status"
 )
 
-const statusUsage = "\n\nRead-only registry comparison:\n  lupetto status --products <file> [--registry <authority> --repository <prefix>] [--json] [--severity-budget <duration>]\nStatus requires both registry/repository settings, reusing independent flag/LUPETTO_* environment precedence.\nProducts YAML version 1 lists package names/providers and dotted numeric selectors; unknown fields are rejected.\nStatus --json prints a kind=status, version=2 document with index, image, installed-package, and severity-enriched security-fix facts.\nSeverity fetching defaults to 20s; --severity-budget 0 uses cache only (otherwise use a Go duration, e.g. 10s).\nStatus reads only; it never builds, publishes, signs, or loads Docker.\nThe Wolfi security feed is unsigned HTTPS and lists fixed vulnerabilities only, not a vulnerability scan.\nStatus exit 0 means computed (including track errors/updates); invocation errors exit 2, global failures exit 1."
+const statusUsage = "\n\nRead-only registry comparison:\n  lupetto status --products <file> [--registry <authority> --repository <prefix>] [--json] [--severity-budget <duration>] [--exit-code]\nStatus requires both registry/repository settings, reusing independent flag/LUPETTO_* environment precedence.\nProducts YAML version 1 lists package names/providers and dotted numeric selectors; unknown fields are rejected.\nStatus --json prints a kind=status, version=2 document with index, image, installed-package, and severity-enriched security-fix facts.\nSeverity fetching defaults to 20s; --severity-budget 0 uses cache only (otherwise use a Go duration, e.g. 10s).\nStatus reads only; it never builds, publishes, signs, or loads Docker.\nThe Wolfi security feed is unsigned HTTPS and lists fixed vulnerabilities only, not a vulnerability scan.\nStatus exit 0 means computed (including track errors/updates); invocation errors exit 2, global failures exit 1.\nWith --exit-code, a computed status exits 0 when every track is current, 3 when any track needs a rebuild (not-built, update-available, fixes-available), and 4 when any track has an error."
 
 type statusRequest struct {
 	products         string
 	json             bool
+	exitCode         bool
 	publicationFlags registry.PublicationFlags
 	severityBudget   time.Duration
 	severitySet      bool
@@ -34,6 +35,13 @@ func parseStatus(args []string) (statusRequest, error) {
 				return statusRequest{}, fmt.Errorf("--json may be specified only once")
 			}
 			request.json = true
+			continue
+		}
+		if arg == "--exit-code" {
+			if request.exitCode {
+				return statusRequest{}, fmt.Errorf("--exit-code may be specified only once")
+			}
+			request.exitCode = true
 			continue
 		}
 		flag, value, inline := strings.Cut(arg, "=")
@@ -67,7 +75,7 @@ func parseStatus(args []string) (statusRequest, error) {
 				request.severityBudget, request.severitySet = budget, true
 			}
 		default:
-			return statusRequest{}, fmt.Errorf("status accepts only --products, --registry, --repository, --severity-budget, and --json")
+			return statusRequest{}, fmt.Errorf("status accepts only --products, --registry, --repository, --severity-budget, --json, and --exit-code")
 		}
 	}
 	if request.products == "" {
@@ -112,13 +120,30 @@ func runStatusWith(ctx context.Context, args []string, stdout, stderr io.Writer,
 		if !writeJSONRecord(stdout, stderr, append(encoded, '\n')) {
 			return 1
 		}
-		return 0
-	}
-	if err := writeStatusTable(stdout, document); err != nil {
+	} else if err := writeStatusTable(stdout, document); err != nil {
 		fmt.Fprintln(stderr, "lupetto: could not write status")
 		return 1
 	}
+	if request.exitCode {
+		return statusExitCode(document)
+	}
 	return 0
+}
+
+// statusExitCode is the --exit-code contract: 4 if any track errored (the
+// comparison is incomplete), else 3 if any track needs a rebuild, else 0.
+func statusExitCode(document status.Document) int {
+	code := 0
+	for _, track := range document.Tracks {
+		switch track.State {
+		case status.Error:
+			return 4
+		case status.Current:
+		default:
+			code = 3
+		}
+	}
+	return code
 }
 
 func writeStatusTable(out io.Writer, document status.Document) error {
