@@ -284,7 +284,7 @@ Chosen so CI runners with an OIDC identity (Tekton/Kubernetes projected tokens, 
 - One new input, `--cosign-identity-token <file>` / `LUPETTO_COSIGN_IDENTITY_TOKEN_FILE`, with the same flag/environment precedence, explicit-empty rejection, and duplicate rejection as the key. Signing is enabled by a key **or** a token file; both together are rejected. Config, HTTP consent, loopback policy, `--require-signing`, and the `sbom` rejection apply to either.
 - Lupetto passes the path through `--identity-token` and never reads the token. It additionally passes `--oidc-disable-ambient-providers` so the signer is exactly the supplied token and no interactive or ambient flow can start inside the output-discarding adapter. Because upstream treats a nonexistent path as a literal token, the path must name an existing regular file (metadata only) before any tool, network, or workspace work.
 - Not chosen: ambient-only keyless (environment or well-known paths without an explicit opt-in), interactive browser/device flows, KMS references, and a Lupetto-managed issuer or Fulcio configuration. Service endpoints continue to come from upstream defaults or an operator signing config.
-- Deferred: identity-based verification (`--certificate-identity[-regexp]` / `--certificate-oidc-issuer`) in `lupetto verify` and the Explorer signature status, which still trust exactly one public key. Also deferred: a live Fulcio/Rekor keyless exchange from CI; the hermetic adapter tests prove the argv contract, not Fulcio interoperability.
+- Identity-based verification, first deferred here, is now [implemented](#keyless-identity-verification-2026-10-20). Deferred: a live Fulcio/Rekor keyless exchange from CI; the hermetic adapter tests prove the argv contract, not Fulcio interoperability.
 
 ## Status rebuild signal (2026-10-20)
 
@@ -302,6 +302,16 @@ Chosen (user decision) so x86 CI runners can build arm64 images, as the first st
 - `--arch` on `discover`, `build`, `sbom`, and `status` accepts `x86_64`/`aarch64` and the OCI spellings `amd64`/`arm64`, normalized to the Wolfi name; duplicates, empty, and other values exit 2. Without it each command keeps the host default and its existing unsupported-host failure.
 - The value replaces only the host lookup: the same single-architecture pipeline, record version 6 (`selection.architecture` already records the target), tags (`…-arm64-build-…`), annotations, signing, and attestation apply. No environment variable; Explorer keeps the host architecture.
 - Not chosen yet: one run producing an OCI image index. That needs a record schema change, index signing, and status/verify/Explorer index reads; it can later assemble per-architecture publications. P6 (one explicit architecture per build) still holds.
+
+## Keyless identity verification (2026-10-20)
+
+Chosen so images signed with `--cosign-identity-token` (and other keyless signers) can be verified by who signed them rather than by a key. Contract in the [README](../README.md#verify-signatures) and the [signing guide](registry-signing.md#lupetto-verify); evidence in [verification](verification.md#keyless-identity-verification-2026-10-20).
+
+- `lupetto verify` trusts exactly one input: the existing public key, **or** `--certificate-identity` / `--certificate-identity-regexp` (Go syntax, as Cosign) with the exact `--certificate-oidc-issuer`. Each flag overrides its `LUPETTO_COSIGN_CERTIFICATE_*` variable, matching the key's precedence; the effective key and identity together are rejected (exit 2), like signing's key/token exclusion.
+- Cosign receives the policy instead of `--key` for both `verify` and `verify-attestation`; artifact listing, claim/subject checks, states, and exits are unchanged.
+- The `verify` document stays at version 1: key output is unchanged, and the additions are optional (`trust.certificateIdentity`, `trust.certificateIdentityRegexp`, `trust.certificateOIDCIssuer`, `signature.identity` with the matched certificate's `subject` and `issuer` from Cosign's verified claim). `trust.publicKeySHA256` is omitted in identity mode.
+- Explorer enables signature checks when a key or an identity variable is set, inherits them through the environment as before, and shows the verified signer subject.
+- Not chosen: an issuer regexp, several trusted identities or keys, and a custom trust root. Verification still uses Cosign's default public-good trust.
 
 ## Proposed design choices
 

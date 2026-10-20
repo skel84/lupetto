@@ -143,7 +143,7 @@ cosign verify <immutable-reference> \
   --certificate-identity <subject, or --certificate-identity-regexp>
 ```
 
-`lupetto verify` and the Explorer signature status currently trust exactly one public key and do not evaluate certificate identities; a keyless-signed image is reported from that key's point of view. Identity-based verification in Lupetto is deferred; see [decisions](decisions.md#keyless-signing-with-an-identity-token-file-2026-10-20). Keyless signing has so far been exercised only with the hermetic command-adapter tests ([verification](verification.md#keyless-signing-option-2026-10-20)); a live Fulcio exchange from CI has not yet been recorded.
+`lupetto verify` and the Explorer signature status take the same policy through `--certificate-identity[-regexp]` / `--certificate-oidc-issuer` or their `LUPETTO_COSIGN_CERTIFICATE_*` variables ([`lupetto verify`](#lupetto-verify)). Keyless signing has so far been exercised only with the hermetic command-adapter tests ([verification](verification.md#keyless-signing-option-2026-10-20)); a live Fulcio exchange from CI has not yet been recorded.
 
 ### Unsigned publication
 
@@ -216,7 +216,7 @@ lupetto verify --json --cosign-public-key "$PUBLIC_KEY" "$IMMUTABLE"
 LUPETTO_COSIGN_PUBLIC_KEY="$PUBLIC_KEY" lupetto verify --json --sbom-out ./verified.spdx.json "$IMMUTABLE"
 ```
 
-- Trust is exactly one PEM public key (`--cosign-public-key`, overriding `LUPETTO_COSIGN_PUBLIC_KEY`); its DER SubjectPublicKeyInfo SHA-256 is reported as `trust.publicKeySHA256`. Keyless identities, multiple keys, and keys fetched from the registry are not supported.
+- Trust is exactly one input: a PEM public key (`--cosign-public-key`, overriding `LUPETTO_COSIGN_PUBLIC_KEY`), whose DER SubjectPublicKeyInfo SHA-256 is reported as `trust.publicKeySHA256`; or one keyless identity policy (`--certificate-identity` or `--certificate-identity-regexp`, with `--certificate-oidc-issuer`, each overriding its `LUPETTO_COSIGN_CERTIFICATE_*` variable), echoed in `trust` and passed to Cosign instead of `--key`, with the matching certificate's subject and issuer reported as `signature.identity`. Multiple keys or identities, an issuer regexp, and keys fetched from the registry are not supported.
 - Lupetto lists Sigstore bundle referrers and legacy `.sig`/`.att` tags itself through the Docker-config keychain and loopback-only HTTP guard. No signature artifact is `unsigned` (Cosign is not run); with an artifact, `signed` requires Cosign success **and** a verified `https://sigstore.dev/cosign/sign/v1` (or legacy `cosign container image signature`) claim naming the digest, otherwise `invalid`. The SPDX attestation is `attested` / `absent` / `invalid` likewise, additionally requiring the in-toto subject digest and the SPDX predicate type. Listing or Cosign execution failures, and Cosign failures caused by an unreachable registry, transparency log, or trust root, are `error`, never `unsigned`.
 - Production use keeps Cosign defaults, including transparency-log verification (`transparencyLog: "verified"`). For literal-loopback registries, `--cosign-allow-http` is required and adds `--allow-http-registry --insecure-ignore-tlog` (`transparencyLog: "skipped-local"`), mirroring the signing exception.
 - `--sbom-out` writes the verified SPDX predicate to a new mode-0600 file only for `attested`. Its bytes are Cosign's re-serialization, so compare it with the retained architecture SPDX as parsed JSON (step 3 below), not by file hash.

@@ -1389,3 +1389,22 @@ This records the evidence for the [explicit target architecture decision](decisi
 **Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test ./... -count=1` passed.
 
 Not exercised: loading a foreign-architecture image into Docker, an arm64 host, foreign-architecture signing and attestation (the Cosign path is architecture-independent but was not run here), and a multi-architecture image index.
+
+## Keyless identity verification (2026-10-20)
+
+This records the evidence for the [keyless identity verification decision](decisions.md#keyless-identity-verification-2026-10-20) on darwin/arm64 with Go 1.27.1 and Cosign v3.1.3. The real checks were read-only against a public image signed by its publisher; nothing was signed or pushed.
+
+| Check | Observed result |
+| --- | --- |
+| `internal/verify` `TestKeylessIdentityTrust` | Both Cosign calls receive `--certificate-identity-regexp … --certificate-oidc-issuer …` and no `--key`; `trust` echoes the policy without a key fingerprint; the matched claim's `Subject`/`Issuer` become `signature.identity`. |
+| `internal/verify` `TestNewRequestTrustSelection` | No trust input, a key plus an identity, an identity without an issuer, an issuer alone, both identity forms, and an invalid regexp are rejected; an exact identity with an issuer is accepted. |
+| `cmd/lupetto` `TestVerifyIdentityFlagsOverrideEnvironment` | A flag issuer combines with an environment identity; a key flag on top of an environment identity exits 2 with the exclusion message. Existing key-mode CLI and package tests pass unchanged. |
+| `internal/explorer` `TestKeylessSignerIdentityIsCheckedAndShown` | With only `LUPETTO_COSIGN_CERTIFICATE_IDENTITY_REGEXP`/`…_OIDC_ISSUER` set, Explorer runs the check, reports `signed`, exposes `Signer` (no key fingerprint), and renders "signer …" on the image detail. |
+| Real `lupetto verify --certificate-identity-regexp '^https://github.com/chainguard-images/images/' --certificate-oidc-issuer https://token.actions.githubusercontent.com cgr.dev/chainguard/static@sha256:fe55470f…d327` | Exit 0; transparency log `verified`; signature `signed` (1 legacy `.sig` artifact); SPDX `attested` (1 `.att`, 3 packages); signer `https://github.com/chainguard-images/images/.github/workflows/release.yaml@refs/heads/main`, issuer `https://token.actions.githubusercontent.com`. |
+| Same digest, exact identity from `LUPETTO_COSIGN_CERTIFICATE_IDENTITY`/`…_OIDC_ISSUER`, `--json --sbom-out` | `trust` holds `certificateIdentity`/`certificateOIDCIssuer` and no key fingerprint; `signature.identity` as above; SBOM file mode 0600 matching the reported SHA-256 `d0a266c1…`. |
+| Same digest with identity regexp `^https://github.com/someone-else/`, and separately with issuer `https://accounts.google.com` | Signature `invalid` (Cosign exit 12) and attestation `invalid` (exit 1) in both; exit 0 as a completed check. |
+| `LUPETTO_COSIGN_PUBLIC_KEY=/nonexistent` plus `--certificate-identity`/`--certificate-oidc-issuer` | Exit 2, "verify trusts either a public key or a certificate identity, not both", before any key read or network access. |
+
+**Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test ./... -count=1` passed.
+
+Not exercised: a Lupetto-built keyless signature (needs an authorized Fulcio-trusted CI identity), an OCI bundle referrer signed keylessly (the public image uses legacy `.sig`/`.att` tags), the Explorer page in a real browser, and the container or Compose with the new variables.
