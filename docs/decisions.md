@@ -295,6 +295,14 @@ Chosen so a scheduled pipeline can act on `status` without re-implementing which
 - Any state other than `current` and `error` counts as rebuild-needed, so a future state cannot silently read as up to date.
 - Not chosen: a `--json` track filter or a new schema field. Each track already carries `state`, so the status document stays at version 2.
 
+## Explicit target architecture (2026-10-20)
+
+Chosen (user decision) so x86 CI runners can build arm64 images, as the first step toward multi-architecture images. Contract in the [README](../README.md#prerequisites-and-installation); evidence in [verification](verification.md#explicit-target-architecture-2026-10-20).
+
+- `--arch` on `discover`, `build`, `sbom`, and `status` accepts `x86_64`/`aarch64` and the OCI spellings `amd64`/`arm64`, normalized to the Wolfi name; duplicates, empty, and other values exit 2. Without it each command keeps the host default and its existing unsupported-host failure.
+- The value replaces only the host lookup: the same single-architecture pipeline, record version 6 (`selection.architecture` already records the target), tags (`…-arm64-build-…`), annotations, signing, and attestation apply. No environment variable; Explorer keeps the host architecture.
+- Not chosen yet: one run producing an OCI image index. That needs a record schema change, index signing, and status/verify/Explorer index reads; it can later assemble per-architecture publications. P6 (one explicit architecture per build) still holds.
+
 ## Proposed design choices
 
 | ID | Proposal | Tradeoff |

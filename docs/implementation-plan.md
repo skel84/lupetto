@@ -136,6 +136,11 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 
 - [x] Add `lupetto status --exit-code` (0 current, 3 rebuild needed, 4 track error; default unchanged). Real runs against the live Wolfi index and an in-memory loopback registry exited 3 for a `not-built` track and 4 with an added unavailable selector, in table and `--json` form, with the full output still written and exit 0 without the flag; hermetic tests cover every state, error precedence and parsing ([evidence](verification.md#status-rebuild-signal-2026-10-20)).
 
+**Target architecture round** ([decision](decisions.md#explicit-target-architecture-2026-10-20)):
+
+- [x] Add `--arch` to `discover`, `build`, `sbom`, and `status`. On the x86_64 macintel host with apko 1.4.5, `build busybox-static 1 --arch arm64 --no-load` published a verified `linux/arm64` image to an in-memory loopback registry (record `selection.architecture: aarch64`, readable tag `…-arm64`); crane read config `linux/arm64` and annotation `aarch64`; `status --arch aarch64 --exit-code` reported `current` and exited 0, the host-architecture status `not-built` and exit 3. Hermetic tests cover parsing, the foreign-architecture apko/annotation path, and status plumbing ([evidence](verification.md#explicit-target-architecture-2026-10-20)).
+- [ ] Multi-architecture OCI image index assembled from per-architecture publications, with index signing and status/verify/Explorer support. Not started.
+
 ### 4. Add Explorer as an optional application
 
 - [ ] Decide Explorer product/repository/module packaging without introducing a CLI dependency on Explorer.

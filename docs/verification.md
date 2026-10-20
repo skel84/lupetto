@@ -1371,3 +1371,21 @@ This records the evidence for the [status rebuild signal decision](decisions.md#
 **Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test ./... -count=1` passed.
 
 Not exercised live: exit 0 with `--exit-code` (needs a published current image; covered by the hermetic test), and a Tekton or other scheduler consuming the signal.
+
+## Explicit target architecture (2026-10-20)
+
+This records the evidence for the [explicit target architecture decision](decisions.md#explicit-target-architecture-2026-10-20). Hermetic checks ran on darwin/arm64 with Go 1.27.1; the real run used darwin/amd64 binaries on the x86_64 macintel host with apko 1.4.5, no Docker daemon, and a go-containerregistry in-memory registry on `127.0.0.1:5055`.
+
+| Check | Observed result |
+| --- | --- |
+| `internal/build` `TestBuildIdentityAnnotationsAndScopedEpoch` | Now requests the non-host architecture: the index selection, `apko lock --arch`, `apko build --arch`, the `lupetto.apk.architecture` annotation, and the result all use the requested target. Forcing the pipeline back to the host lookup fails the test. |
+| `cmd/lupetto` `TestTargetArchFlags` | `build`, `discover`, and `status` normalize `amd64`/`arm64` to `x86_64`/`aarch64`, in separate and inline forms; no flag leaves the host default; `riscv64`, empty, missing, and duplicate values are rejected. |
+| `internal/status` `TestRunUsesRequestedArchitecture` | The architecture set by the CLI reaches the status comparison. |
+| Real `discover --json busybox-static --arch arm64` | `architecture: aarch64` with the aarch64 APKINDEX checksum. |
+| Real `build busybox-static 1 --arch arm64 --no-load --json --registry 127.0.0.1:5055 --repository lab` | Exit 0; record version 6 with `selection.architecture: aarch64` (`1.38.0-r3`), build `completed`, load `skipped` with readable reference `lupetto/busybox-static:1.38.0-r3-arm64`, publication `published` and `verified` at `…-arm64-build-…`; signing skipped (no key). |
+| Independent `crane config` / `crane manifest` by digest | Config `linux` / `arm64`; OCI image manifest with `lupetto.apk.architecture: aarch64`. |
+| Real `status --arch aarch64 --exit-code` | Track `current` at `1.38.0-r3` and exit 0; this is also the live exit-0 case for the [status rebuild signal](#status-rebuild-signal-2026-10-20). Host-architecture `status --exit-code`: `not-built`, exit 3. |
+
+**Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test ./... -count=1` passed.
+
+Not exercised: loading a foreign-architecture image into Docker, an arm64 host, foreign-architecture signing and attestation (the Cosign path is architecture-independent but was not run here), and a multi-architecture image index.
