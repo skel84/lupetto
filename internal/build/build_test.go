@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"lupetto/internal/build/buildtest"
+	"lupetto/internal/imageconfig"
 	"lupetto/internal/wolfi"
 )
 
@@ -119,6 +120,13 @@ func TestCheckSelectedLockRejectsSubstitution(t *testing.T) {
 
 func makeOCI(t *testing.T, version string) (string, string) {
 	t.Helper()
+	return makeOCIWith(t, version, nil, nil)
+}
+
+// makeOCIWith adds extra layer entries (bodies are empty) and a config
+// entrypoint to the makeOCI fixture.
+func makeOCIWith(t *testing.T, version string, entries []tar.Header, entrypoint []string) (string, string) {
+	t.Helper()
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "blobs", "sha256"), 0700); err != nil {
 		t.Fatal(err)
@@ -136,6 +144,11 @@ func makeOCI(t *testing.T, version string) (string, string) {
 	if _, err := archive.Write([]byte(installed)); err != nil {
 		t.Fatal(err)
 	}
+	for _, entry := range entries {
+		if err := archive.WriteHeader(&entry); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := archive.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +156,9 @@ func makeOCI(t *testing.T, version string) (string, string) {
 		t.Fatal(err)
 	}
 	layerDigest := buildtest.WriteOCIBlob(t, dir, layer.Bytes())
-	manifest, _ := json.Marshal(map[string]any{"layers": []any{map[string]any{"digest": layerDigest}}})
+	config, _ := json.Marshal(map[string]any{"architecture": "amd64", "os": "linux", "config": map[string]any{"Entrypoint": entrypoint}})
+	configDigest := buildtest.WriteOCIBlob(t, dir, config)
+	manifest, _ := json.Marshal(map[string]any{"config": map[string]any{"digest": configDigest}, "layers": []any{map[string]any{"digest": layerDigest}}})
 	manifestDigest := buildtest.WriteOCIBlob(t, dir, manifest)
 	index, _ := json.Marshal(map[string]any{"manifests": []any{map[string]any{
 		"digest": manifestDigest, "platform": map[string]string{"architecture": "amd64", "os": "linux"},
@@ -157,12 +172,12 @@ func makeOCI(t *testing.T, version string) (string, string) {
 func TestCheckImagePackageRequiresExactInstalledVersionAndLayerDigest(t *testing.T) {
 	dir, layerDigest := makeOCI(t, "9.1.2-r1")
 	selected := wolfi.Package{Name: "valkey-9.1", Version: "9.1.2-r1", Arch: "x86_64"}
-	digest, err := checkImagePackage(dir, selected)
+	digest, err := checkImage(dir, selected, imageconfig.Options{})
 	if err != nil || !digestPattern.MatchString(digest) {
 		t.Fatalf("valid OCI image rejected: digest=%q err=%v", digest, err)
 	}
 	selected.Version = "9.1.2-r0"
-	if _, err := checkImagePackage(dir, selected); err == nil {
+	if _, err := checkImage(dir, selected, imageconfig.Options{}); err == nil {
 		t.Fatal("image with wrong selected package version accepted")
 	}
 	selected.Version = "9.1.2-r1"
@@ -170,7 +185,7 @@ func TestCheckImagePackageRequiresExactInstalledVersionAndLayerDigest(t *testing
 	if err := os.WriteFile(layerPath, []byte("tampered"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := checkImagePackage(dir, selected); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+	if _, err := checkImage(dir, selected, imageconfig.Options{}); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Fatalf("tampered layer accepted: %v", err)
 	}
 }
@@ -178,7 +193,7 @@ func TestCheckImagePackageRequiresExactInstalledVersionAndLayerDigest(t *testing
 func TestCheckImagePackageKeepsFirstSelectedRecordSemantics(t *testing.T) {
 	dir, _ := makeOCI(t, "9.1.2-r0\nA:x86_64\n\nP:valkey-9.1\nV:9.1.2-r1")
 	selected := wolfi.Package{Name: "valkey-9.1", Version: "9.1.2-r1", Arch: "x86_64"}
-	if _, err := checkImagePackage(dir, selected); err == nil || !strings.Contains(err.Error(), "different version or architecture") {
+	if _, err := checkImage(dir, selected, imageconfig.Options{}); err == nil || !strings.Contains(err.Error(), "different version or architecture") {
 		t.Fatalf("later duplicate record must not mask wrong first selected version: %v", err)
 	}
 }

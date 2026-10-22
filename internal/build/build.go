@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
+	"lupetto/internal/imageconfig"
 	"lupetto/internal/storage"
 	"lupetto/internal/wolfi"
 )
@@ -72,6 +73,8 @@ type Services struct {
 	RegistryTransport http.RoundTripper
 	// RegistryKeychain nil means Docker's client configuration only.
 	RegistryKeychain authn.Keychain
+	// Now nil means time.Now; it supplies the build's creation time.
+	Now func() time.Time
 }
 
 // RunWith executes the pipeline with the given external boundaries. After
@@ -81,6 +84,9 @@ func RunWith(ctx context.Context, request Request, services Services) (Result, e
 		return Result{}, err
 	}
 	if err := validateSigningOptions(request.Signing, request.Publication); err != nil {
+		return Result{}, err
+	}
+	if err := request.Image.Validate(); err != nil {
 		return Result{}, err
 	}
 	result := InitialResult(request)
@@ -186,8 +192,12 @@ func RunWith(ctx context.Context, request Request, services Services) (Result, e
 	}
 	buildMessage(ctx, "Selected %s@%s; local reference %s; build reference %s", selected.Name, selected.Version, imageReference, buildReference)
 	configPath := filepath.Join(workspace, "apko.yaml")
-	created := time.Now().UTC().Truncate(time.Second)
-	config := fmt.Sprintf("contents:\n  keyring:\n    - %s\n  repositories:\n    - %s\n  packages:\n    - %s\narchs:\n  - %s\nannotations:\n  org.opencontainers.image.version: %s\n  org.opencontainers.image.created: %s\n  lupetto.apk.name: %s\n  lupetto.apk.version: %s\n  lupetto.apk.architecture: %s\n  lupetto.index.sha256: %s\n", strconv.Quote(keyPath), wolfi.Repository, strconv.Quote(selected.Name+"="+selected.Version), arch, strconv.Quote(selected.Version), strconv.Quote(created.Format(time.RFC3339)), strconv.Quote(selected.Name), strconv.Quote(selected.Version), strconv.Quote(selected.Arch), strconv.Quote(indexDigest))
+	now := services.Now
+	if now == nil {
+		now = time.Now
+	}
+	created := now().UTC().Truncate(time.Second)
+	config := apkoConfig(keyPath, selected, arch, created, indexDigest, request.Image)
 	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
 		return buildFail(fmt.Errorf("retain apko config: %w", err))
 	}
@@ -217,7 +227,7 @@ func RunWith(ctx context.Context, request Request, services Services) (Result, e
 		return buildFail(err)
 	}
 	buildStage(ctx, "Checking installed APK")
-	imageDigest, err := checkImagePackage(imageDir, selected)
+	imageDigest, err := checkImage(imageDir, selected, request.Image)
 	if err != nil {
 		return buildFail(err)
 	}
@@ -348,8 +358,10 @@ func readOCIBlob(dir, digest string, maxBytes int64) ([]byte, error) {
 	return data, nil
 }
 
-// checkImagePackage returns the validated local OCI manifest digest.
-func checkImagePackage(dir string, selected wolfi.Package) (string, error) {
+// checkImage returns the validated local OCI manifest digest. It checks the
+// installed selected APK, that the config carries exactly the requested image
+// options, and that a requested entrypoint is an executable in the layer.
+func checkImage(dir string, selected wolfi.Package, image imageconfig.Options) (string, error) {
 	if _, err := os.Stat(filepath.Join(dir, "oci-layout")); err != nil {
 		return "", fmt.Errorf("OCI layout missing: %w", err)
 	}
@@ -374,9 +386,15 @@ func checkImagePackage(dir string, selected wolfi.Package) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read OCI manifest: %w", err)
 	}
-	var manifest struct{ Layers []struct{ Digest string } }
+	var manifest struct {
+		Config struct{ Digest string }
+		Layers []struct{ Digest string }
+	}
 	if err := json.Unmarshal(data, &manifest); err != nil || len(manifest.Layers) != 1 {
 		return "", fmt.Errorf("expected one OCI image layer: %v", err)
+	}
+	if err := checkImageConfig(dir, manifest.Config.Digest, image); err != nil {
+		return "", err
 	}
 	layerDigest := manifest.Layers[0].Digest
 	if !digestPattern.MatchString(layerDigest) {
@@ -402,13 +420,26 @@ func checkImagePackage(dir string, selected wolfi.Package) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	found := false
 	for _, pkg := range installed {
 		if pkg.Name == selected.Name {
-			if pkg.Version == selected.Version && pkg.Arch == selected.Arch {
-				return index.Manifests[0].Digest, nil
+			if pkg.Version != selected.Version || pkg.Arch != selected.Arch {
+				return "", fmt.Errorf("OCI image contains a different version or architecture of %s", selected.Name)
 			}
-			return "", fmt.Errorf("OCI image contains a different version or architecture of %s", selected.Name)
+			found = true
+			break
 		}
 	}
-	return "", fmt.Errorf("OCI image does not contain selected %s@%s", selected.Name, selected.Version)
+	if !found {
+		return "", fmt.Errorf("OCI image does not contain selected %s@%s", selected.Name, selected.Version)
+	}
+	if image.Entrypoint != nil {
+		if _, err := layer.Seek(0, io.SeekStart); err != nil {
+			return "", fmt.Errorf("rewind OCI layer: %w", err)
+		}
+		if err := checkExecutable(layer, image.Entrypoint[0]); err != nil {
+			return "", fmt.Errorf("entrypoint %s is not usable in the image of %s@%s and its dependency closure: %w", image.Entrypoint[0], selected.Name, selected.Version, err)
+		}
+	}
+	return index.Manifests[0].Digest, nil
 }

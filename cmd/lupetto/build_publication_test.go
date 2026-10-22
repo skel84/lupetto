@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -99,7 +100,7 @@ func TestBuildPublicationSingleCompositionAndV6Record(t *testing.T) {
 				wantLoad = "skipped"
 			}
 			if record.Version != 6 || record.Command != "build" || record.Outcome != "succeeded" || record.Failure != nil || record.Workspace != f.workspace ||
-				record.Request != (build.RecordRequest{Package: "postgresql-17", APKVersion: "17.10-r1", Load: mode != "no-load", Publish: true}) ||
+				!reflect.DeepEqual(record.Request, build.RecordRequest{Package: "postgresql-17", APKVersion: "17.10-r1", Load: mode != "no-load", Publish: true}) ||
 				record.Stages.Build.Status != "completed" || record.Stages.Load.Status != wantLoad || record.Stages.Load.ReadableReferenceConfirmed != (mode != "no-load") ||
 				record.Stages.Publication != (build.RecordPublication{Status: "published", Reference: result.Publication.Reference, Digest: f.manifestDigest, ImmutableReference: immutable, Verified: true}) ||
 				record.Stages.Signing.Status != "skipped" || record.Stages.Attestation.Status != "skipped" ||

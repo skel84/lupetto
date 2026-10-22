@@ -87,7 +87,7 @@ func MakeLoadOCI(t *testing.T, dir, pkg, version, arch string) (string, []byte, 
 	layerDigest := WriteOCIBlob(t, dir, layer)
 	config := marshal(map[string]any{
 		"architecture": ociArch, "os": "linux",
-		"config": map[string]any{"Env": []string{"FIXTURE=value"}, "Entrypoint": []string{"/bin/fixture"}},
+		"config": map[string]any{"Env": []string{"FIXTURE=value"}},
 		"rootfs": map[string]any{"type": "layers", "diff_ids": []string{"sha256:" + wolfi.SHA256Hex(uncompressed.Bytes())}},
 	})
 	configDigest := WriteOCIBlob(t, dir, config)

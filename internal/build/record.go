@@ -41,6 +41,9 @@ type RecordRequest struct {
 	Load       bool   `json:"load"`
 	Publish    bool   `json:"publish"`
 	Sign       bool   `json:"sign"`
+	// Entrypoint is omitted when not requested, keeping such records
+	// byte-identical to earlier version-6 records.
+	Entrypoint []string `json:"entrypoint,omitempty"`
 }
 
 type RecordSelection struct {
@@ -107,6 +110,7 @@ func InitialResult(request Request) Result {
 		Request: RecordRequest{
 			Package: request.PackageName, Selector: request.Selector, APKVersion: request.Version,
 			Load: !request.NoLoad, Publish: request.Publication.Enabled(), Sign: request.Signing.Enabled(),
+			Entrypoint: request.Image.Entrypoint,
 		},
 		Build:       "not-attempted",
 		DockerLoad:  requestedStatus(!request.NoLoad),
