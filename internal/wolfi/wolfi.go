@@ -246,11 +246,13 @@ func matchesRequestedPackage(pkg Package, requested string) bool {
 
 // SelectPackage resolves requested (an APK name or version-matched provider)
 // to one exact APK: the exact version when given, otherwise the highest APK
-// version whose upstream numbers match the dotted numeric selector.
+// version whose upstream numbers match the dotted numeric selector. When
+// several distinct APKs rank equally, the one named exactly requested wins
+// (the APK itself over packages that provide its name at the same version);
+// otherwise the request is ambiguous.
 func SelectPackage(packages []Package, requested, selector, version, arch string) (Package, error) {
-	var best Package
+	var candidates []Package
 	var bestVersion apkcompare.Version
-	ambiguous := false
 	for _, pkg := range packages {
 		if pkg.Arch != arch || !matchesRequestedPackage(pkg, requested) {
 			continue
@@ -259,13 +261,9 @@ func SelectPackage(packages []Package, requested, selector, version, arch string
 			return Package{}, fmt.Errorf("invalid APKINDEX package name %q", pkg.Name)
 		}
 		if version != "" {
-			if pkg.Version != version {
-				continue
+			if pkg.Version == version {
+				candidates = appendDistinct(candidates, pkg)
 			}
-			if best.Version != "" && (best.Name != pkg.Name || best.Checksum != pkg.Checksum) {
-				return Package{}, fmt.Errorf("ambiguous package providers for %s@%s", requested, pkg.Version)
-			}
-			best = pkg
 			continue
 		}
 		upstream := upstreamNumbers.FindString(pkg.Version)
@@ -276,28 +274,49 @@ func SelectPackage(packages []Package, requested, selector, version, arch string
 		if err != nil {
 			return Package{}, fmt.Errorf("cannot order APK version %q for %s: %w", pkg.Version, pkg.Name, err)
 		}
-		if best.Version == "" {
-			best, bestVersion = pkg, parsed
-			continue
+		comparison := 1
+		if len(candidates) > 0 {
+			comparison = apkcompare.CompareVersions(parsed, bestVersion)
 		}
-		comparison := apkcompare.CompareVersions(parsed, bestVersion)
 		if comparison > 0 {
-			best, bestVersion = pkg, parsed
-			ambiguous = false
-		} else if comparison == 0 && (best.Name != pkg.Name || best.Version != pkg.Version || best.Checksum != pkg.Checksum) {
-			ambiguous = true
+			candidates, bestVersion = []Package{pkg}, parsed
+		} else if comparison == 0 {
+			candidates = appendDistinct(candidates, pkg)
 		}
 	}
-	if best.Version == "" {
+	if len(candidates) == 0 {
 		if version != "" {
 			selector = version
 		}
 		return Package{}, fmt.Errorf("unavailable version: %s %s for %s in current Wolfi APKINDEX", requested, selector, arch)
 	}
-	if ambiguous {
-		return Package{}, fmt.Errorf("ambiguous package providers for %s at %s", requested, best.Version)
+	if len(candidates) == 1 {
+		return candidates[0], nil
 	}
-	return best, nil
+	var exact []Package
+	for _, pkg := range candidates {
+		if pkg.Name == requested {
+			exact = append(exact, pkg)
+		}
+	}
+	if len(exact) == 1 {
+		return exact[0], nil
+	}
+	if version != "" {
+		return Package{}, fmt.Errorf("ambiguous package providers for %s@%s", requested, version)
+	}
+	return Package{}, fmt.Errorf("ambiguous package providers for %s at %s", requested, candidates[0].Version)
+}
+
+// appendDistinct adds pkg unless the same APK (name, version, and bytes) is
+// already listed; repeated index entries for one APK are not ambiguous.
+func appendDistinct(candidates []Package, pkg Package) []Package {
+	for _, candidate := range candidates {
+		if candidate.Name == pkg.Name && candidate.Version == pkg.Version && candidate.Checksum == pkg.Checksum {
+			return candidates
+		}
+	}
+	return append(candidates, pkg)
 }
 
 // SHA256Hex returns the lower-case hex SHA-256 of data.

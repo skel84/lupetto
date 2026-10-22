@@ -86,14 +86,62 @@ func TestSelectPackageRejectsAmbiguousRevisionAndProvider(t *testing.T) {
 			{Name: "valkey", Version: "9.1-r1", Arch: "x86_64", Checksum: "two"},
 		},
 		{
+			{Name: "valkey-9.1", Provides: "valkey=9.1-r1", Version: "9.1-r1", Arch: "x86_64", Checksum: "one"},
+			{Name: "valkey-full", Provides: "valkey=9.1-r1", Version: "9.1-r1", Arch: "x86_64", Checksum: "two"},
+		},
+		// An exact-name APK does not settle a tie among its own distinct builds.
+		{
 			{Name: "valkey", Version: "9.1-r1", Arch: "x86_64", Checksum: "one"},
-			{Name: "valkey-9.1", Provides: "valkey=9.1-r1", Version: "9.1-r1", Arch: "x86_64", Checksum: "two"},
+			{Name: "valkey", Version: "9.1-r1", Arch: "x86_64", Checksum: "two"},
+			{Name: "valkey-full", Provides: "valkey=9.1-r1", Version: "9.1-r1", Arch: "x86_64", Checksum: "three"},
 		},
 	} {
 		for _, req := range []selection{{packageName: "valkey", selector: "9"}, {packageName: "valkey", version: "9.1-r1"}} {
 			if _, err := selectFor(packages, req, "x86_64"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
 				t.Fatalf("expected ambiguous revision for %+v, got %v", req, err)
 			}
+		}
+	}
+}
+
+// Wolfi's busybox-full and busybox-static provide busybox at busybox's own
+// version; asking for busybox means the busybox APK.
+func TestSelectPackagePrefersExactNameAmongEqualProviders(t *testing.T) {
+	packages := []Package{
+		{Name: "busybox-full", Provides: "busybox=1.38.0-r3 cmd:busybox=1.38.0-r3", Version: "1.38.0-r3", Arch: "x86_64", Checksum: "full"},
+		{Name: "busybox", Version: "1.38.0-r3", Arch: "x86_64", Checksum: "exact"},
+		{Name: "busybox", Version: "1.38.0-r3", Arch: "x86_64", Checksum: "exact"},
+		{Name: "busybox-static", Provides: "busybox=1.38.0-r3", Version: "1.38.0-r3", Arch: "x86_64", Checksum: "static"},
+		{Name: "busybox", Version: "1.38.0-r2", Arch: "x86_64", Checksum: "older"},
+		{Name: "busybox", Version: "1.38.0-r3", Arch: "aarch64", Checksum: "arm"},
+	}
+	for _, request := range []selection{
+		{packageName: "busybox", selector: "1"},
+		{packageName: "busybox", selector: "1.38.0"},
+		{packageName: "busybox", version: "1.38.0-r3"},
+	} {
+		selected, err := selectFor(packages, request, "x86_64")
+		if err != nil || selected.Name != "busybox" || selected.Checksum != "exact" {
+			t.Fatalf("%+v: selected %+v, error %v", request, selected, err)
+		}
+	}
+	// Exact names still never pick a lower version over a newer provider.
+	newerProvider := Package{Name: "busybox-full", Provides: "busybox=1.38.1-r0", Version: "1.38.1-r0", Arch: "x86_64", Checksum: "newer"}
+	for _, newer := range [][]Package{append([]Package{newerProvider}, packages...), append(packages[1:2:2], newerProvider)} {
+		if selected, err := selectFor(newer, selection{packageName: "busybox", selector: "1"}, "x86_64"); err != nil || selected.Name != "busybox-full" || selected.Version != "1.38.1-r0" {
+			t.Fatalf("newer provider: selected %+v, error %v", selected, err)
+		}
+	}
+	// One provider is still selected; several without the exact APK stay ambiguous.
+	if _, err := selectFor(packages, selection{packageName: "cmd:busybox", selector: "1"}, "x86_64"); err != nil {
+		t.Fatalf("single provider: %v", err)
+	}
+	for _, request := range []selection{{packageName: "busybox", selector: "1"}, {packageName: "busybox", version: "1.38.0-r3"}} {
+		if _, err := selectFor(packages[3:4:4], request, "x86_64"); err != nil {
+			t.Fatalf("lone provider %+v: %v", request, err)
+		}
+		if _, err := selectFor([]Package{packages[0], packages[3]}, request, "x86_64"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+			t.Fatalf("two providers without the exact APK %+v: %v", request, err)
 		}
 	}
 }
