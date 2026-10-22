@@ -141,6 +141,10 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 - [x] Add `--arch` to `discover`, `build`, `sbom`, and `status`. On the x86_64 macintel host with apko 1.4.5, `build busybox-static 1 --arch arm64 --no-load` published a verified `linux/arm64` image to an in-memory loopback registry (record `selection.architecture: aarch64`, readable tag `…-arm64`); crane read config `linux/arm64` and annotation `aarch64`; `status --arch aarch64 --exit-code` reported `current` and exited 0, the host-architecture status `not-built` and exit 3. Hermetic tests cover parsing, the foreign-architecture apko/annotation path, and status plumbing ([evidence](verification.md#explicit-target-architecture-2026-10-20)).
 - [ ] Multi-architecture OCI image index assembled from per-architecture publications, with index signing and status/verify/Explorer support. Not started.
 
+**Image entrypoint round** ([decision](decisions.md#image-entrypoint-2026-10-22)):
+
+- [x] Optional per-product `entrypoint` and repeatable `build`/`sbom` `--entrypoint`, written to the OCI config, checked against the image closure, recorded as `request.entrypoint` and the `lupetto.image.entrypoint` annotation, compared by `status` (`config-changed`, exit 3 with `--exit-code`), and passed by Explorer from the products file. Real apko builds set and rejected entrypoints as specified; against a loopback registry an args-only `docker run` failed without an entrypoint and worked after the `config-changed` rebuild, and an Explorer "Rebuild" in Chrome returned the track to `current`. Without an entrypoint the apko configuration matched v0.1.0's byte for byte for the same inputs and apko reproduced v0.1.0's digest from it; separate builds never had reproducible digests (workspace path in `/etc/apko.json`) ([evidence](verification.md#image-entrypoint-v020)).
+
 ### 4. Add Explorer as an optional application
 
 - [ ] Decide Explorer product/repository/module packaging without introducing a CLI dependency on Explorer.

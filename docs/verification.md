@@ -1410,3 +1410,49 @@ This records the evidence for the [keyless identity verification decision](decis
 **Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test ./... -count=1` passed.
 
 Not exercised: a keyless signature made by `lupetto build --cosign-identity-token` (the release image is signed by the workflow's own `cosign sign`), an OCI bundle referrer signed keylessly (the public image uses legacy `.sig`/`.att` tags), the Explorer page in a real browser, and the container or Compose with the new variables.
+
+## Image entrypoint (v0.2.0)
+
+This records the evidence for the [image entrypoint decision](decisions.md#image-entrypoint-2026-10-22), observed 2026-10-22 on darwin/amd64 (x86_64 host) with Go 1.27.1, apko 1.4.5, Docker 27.4.0, Google Chrome 155 (headless, driven over the DevTools protocol), and a disposable `crane registry serve` (crane 0.21.6) on `127.0.0.1:55310` with repository `e2e/images`, no credentials or signing key. All runs used a scratch `LUPETTO_DATA_DIR`; afterwards the registry, Explorer, and browser were stopped and the scratch data and browser profile deleted; the loaded test images stayed in the local Docker store.
+
+**Unchanged output without an entrypoint (v0.1.0 digest stability).** Digests are not reproducible across separate builds in any release: each build pins a new creation time, and apko writes `/etc/apko.json` with the absolute keyring path inside the random build workspace. The proof therefore shows that, given v0.1.0's inputs, the new code renders the same apko inputs and apko composes the same image:
+
+| Check | Observed result |
+| --- | --- |
+| `internal/build` `TestApkoConfigWithoutImageOptionsMatchesV010` | `apkoConfig` without options renders a literal copy of the v0.1.0 configuration byte for byte. Making the entrypoint block unconditional fails it. |
+| `internal/build` `TestRunWithoutImageOptionsKeepsV010Inputs` | The real pipeline up to `apko build` (fake apko, fixed clock) writes exactly that configuration, passes the same `--build-date`/`--arch` arguments, and encodes a record with no `entrypoint` key; with an entrypoint it appends only the annotation line and the `entrypoint.command` block. |
+| `internal/build` `TestBuildIdentityAnnotationsAndScopedEpoch` (unchanged) | Still sees exactly the six identity annotations without an entrypoint. |
+| v0.1.0 binary (built from tag `v0.1.0` in a temporary worktree): `build busybox-static --apk-version 1.38.0-r3 --arch x86_64 --no-load --json` | Image digest `sha256:ab1fc825…c7d4`, `apko.yaml` SHA-256 `ca3c1159…cdaed2`, created `2026-10-22T15:27:11Z`, index `dd423977…701e`. |
+| New `apkoConfig` (temporary, uncommitted test harness) for that workspace's key path, selection, created time, and index digest | Byte-identical to v0.1.0's `apko.yaml` (625 bytes). |
+| `apko build` re-run with v0.1.0's `apko.yaml`, `lock.json`, `--build-date 2026-10-22T15:27:11Z`, and `SOURCE_DATE_EPOCH=1792682831` into a fresh directory | Digest `sha256:ab1fc825…c7d4`, identical to the v0.1.0 build. |
+| New pipeline (`RunWith`, real apko, same index, clock fixed to the same second) in a new workspace | Succeeded; `apko.yaml` and `lock.json` equal v0.1.0's after replacing the workspace path. Its digest `sha256:e75914e1…` differs; comparing the two layers member by member (317 each) shows the only difference is `etc/apko.json`, whose `keyring` names the workspace path. Two v0.1.0 builds differ the same way. |
+
+Status does not compare digests: a product without `entrypoint` and an image without `lupetto.image.entrypoint` compare equal, so existing tracks keep their state (unit and real checks below).
+
+**Entrypoint behaviour.**
+
+| Check | Observed result |
+| --- | --- |
+| `internal/imageconfig` tests | Validation accepts absolute clean paths with arguments (spaces, `#`, leading `-`) and rejects empty lists, relative, non-clean, and trailing-slash paths, empty elements, single quotes, control characters, invalid UTF-8, oversized elements, and more than 32 elements. Annotations round-trip; absent means none; malformed JSON, non-strings, empty arrays, and relative paths are errors. |
+| `internal/build` `TestApkoConfigEntrypoint`, `TestCheckImageEntrypoint`, `TestRunRejectsInvalidEntrypointBeforeExternalBoundaries` | The config adds a seventh annotation and `entrypoint.command` with each element single-quoted. The image check accepts direct, relative- and absolute-symlinked (`/bin` → `usr/bin`, `/sbin` → `/usr/../usr/bin`), and hard-linked executables; rejects missing paths, directories, non-executable files, dangling and looping symlinks, and files used as directories with a message naming the package; and rejects a config entrypoint that differs from the request (including one set when none was requested, and a split element). An invalid request fails before any command runs. |
+| `cmd/lupetto` `TestParseBuildEntrypoint` | Separate and inline forms keep order; a missing value, a separate value starting with `-`, an empty element, a relative path, and a single quote exit 2. |
+| `internal/status` `TestRunImageConfigurationState`, `TestParseProductsEntrypoint` | `current` when both sides have none or match; `config-changed` when added, removed, or changed, and over `fixes-available`; `update-available` outranks it; a malformed annotation is a track `error`. The track's `entrypoint` appears only when requested. Products reject a scalar, empty, null, relative, numeric, boolean, nested, or quoted-apostrophe entrypoint. |
+| `internal/products` `TestProductsKeepEntrypointAcrossMutations` | `add`/`remove` keep a product's entrypoint; a mutation of a file with an invalid entrypoint is rejected. With the real binary, `products add kyverno 2`, `add curl 8`, and `remove kyverno 1` on a commented file kept the comments and the entrypoint, and `products list --json` returned it only for kyverno. |
+| `cmd/lupetto` `TestStatusExitCodeSignalsRebuildAndErrors` | `config-changed` exits 3, and 4 alongside an `error`. |
+| `internal/explorer` `TestHTTPBuildUsesTrackedProductEntrypoint`, `TestHTTPBuildRefusedWithoutReadableProducts`, `TestValidateBuildEntrypoint`, verdict and template tests | A tracked package's build runs `build cmd:curl 1.2 --no-load --entrypoint=/usr/bin/curl --entrypoint=-s '--entrypoint=two words' --json` and ignores a forged `entrypoint` form field; an untracked package gets none; an unreadable products file returns 503 without starting a job. `config-changed` maps to "Configuration changed", kind `rebuild`, action "Rebuild". The build page lists the recorded entrypoint (escaped). |
+| Real `build busybox-static 1 --no-load --json --entrypoint /bin/busybox --entrypoint=echo --entrypoint 'two words'` | Succeeded; record `request.entrypoint` `["/bin/busybox","echo","two words"]`; OCI config `Entrypoint` the same three elements and no `Cmd`; annotation `lupetto.image.entrypoint` `["/bin/busybox","echo","two words"]`. The layer has `bin -> usr/bin`, so the check resolved a real symlink. |
+| Real `build busybox-static 1 --no-load --entrypoint /usr/bin/kyverno` | Build stage failed: `entrypoint /usr/bin/kyverno is not usable in the image of busybox-static@1.38.0-r3 and its dependency closure: /usr/bin/kyverno does not exist`. |
+| Real `build kyverno 1 --entrypoint /usr/bin/kyverno --no-load` and `build memcached 1 --entrypoint /usr/bin/memcached --entrypoint=-u --entrypoint memcached --no-load --json` (the README examples) | Both succeeded (`kyverno 1` selected `kyverno-1.18`; memcached `1.6.45-r5` with the three-element entrypoint recorded). |
+
+**End to end against the loopback registry.**
+
+| Step | Observed result |
+| --- | --- |
+| `build busybox-static 1 --json` (load and publish, no entrypoint) | Published `sha256:bb98ee3d…`; record without `entrypoint`. `status --exit-code` with products `busybox-static ["1"]`: `current`, exit 0. |
+| Product gains `entrypoint: [/bin/busybox]` | `status --exit-code`: `config-changed`, exit 3. `docker run --rm lupetto/busybox-static:1.38.0-r3-amd64 --help` failed with `exec: "--help": executable file not found in $PATH`, the args-only failure this change addresses. |
+| `build busybox-static 1 --entrypoint /bin/busybox --json` | Published `sha256:58b73c5e…`; `status --exit-code`: `current`, exit 0. The same args-only `docker run … --help` printed the BusyBox banner, `docker run … echo args-only works` printed its argument, and the image config held `Entrypoint ["/bin/busybox"]`. |
+| Explorer (`--enable-builds`, real CLI) with the product changed to `[/bin/busybox, sh]`, in headless Chrome | The Images page showed the "Configuration changed" verdict chip (rebuild style) and a "Rebuild" button (screenshot inspected). Clicking it started job 1, which ran with `--entrypoint=/bin/busybox --entrypoint=sh`, succeeded (loaded and published), and kept `entrypoint` in the job request. After the refresh the track was `current` / "Up to date" with annotation `["/bin/busybox","sh"]`; `docker run … -c 'echo shell-entrypoint ok'` ran through the shell. The build page from history showed `Entrypoint: "/bin/busybox" "sh"`. The only browser console error was the existing missing-favicon 404. |
+
+**Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test ./...` passed.
+
+Not exercised: an aarch64 entrypoint build, signing or attesting an image with an entrypoint (the Cosign path is unchanged), a real Kubernetes Deployment with an args-only chart, the combined container, and browsers other than Chrome.

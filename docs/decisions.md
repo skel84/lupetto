@@ -313,6 +313,18 @@ Chosen so images signed with `--cosign-identity-token` (and other keyless signer
 - Explorer enables signature checks when a key or an identity variable is set, inherits them through the environment as before, and shows the verified signer subject.
 - Not chosen: an issuer regexp, several trusted identities or keys, and a custom trust root. Verification still uses Cosign's default public-good trust.
 
+## Image entrypoint (2026-10-22)
+
+Requested by the user for v0.2.0 so Lupetto images can replace upstream images in charts that pass only `args` (Kubernetes then runs the first argument as the program). The scope (an optional products-file and build-flag entrypoint, part of the record and image identity, unchanged output without it, a build-time existence check) was the user's; the details below were chosen during implementation. Contract in the [README](../README.md#image-entrypoint); evidence in [verification](verification.md#image-entrypoint-v020).
+
+- One option, `entrypoint`: a products-file list per product (applies to all its selectors) and a repeatable `--entrypoint` element flag on `build` and `sbom`. No `cmd`: args-only charts replace `CMD` anyway, and v0.1.0 images have none, so nothing needed it. This keeps the one-APK-plus-closure principle; it is the "explicit, retained runtime input" the Products item in [§5 of the checklist](implementation-plan.md#5-complete-browsing-semantics) asks for, not a default guessed from the package name.
+- Validation: the first element is a clean absolute path; no empty elements, single quotes, or control characters (apko splits `entrypoint.command` with shell-like rules, and every element is single-quoted so spaces survive); at most 32 elements of 1 KiB. After apko builds, the OCI config must hold exactly the requested entrypoint (none when none was requested) and its executable must resolve, through the layer's symlinks, to an executable regular file. A failure is a build-stage failure.
+- Identity: the optional manifest annotation `lupetto.image.entrypoint` (compact JSON array) and the optional record field `request.entrypoint`. Both are absent without an entrypoint, so the apko configuration, annotations, and record bytes equal v0.1.0's. Record version 6 and the status document version 2 are unchanged: the additions are optional and Explorer's decoders accept unknown fields.
+- Status compares the newest image's annotation with the product's entrypoint and reports the new state `config-changed` when they differ (added, removed, or changed). Precedence: `error` > `update-available` > `config-changed` > `fixes-available` > `current`. An unparsable annotation is a track `error`. The [rebuild signal](#status-rebuild-signal-2026-10-20) already counts any state other than `current`/`error` as rebuild-needed, so `--exit-code` exits 3 and older Explorer binaries show "Unable to compare" rather than "Up to date". Each track echoes the requested `entrypoint`.
+- Explorer passes a tracked product's entrypoint (from `lupetto products list`, never from a form field) as `--entrypoint=<element>` and refuses a build when the products file cannot be read, so its rebuilds produce what status expects. `config-changed` shows as "Configuration changed" with a "Rebuild" action; the build page lists the recorded entrypoint.
+- Shared ownership: `internal/imageconfig` (no in-module imports) owns validation, the annotation encoding, and comparison for `internal/build` and `internal/status`; Explorer keeps its own minimal argument checks.
+- Not chosen: per-selector entrypoints, `CMD`, working directory, user, or environment settings; image-content changes beyond the selected closure.
+
 ## Proposed design choices
 
 | ID | Proposal | Tradeoff |

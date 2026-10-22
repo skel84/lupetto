@@ -13,7 +13,7 @@ One local Go module contains the standalone CLI and optional Explorer backend. T
 | Component | Responsibility | Status |
 | --- | --- | --- |
 | Index access and selection | Fetch and verify the signed APKINDEX, parse it, resolve names/providers and selectors to one exact APK. | `internal/wolfi` |
-| Build pipeline | Exact request → apko config and lock → OCI layout → installed-package and SPDX validation → optional load, publication, signing, attestation → version-6 record. | `internal/build` |
+| Build pipeline | Exact request → apko config and lock → OCI layout → installed-package, image-config, and SPDX validation → optional load, publication, signing, attestation → version-6 record. | `internal/build` |
 | CLI | Parse arguments, render progress, print human or `--json` output, `doctor`, `discover`, `status`, `verify`. | `cmd/lupetto` |
 | Signature status | Read-only Cosign signature and SPDX-attestation verification of one registry digest against a configured public key; lists Sigstore artifacts through the shared registry keychain/guard. | `internal/verify` |
 | Status | Compare products-file tracks with the index, registry images (by annotation), and Wolfi security fixes; read-only. | `internal/status` |
@@ -29,6 +29,7 @@ cmd/lupetto/          arguments, terminal progress (implements build.Reporter), 
 internal/build/       pipeline: apko, validation, Docker load, OCI publication, Cosign, records, workflow failures
 internal/build/buildtest/   shared test fixtures (OCI layouts, in-process registry, signing helpers)
 internal/wolfi/       signed index fetch/verification, parsing, selection, discovery ordering
+internal/imageconfig/ optional image configuration (entrypoint): validation, annotation encoding, comparison
 internal/registry/    shared registry settings/naming, Docker-config-only authentication, loopback HTTP guard, sanitized errors
 internal/status/      strict products YAML, registry/index/security comparison, digest-keyed installed-package cache
 internal/verify/      read-only signature/attestation status of one registry digest (`lupetto verify`)
@@ -44,12 +45,13 @@ cmd/lupetto ──▶ internal/build ──▶ internal/wolfi
       └────────▶ internal/status ──▶ internal/wolfi, internal/registry
       └────────▶ internal/verify ──▶ internal/status, internal/registry
       └────────▶ internal/images ──▶ internal/build, internal/storage, internal/wolfi
-                 internal/build ──▶ internal/registry, internal/storage
+                 internal/build ──▶ internal/registry, internal/storage, internal/imageconfig
+                 internal/status ──▶ internal/imageconfig
 
 cmd/lupetto-explorer ──▶ internal/explorer ──(argv + JSON)──▶ lupetto executable
 ```
 
-- `internal/wolfi` imports nothing else from the module and owns the shared installed-APK-database parser; `internal/registry` and `internal/storage` likewise import no in-module packages. `internal/storage` is the one CLI rule for where build workspaces live: `internal/build` (the only writer) and `internal/images` (a reader) share it. Explorer keeps its own copy of that root resolution because it must not import CLI packages. `internal/build` and `internal/status` consume those shared boundaries independently, and status never imports the build pipeline.
+- `internal/wolfi` imports nothing else from the module and owns the shared installed-APK-database parser; `internal/registry`, `internal/storage`, and `internal/imageconfig` likewise import no in-module packages. `internal/imageconfig` is the one rule for the optional image entrypoint that `internal/build` writes and `internal/status` compares. `internal/storage` is the one CLI rule for where build workspaces live: `internal/build` (the only writer) and `internal/images` (a reader) share it. Explorer keeps its own copy of that root resolution because it must not import CLI packages. `internal/build` and `internal/status` consume those shared boundaries independently, and status never imports the build pipeline.
 - `cmd/lupetto` makes no apko, Docker, Cosign, or registry calls itself; `doctor` only checks `PATH`. The CLI owns status table/JSON presentation, not comparison logic.
 - These packages are module-internal, not a public Go API. Explorer defines its own JSON decoding types and imports none of `internal/build`, `internal/wolfi`, `internal/status`, `internal/registry`, `internal/verify`, `internal/images`, `internal/products`, `internal/storage`, or `cmd/lupetto`; its `go list -deps` boundary test also verifies the CLI never imports Explorer.
 
