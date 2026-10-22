@@ -138,6 +138,9 @@ products:
   - package: kyverno
     selectors: ["1"]
     entrypoint: [/usr/bin/kyverno]
+  - package: external-dns-0.21
+    selectors: ["0"]
+    caBundle: true
 ```
 
 | Field | Required | Meaning |
@@ -146,8 +149,9 @@ products:
 | `products[].package` | yes | APK name or version-matched provider, as accepted by `build`. |
 | `products[].selectors` | yes | One or more quoted dotted numeric selectors; each is one track. |
 | `products[].entrypoint` | no | [Image entrypoint](#image-entrypoint) for every track of this product: a list of strings whose first element is an absolute executable path. Absent means no entrypoint, as in images built before it existed. |
+| `products[].caBundle` | no | `true` adds the [CA certificate bundle](#ca-certificate-bundle) to every track of this product; `false` or absent adds nothing. |
 
-Unknown fields, duplicate tracks, unsupported versions, empty products/selectors, malformed package names/selectors, and invalid entrypoints (empty list, relative path, non-string element) are rejected. Products are tracking groups, **not runtime recipes**: the entrypoint is the only image setting, and each image still holds exactly one selected APK and its dependency closure. The file is limited to 1 MiB.
+Unknown fields, duplicate tracks, unsupported versions, empty products/selectors, malformed package names/selectors, and invalid entrypoints (empty list, relative path, non-string element), and a non-boolean `caBundle` are rejected. Products are tracking groups, **not runtime recipes**: the entrypoint and CA bundle are the only image settings, and each image otherwise holds exactly one selected APK and its dependency closure. The file is limited to 1 MiB.
 
 ```bash
 lupetto status --products products.yaml \
@@ -167,7 +171,7 @@ The newest image's complete installed APK set is read by digest from its manifes
 | --- | --- |
 | `not-built` | No identified image matches this actual APK, architecture, and selector. |
 | `update-available` | The selected index top-level APK is newer than the newest matching image. |
-| `config-changed` | Same top-level APK version, but the newest image was built with a different [entrypoint](#image-entrypoint) than the product now lists (added, removed, or changed). A rebuild applies it. Outranks `fixes-available`; an update outranks it. |
+| `config-changed` | Same top-level APK version, but the newest image was built with a different [entrypoint](#image-entrypoint) or [CA bundle](#ca-certificate-bundle) setting than the product now lists (added, removed, or changed). A rebuild applies it. Outranks `fixes-available`; an update outranks it. |
 | `fixes-available` | Same top-level APK version, with reachable security fixes in installed dependencies available for a rebuild. |
 | `current` | No newer top-level version or reachable fixes for this track; **not a clean vulnerability result**. |
 | `error` | This track could not be compared (unavailable/ambiguous selector, registry/image/cache failure, or newest image newer than the current index selection). Other tracks still report. |
@@ -176,7 +180,7 @@ Every installed package with a newer same-name/same-architecture indexed version
 
 ### Status JSON contract and exits
 
-`--json` prints one indented, newline-terminated document: `kind: "status"`, **`version: 2`**, `computedAt` (UTC RFC 3339), `architecture`, `registry`, `repository`, `indexSHA256`, `security`, and `tracks`. `security` has `url`, `sha256`, `unsigned`, `fixedOnly`, `wolfiOnly`, `unevaluatedFixCount`, `unevaluatedFixes`, and `severity` (summary below). Each track has `package`, `selector`, `state`, optional `entrypoint` (the product's requested entrypoint; omitted when it has none), optional `error`, optional `latest` (`name`, `version`, `architecture`), optional `repository`, `images`, optional `newest`, `installed`, `outdated`, `missingFixes`, `unevaluatedFixes`, `artifactCount`, and `unidentifiedCount`.
+`--json` prints one indented, newline-terminated document: `kind: "status"`, **`version: 2`**, `computedAt` (UTC RFC 3339), `architecture`, `registry`, `repository`, `indexSHA256`, `security`, and `tracks`. `security` has `url`, `sha256`, `unsigned`, `fixedOnly`, `wolfiOnly`, `unevaluatedFixCount`, `unevaluatedFixes`, and `severity` (summary below). Each track has `package`, `selector`, `state`, optional `entrypoint` (the product's requested entrypoint; omitted when it has none), optional `caBundle` (`true` when the product requests the CA bundle), optional `error`, optional `latest` (`name`, `version`, `architecture`), optional `repository`, `images`, optional `newest`, `installed`, `outdated`, `missingFixes`, `unevaluatedFixes`, `artifactCount`, and `unidentifiedCount`.
 
 - Each image: `digest`, `tags`, `name`, `version`, `architecture`, `created`, `annotations`.
 - Each installed identity: `name`, `version`, `architecture`.
@@ -312,6 +316,7 @@ Every `build` and `sbom` config supplies these manifest annotations through apko
 | `lupetto.apk.architecture` | Wolfi APK architecture (`x86_64` or `aarch64`). |
 | `lupetto.index.sha256` | SHA-256 of the signed APKINDEX archive used for selection. |
 | `lupetto.image.entrypoint` | Only when an [entrypoint](#image-entrypoint) was requested: the entrypoint as a compact JSON array. |
+| `lupetto.image.ca-bundle` | Only when the [CA bundle](#ca-certificate-bundle) was requested: `true`. |
 
 apko's build date and its subprocess-only `SOURCE_DATE_EPOCH` are pinned to the same current UTC timestamp so an inherited reproducibility epoch cannot replace the created annotation with a historical package date. Other subprocess environment settings remain inherited; Lupetto does not record the environment. Publication pushes that annotated manifest unchanged. Version-6 result records are unchanged.
 
@@ -331,6 +336,16 @@ Repeat `--entrypoint` once per element, in order; an element starting with `-` n
 The build writes the entrypoint to the OCI image config and checks the result before validating SPDX: the config must hold exactly the requested entrypoint, and its executable must resolve, through the image's own symbolic links (such as `/bin` → `usr/bin`), to an executable regular file installed by the selected package or its dependency closure. Otherwise the build stage fails, for example `entrypoint /usr/bin/kyverno is not usable in the image of busybox-static@1.38.0-r3 and its dependency closure: /usr/bin/kyverno does not exist`. The entrypoint is recorded in the `lupetto.image.entrypoint` annotation and the record's `request.entrypoint`, so `status` reports `config-changed` when a product's [`entrypoint`](#compare-published-images-with-wolfi) no longer matches its newest image.
 
 Without `--entrypoint`, the apko configuration, annotations, and record are byte-for-byte what v0.1.0 produced, so existing tracks are not reported as changed and need no rebuild. Image digests are not reproducible across builds in any release, because each build pins a new creation time and apko embeds the build workspace's key path in `/etc/apko.json`; given identical inputs apko produces an identical image ([evidence](docs/verification.md#image-entrypoint-v020)).
+
+### CA certificate bundle
+
+Some Wolfi packages do not depend on a CA certificate bundle, so their images have no system roots and TLS clients in them fail with `x509: certificate signed by unknown authority` (for example `external-dns-0.21`, whose image is otherwise only the binary). `--ca-bundle` adds Wolfi's `ca-certificates-bundle` APK:
+
+```bash
+lupetto build external-dns-0.21 0 --ca-bundle --entrypoint /usr/bin/external-dns
+```
+
+The bundle is added unpinned beside the selected APK; apko's retained lock records its exact version (and its own dependencies, such as `wolfi-baselayout`), and the SPDX document is validated against that lock as for any dependency. The build then requires `/etc/ssl/certs/ca-certificates.crt` to be a regular file in the image. When the closure already contains the bundle (for example `busybox-static`), the image contents are the same and only the request is recorded. The option is recorded as the `lupetto.image.ca-bundle` annotation and the record's `request.caBundle`, and `status` reports `config-changed` when a product's `caBundle` no longer matches its newest image. A newer bundle alone does not make a track `update-available`; rebuild periodically if the roots matter. `sbom` accepts the same flag.
 
 ## Generate validated SPDX
 
@@ -396,7 +411,7 @@ Every `build` and `sbom` run that passes argument validation produces one **vers
 
 - `outcome` is `succeeded` or `failed`; a failed record adds `failure: {stage, error, sideEffectsPossible}`. Stages are `cosign-version`, `build`, `load`, `readable-tag`, `publication`, `signing`, `attestation`, or `record`.
 - Stage statuses: build `completed|failed|not-attempted`; load `loaded|skipped|failed|not-attempted`; publication `published|skipped|failed|not-attempted`; signing `signed|…`; attestation `attested|…`. `skipped` means not requested; `not-attempted` means requested but an earlier stage failed.
-- `request.entrypoint` (a string array) appears only when an [entrypoint](#image-entrypoint) was requested; records without one are unchanged.
+- `request.entrypoint` (a string array) appears only when an [entrypoint](#image-entrypoint) was requested, and `request.caBundle` (`true`) only when the [CA bundle](#ca-certificate-bundle) was; records without them are unchanged.
 - `selection` appears once an APK is selected, `evidence` once SPDX is validated, `workspace` once one exists. `evidence.imageDigest` is the local OCI manifest digest, which equals the published digest.
 - Load references are intended names when loading is skipped; `readableReferenceConfirmed: false` with `loaded` means the readable tag could not be confirmed.
 - Publication workflows keep `failure.error` to a sanitized stage message; local-only workflows record the detailed local error (capped at 8 KiB).
@@ -463,7 +478,7 @@ The SPDX attestation state is shown beside it: SBOM attested (with package count
 
 Catalog (`/catalog?q=substring`, `/catalog/{name}`) searches the cached signed index and offers Track and exact-version Build actions. Builds (`/builds`, optionally `?package=name`, `/builds/{id}`) merges persistent CLI build/failure records with the last 50 in-memory jobs, deduplicated by workspace, and shows seven stages: resolve, build, validate, load, publish, sign, attest. Raw logs exist only for jobs started by the current server process, behind a toggle. Tracking (`/products/track?package=name&selector=major`) works as a dialog with JavaScript or as a plain page. `POST /products/add|remove` edits only through the CLI, is available even with builds disabled, reports read-only file/directory errors clearly, and refreshes status afterward. Mount the products **directory** writable for atomic replacement. Removing the last track yields an intentional empty state without asking status to compare an empty products file.
 
-Build forms submit `package`, exactly one of `selector` (dotted numeric) or `apkVersion` (exact `-rN` revision), and `mode=local|publish` to `POST /builds`. Explorer invokes an argv array, never a shell: `lupetto build <package> (<selector> | --apk-version <revision>) [--entrypoint=<element>]... --json`. The entrypoint is not a form field: when `package` names a tracked product, Explorer reads it from `lupetto products list` and passes that product's `entrypoint`, so a "Rebuild" on a `config-changed` track ("Configuration changed") produces the image status expects; if the products file cannot be read the build is refused with 503. Publish mode requires configured registry/repository and inherits signing settings. It also loads into local Docker when the latest inventory reports Docker available; otherwise it adds `--no-load` and shows the unavailable/unknown reason before and after submission. The job retains that loading decision even if inventory changes while it runs, and its running load stage follows the decision. Finished stages use the CLI record; a Docker load failure occurs before publication. Local mode always loads Docker and suppresses publication/signing even when the server has registry settings. Absent `mode` preserves the older no-load/environment-driven behavior. Builds disabled returns 403; another running job returns 409. Stdout must be a version-6 record, including partial failures; stderr polling at `/builds/{id}/logs?offset=<byte-position>` returns `{offset,nextOffset,text,truncated,done}`, capped at a 1 MiB retained tail. Job history is capped at the last 50 jobs. Restarting Explorer loses only in-memory jobs/logs; retained CLI history remains.
+Build forms submit `package`, exactly one of `selector` (dotted numeric) or `apkVersion` (exact `-rN` revision), and `mode=local|publish` to `POST /builds`. Explorer invokes an argv array, never a shell: `lupetto build <package> (<selector> | --apk-version <revision>) [--entrypoint=<element>]... [--ca-bundle] --json`. Image options are not form fields: when `package` names a tracked product, Explorer reads it from `lupetto products list` and passes that product's `entrypoint` and `caBundle`, so a "Rebuild" on a `config-changed` track ("Configuration changed") produces the image status expects; if the products file cannot be read the build is refused with 503. Publish mode requires configured registry/repository and inherits signing settings. It also loads into local Docker when the latest inventory reports Docker available; otherwise it adds `--no-load` and shows the unavailable/unknown reason before and after submission. The job retains that loading decision even if inventory changes while it runs, and its running load stage follows the decision. Finished stages use the CLI record; a Docker load failure occurs before publication. Local mode always loads Docker and suppresses publication/signing even when the server has registry settings. Absent `mode` preserves the older no-load/environment-driven behavior. Builds disabled returns 403; another running job returns 409. Stdout must be a version-6 record, including partial failures; stderr polling at `/builds/{id}/logs?offset=<byte-position>` returns `{offset,nextOffset,text,truncated,done}`, capped at a 1 MiB retained tail. Job history is capped at the last 50 jobs. Restarting Explorer loses only in-memory jobs/logs; retained CLI history remains.
 
 Status refreshes at startup, on the interval, after builds and tracking edits, and on `POST /status/refresh`. Refresh is single-flight; last good facts, computed time, latest error and in-progress state remain separate. A build finishing during an older refresh schedules another comparison. Inventory is cached for 15 seconds and invalidated after builds/tracking edits; inspected immutable package sets are cached by digest reference. Catalog search returns at most 200 entries; named discovery has a 25-second limit and at most four concurrent processes. Append `?format=json` to page GET routes for their view model. Old `/tracks`, `/packages`, and `/jobs` routes remain aliases. `/healthz` means process up, not healthy comparison data. The [rendering contract](internal/explorer/web/CONTRACT.md) specifies models, forms, states and polling.
 

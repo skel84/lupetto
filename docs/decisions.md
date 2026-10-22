@@ -325,6 +325,17 @@ Requested by the user for v0.2.0 so Lupetto images can replace upstream images i
 - Shared ownership: `internal/imageconfig` (no in-module imports) owns validation, the annotation encoding, and comparison for `internal/build` and `internal/status`; Explorer keeps its own minimal argument checks.
 - Not chosen: per-selector entrypoints, `CMD`, working directory, user, or environment settings; image-content changes beyond the selected closure.
 
+## CA certificate bundle (2026-10-22)
+
+Requested by the user for v0.2.0 as a design note first ("for example a track-level `caBundle: true` adding `ca-certificates-bundle`, recorded in the build record and SBOM"), to be implemented only if small and clean. It reuses the [image entrypoint](#image-entrypoint-2026-10-22) plumbing, so it was implemented. Contract in the [README](../README.md#ca-certificate-bundle); evidence in [verification](verification.md#ca-certificate-bundle-v020).
+
+- Need: some Wolfi packages do not depend on a CA bundle, so their images cannot verify public TLS endpoints. Real builds against the live x86_64 index confirmed it for `external-dns-0.21`, `kubectl-1.34`, and `velero`; an approximate dependency scan of the index also lists `metrics-server`, `external-secrets-operator-*`, and `prometheus-alertmanager`. Others already get it through their closure (`busybox-static` and `busybox` by real builds; `kyverno-1.18` and `prometheus-3.*` by the scan).
+- `caBundle: true` per product and a valueless, once-only `--ca-bundle` on `build`/`sbom` add `ca-certificates-bundle` to apko's package list **unpinned**. apko's lock pins the version that is installed; the lock is retained and the SPDX document is validated against it, so the bundle and its dependencies (`wolfi-baselayout`) are evidence like any dependency. It is not added twice when the selected APK is the bundle itself.
+- This is the one deliberate exception to "one selected APK and its closure": a second top-level APK limited to this fixed Wolfi package, opt-in and recorded. No other extra packages are accepted.
+- After the build, `/etc/ssl/certs/ca-certificates.crt` must resolve to a regular file in the layer; otherwise the build stage fails.
+- Identity follows the entrypoint: optional annotation `lupetto.image.ca-bundle: "true"`, optional record `request.caBundle`, status `config-changed` on a mismatch (a value other than `true` is a track error), track `caBundle`, Explorer passes `--ca-bundle` from the products file. Without it every output is unchanged.
+- Not chosen: pinning a bundle version in the products file (the lock already records it), flagging a newer bundle as `update-available` (status ranks only the selected APK; the bundle is a dependency like any other), or adding the bundle automatically.
+
 ## Exact-name provider precedence (2026-10-22)
 
 Requested by the user for v0.2.0: `busybox` with selector `1` failed as ambiguous because `busybox-full` and `busybox-static` also provide `busybox=<the same version>`. Asking for an APK by its own name means that APK. Evidence in [verification](verification.md#exact-name-provider-precedence-v020).
