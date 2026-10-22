@@ -1495,3 +1495,18 @@ This records the evidence for the [CA certificate bundle decision](decisions.md#
 **Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test ./...` passed.
 
 Not exercised: an aarch64 bundle build, signing an image with the bundle, and a bundle whose file is missing in a real image (covered hermetically).
+
+## v0.2.0 release readiness (2026-10-22)
+
+Checks run on the `release-v0.2.0` branch after the [entrypoint](#image-entrypoint-v020), [selection](#exact-name-provider-precedence-v020), and [CA bundle](#ca-certificate-bundle-v020) changes, on darwin/amd64 with Go 1.27.1.
+
+| Check | Observed result |
+| --- | --- |
+| `gofmt -l .`, `go vet -composites=false ./...`, `go test ./... -count=1` | Empty, passed, passed. |
+| `go test -race ./... -count=1` | Passed. |
+| `git diff --check v0.1.0` | No whitespace errors. |
+| Relative links and anchors in `README.md`, `CHANGELOG.md`, `docs/*.md`, `docs/release-notes/*.md`, `AGENTS.md`, and the Explorer contract | All resolve. |
+| `bash -n` on the 33 Bash-fenced blocks in `README.md`, `CHANGELOG.md`, `docs/registry-signing.md`, and the release notes | 32 pass. The keyless `cosign verify` template in `docs/registry-signing.md` (unchanged since v0.1.0) fails because of its `<subject, or --certificate-identity-regexp>` placeholder; syntax only, as before. |
+| `lupetto help` | Both `build` lines and `sbom` show `[--entrypoint <element>]... [--ca-bundle]`; the status exit-code sentence lists `config-changed`. |
+
+Not done: tagging `v0.2.0`, pushing, and the release workflow's image publication and signing, which need the maintainer's approval. There is no version constant in the source; the release is the tag.

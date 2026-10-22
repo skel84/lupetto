@@ -47,12 +47,12 @@ Where behavior is specified:
 | Registry/signing inputs and precedence, publication and readback, Cosign, verification, partial outcomes | [Registry/signing guide](registry-signing.md) |
 | Why each contract was chosen, and what it superseded | [Decisions](decisions.md) |
 
-Output-directory flags, an Explorer compatibility contract, and runtime image recipes remain undecided. Failures and cancellation are nonzero, retain the workspace without a success record, and never roll back local or remote side effects.
+Output-directory flags, an Explorer compatibility contract, and runtime image recipes remain undecided. Two explicit, recorded image options exist: an optional OCI [entrypoint](../README.md#image-entrypoint) and an optional [CA certificate bundle](../README.md#ca-certificate-bundle); neither is a recipe, and neither is guessed from the package name. Failures and cancellation are nonzero, retain the workspace without a success record, and never roll back local or remote side effects.
 
 ### Numeric selection: implemented live-index rule
 
 - Select against one identified snapshot and target architecture.
-- Match leading dotted upstream version components within exact package names or matching-version providers; reject ambiguous selections.
+- Match leading dotted upstream version components within exact package names or matching-version providers; when distinct APKs tie at the chosen version, prefer the single APK named exactly as requested, and reject any other ambiguous selection.
 - Choose the highest matching APK version using APK-compatible ordering, not lexical sorting or generic SemVer assumptions.
 - Display and record the exact package/version before building.
 - Reject conflicting selectors, ambiguous mappings, and missing matches. Never fall back to another major.
@@ -63,7 +63,7 @@ Both selector forms enter the same exact-build pipeline. A major selector may re
 
 The user-approved [registry-comparison dashboard](decisions.md#registry-comparison-dashboard-user-approved-2026-10-01) is the first Explorer target: compare images published to a registry with the latest signed-index versions, show known security fixes those images are missing, browse index packages, and build images from the UI. It is a separate `lupetto-explorer` program that integrates only through the CLI's JSON output and runs as one container without a database. Kubernetes and Tekton/Konflux compatibility is the long-term direction, not current scope.
 
-Restoring package metadata, recipe history, snapshot provenance, durable SBOM downloads, and local Docker image availability remains in the full compatibility target. The specification also names Products and package series; the dashboard's products file defines tracked package/selector groupings only, not runtime recipes.
+Restoring package metadata, recipe history, snapshot provenance, durable SBOM downloads, and local Docker image availability remains in the full compatibility target. The specification also names Products and package series; the dashboard's products file defines tracked package/selector groupings and their two optional image options (entrypoint, CA bundle), not runtime recipes.
 
 Local Docker availability is not registry availability. Missing security fixes are not a vulnerability scan, and signature status is not shown.
 

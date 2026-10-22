@@ -149,6 +149,11 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 
 - [x] Optional per-product `caBundle` and `build`/`sbom` `--ca-bundle` adding the unpinned `ca-certificates-bundle` APK (version recorded by the retained lock and validated SPDX), with an image file check, the `lupetto.image.ca-bundle` annotation, `request.caBundle`, `config-changed` status, and Explorer pass-through. A real `external-dns-0.21` build gained the 118-certificate bundle; a `kubectl-1.34` image failed public TLS verification without it and verified with it; status and an Explorer rebuild in Chrome moved a loopback-registry track from `config-changed` to `current` ([evidence](verification.md#ca-certificate-bundle-v020)).
 
+**v0.2.0 release** ([changelog](../CHANGELOG.md), [release notes](release-notes/v0.2.0.md)):
+
+- [x] Changelog, release notes, and documentation for the entrypoint, CA bundle, and selection changes; race tests, link, diff, and Bash-syntax checks ([evidence](verification.md#v020-release-readiness-2026-10-22)).
+- [ ] Tag `v0.2.0`, push it, and let the release workflow publish and sign the image. Awaiting the maintainer's approval.
+
 **Exact-name provider precedence** ([decision](decisions.md#exact-name-provider-precedence-2026-10-22)):
 
 - [x] When distinct APKs tie at the selected version, select the single APK named exactly as requested; other ties stay ambiguous. Against the live index, `build busybox 1` and `build busybox --apk-version 1.38.0-r3` failed as ambiguous with the v0.1.0 binary and now build `busybox@1.38.0-r3` with validated SPDX; `cmd:CMakeLists.txt 3.12` and `--apk-version 3.12.3-r0` still fail as ambiguous. Hermetic and mutation tests cover both paths ([evidence](verification.md#exact-name-provider-precedence-v020)).
