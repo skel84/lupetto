@@ -44,6 +44,8 @@ type RecordRequest struct {
 	// Entrypoint is omitted when not requested, keeping such records
 	// byte-identical to earlier version-6 records.
 	Entrypoint []string `json:"entrypoint,omitempty"`
+	// CABundle is omitted unless the CA bundle was requested.
+	CABundle bool `json:"caBundle,omitempty"`
 }
 
 type RecordSelection struct {
@@ -110,7 +112,7 @@ func InitialResult(request Request) Result {
 		Request: RecordRequest{
 			Package: request.PackageName, Selector: request.Selector, APKVersion: request.Version,
 			Load: !request.NoLoad, Publish: request.Publication.Enabled(), Sign: request.Signing.Enabled(),
-			Entrypoint: request.Image.Entrypoint,
+			Entrypoint: request.Image.Entrypoint, CABundle: request.Image.CABundle,
 		},
 		Build:       "not-attempted",
 		DockerLoad:  requestedStatus(!request.NoLoad),

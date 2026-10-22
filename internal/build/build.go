@@ -433,12 +433,12 @@ func checkImage(dir string, selected wolfi.Package, image imageconfig.Options) (
 	if !found {
 		return "", fmt.Errorf("OCI image does not contain selected %s@%s", selected.Name, selected.Version)
 	}
-	if image.Entrypoint != nil {
+	if image.Entrypoint != nil || image.CABundle {
 		if _, err := layer.Seek(0, io.SeekStart); err != nil {
 			return "", fmt.Errorf("rewind OCI layer: %w", err)
 		}
-		if err := checkExecutable(layer, image.Entrypoint[0]); err != nil {
-			return "", fmt.Errorf("entrypoint %s is not usable in the image of %s@%s and its dependency closure: %w", image.Entrypoint[0], selected.Name, selected.Version, err)
+		if err := checkImageFiles(layer, selected, image); err != nil {
+			return "", err
 		}
 	}
 	return index.Manifests[0].Digest, nil

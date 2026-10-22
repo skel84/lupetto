@@ -114,7 +114,7 @@ func RunWith(ctx context.Context, products Products, options Options, services S
 	installedSets := map[string][]wolfi.InstalledPackage{}
 	for _, product := range products.Products {
 		for _, selector := range product.Selectors {
-			track := Track{Package: product.Package, Selector: selector, State: NotBuilt, Entrypoint: product.Entrypoint, Images: []Image{}, Installed: []Identity{}, Outdated: []OutdatedPackage{}, MissingFixes: []MissingFix{}, UnevaluatedFixes: []UnevaluatedFix{}}
+			track := Track{Package: product.Package, Selector: selector, State: NotBuilt, Entrypoint: product.Entrypoint, CABundle: product.CABundle, Images: []Image{}, Installed: []Identity{}, Outdated: []OutdatedPackage{}, MissingFixes: []MissingFix{}, UnevaluatedFixes: []UnevaluatedFix{}}
 			selected, err := wolfi.SelectPackage(packages, product.Package, selector, "", services.Architecture)
 			if err != nil {
 				track.State, track.Error = Error, "unavailable index version for track"

@@ -36,3 +36,17 @@ func TestParseBuildEntrypoint(t *testing.T) {
 		}
 	}
 }
+
+func TestParseBuildCABundle(t *testing.T) {
+	if request, err := parseBuild([]string{"external-dns-0.21", "0"}); err != nil || request.Image.CABundle {
+		t.Fatalf("default=%+v err=%v", request.Image, err)
+	}
+	if request, err := parseBuild([]string{"--ca-bundle", "external-dns-0.21", "--apk-version", "0.21.0-r9"}); err != nil || !request.Image.CABundle {
+		t.Fatalf("--ca-bundle=%+v err=%v", request.Image, err)
+	}
+	for _, args := range [][]string{{"tool", "1", "--ca-bundle", "--ca-bundle"}, {"tool", "1", "--ca-bundle=true"}} {
+		if _, err := parseBuild(args); err == nil {
+			t.Errorf("parseBuild(%q) accepted", args)
+		}
+	}
+}

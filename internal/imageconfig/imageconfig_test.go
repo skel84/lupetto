@@ -84,3 +84,24 @@ func TestApkoCommandQuotesEachElement(t *testing.T) {
 		t.Fatalf("got %s want %s", got, want)
 	}
 }
+
+func TestCABundleOption(t *testing.T) {
+	options := Options{CABundle: true}
+	annotations := options.Annotations()
+	if len(annotations) != 1 || annotations[CABundleAnnotation] != "true" {
+		t.Fatalf("annotations=%v", annotations)
+	}
+	parsed, err := FromAnnotations(annotations)
+	if err != nil || !parsed.Equal(options) || parsed.Equal(Options{}) {
+		t.Fatalf("round trip=%+v err=%v", parsed, err)
+	}
+	both := Options{Entrypoint: []string{"/usr/bin/a"}, CABundle: true}
+	if parsed, err := FromAnnotations(both.Annotations()); err != nil || !parsed.Equal(both) || parsed.Equal(Options{Entrypoint: both.Entrypoint}) {
+		t.Fatalf("combined round trip=%+v err=%v", parsed, err)
+	}
+	for _, malformed := range []string{"", "false", "TRUE", "yes", "1"} {
+		if _, err := FromAnnotations(map[string]string{CABundleAnnotation: malformed}); err == nil {
+			t.Errorf("malformed annotation %q accepted", malformed)
+		}
+	}
+}

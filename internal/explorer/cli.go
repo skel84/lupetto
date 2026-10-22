@@ -70,6 +70,9 @@ func buildArgs(request BuildRequest) []string {
 	for _, element := range request.Entrypoint {
 		args = append(args, "--entrypoint="+element)
 	}
+	if request.CABundle {
+		args = append(args, "--ca-bundle")
+	}
 	return append(args, "--json")
 }
 

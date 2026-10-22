@@ -24,11 +24,13 @@ type Product struct {
 	// Entrypoint is the optional image ENTRYPOINT for every selector of
 	// this product; absent means none, as in images built before it existed.
 	Entrypoint []string `yaml:"entrypoint,omitempty" json:"entrypoint,omitempty"`
+	// CABundle adds the CA certificate bundle to every selector's image.
+	CABundle bool `yaml:"caBundle,omitempty" json:"caBundle,omitempty"`
 }
 
 // Image returns the image configuration the product's tracks build with.
 func (p Product) Image() imageconfig.Options {
-	return imageconfig.Options{Entrypoint: p.Entrypoint}
+	return imageconfig.Options{Entrypoint: p.Entrypoint, CABundle: p.CABundle}
 }
 
 type Products struct {
@@ -105,6 +107,9 @@ func checkYAMLTypes(node *yaml.Node) error {
 						return errors.New("selectors must be YAML strings")
 					}
 				}
+			}
+			if key.Value == "caBundle" && (value.Kind != yaml.ScalarNode || value.Tag != "!!bool") {
+				return errors.New("caBundle must be true or false")
 			}
 			if key.Value == "entrypoint" {
 				if value.Kind != yaml.SequenceNode {

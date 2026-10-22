@@ -9,6 +9,7 @@ type Product struct {
 	Package    string   `json:"package"`
 	Selectors  []string `json:"selectors"`
 	Entrypoint []string `json:"entrypoint,omitempty"`
+	CABundle   bool     `json:"caBundle,omitempty"`
 }
 type ProductsDocument struct {
 	Kind     string    `json:"kind"`

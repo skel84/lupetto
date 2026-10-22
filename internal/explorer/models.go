@@ -115,9 +115,10 @@ type BuildRequest struct {
 	Mode       string `json:"mode,omitempty"`
 	Load       bool   `json:"load"`
 	LoadReason string `json:"loadReason,omitempty"`
-	// Entrypoint comes from the tracked product in the products file, never
-	// from a form field; empty means the image has no entrypoint.
+	// Entrypoint and CABundle come from the tracked product in the products
+	// file, never from a form field; empty means the image has neither.
 	Entrypoint []string `json:"entrypoint,omitempty"`
+	CABundle   bool     `json:"caBundle,omitempty"`
 }
 type RecordSelection struct {
 	Package      string `json:"package"`

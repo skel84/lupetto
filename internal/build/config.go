@@ -24,7 +24,11 @@ import (
 // lock and build date.
 func apkoConfig(keyPath string, selected wolfi.Package, arch string, created time.Time, indexDigest string, image imageconfig.Options) string {
 	var config strings.Builder
-	fmt.Fprintf(&config, "contents:\n  keyring:\n    - %s\n  repositories:\n    - %s\n  packages:\n    - %s\narchs:\n  - %s\nannotations:\n  org.opencontainers.image.version: %s\n  org.opencontainers.image.created: %s\n  lupetto.apk.name: %s\n  lupetto.apk.version: %s\n  lupetto.apk.architecture: %s\n  lupetto.index.sha256: %s\n", strconv.Quote(keyPath), wolfi.Repository, strconv.Quote(selected.Name+"="+selected.Version), arch, strconv.Quote(selected.Version), strconv.Quote(created.Format(time.RFC3339)), strconv.Quote(selected.Name), strconv.Quote(selected.Version), strconv.Quote(selected.Arch), strconv.Quote(indexDigest))
+	fmt.Fprintf(&config, "contents:\n  keyring:\n    - %s\n  repositories:\n    - %s\n  packages:\n    - %s\n", strconv.Quote(keyPath), wolfi.Repository, strconv.Quote(selected.Name+"="+selected.Version))
+	if image.CABundle && selected.Name != imageconfig.CABundlePackage {
+		fmt.Fprintf(&config, "    - %s\n", strconv.Quote(imageconfig.CABundlePackage))
+	}
+	fmt.Fprintf(&config, "archs:\n  - %s\nannotations:\n  org.opencontainers.image.version: %s\n  org.opencontainers.image.created: %s\n  lupetto.apk.name: %s\n  lupetto.apk.version: %s\n  lupetto.apk.architecture: %s\n  lupetto.index.sha256: %s\n", arch, strconv.Quote(selected.Version), strconv.Quote(created.Format(time.RFC3339)), strconv.Quote(selected.Name), strconv.Quote(selected.Version), strconv.Quote(selected.Arch), strconv.Quote(indexDigest))
 	annotations := image.Annotations()
 	for _, name := range slices.Sorted(maps.Keys(annotations)) {
 		fmt.Fprintf(&config, "  %s: %s\n", name, strconv.Quote(annotations[name]))
@@ -63,13 +67,33 @@ type layerEntry struct {
 	linkname string
 }
 
-// checkExecutable requires target, resolved through the layer's own
-// symlinks, to be an executable regular file in the gzip-compressed layer.
-func checkExecutable(layer io.Reader, target string) error {
+// checkImageFiles checks the files image options require in the
+// gzip-compressed layer: the entrypoint executable and the CA bundle.
+func checkImageFiles(layer io.Reader, selected wolfi.Package, image imageconfig.Options) error {
 	entries, err := readLayerEntries(layer)
 	if err != nil {
 		return err
 	}
+	if image.Entrypoint != nil {
+		if err := checkExecutable(entries, image.Entrypoint[0]); err != nil {
+			return fmt.Errorf("entrypoint %s is not usable in the image of %s@%s and its dependency closure: %w", image.Entrypoint[0], selected.Name, selected.Version, err)
+		}
+	}
+	if image.CABundle {
+		entry, err := resolveLayerPath(entries, imageconfig.CABundlePath)
+		if err == nil && entry.typeflag != tar.TypeReg && entry.typeflag != tar.TypeLink {
+			err = errors.New("not a regular file")
+		}
+		if err != nil {
+			return fmt.Errorf("CA bundle %s is not usable in the image of %s@%s: %w", imageconfig.CABundlePath, selected.Name, selected.Version, err)
+		}
+	}
+	return nil
+}
+
+// checkExecutable requires target, resolved through the layer's own
+// symlinks, to be an executable regular file.
+func checkExecutable(entries map[string]layerEntry, target string) error {
 	entry, err := resolveLayerPath(entries, target)
 	if err != nil {
 		return err

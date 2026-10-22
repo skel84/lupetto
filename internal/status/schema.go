@@ -83,6 +83,7 @@ type Track struct {
 	Selector          string            `json:"selector"`
 	State             string            `json:"state"`
 	Entrypoint        []string          `json:"entrypoint,omitempty"`
+	CABundle          bool              `json:"caBundle,omitempty"`
 	Error             string            `json:"error,omitempty"`
 	Latest            *Identity         `json:"latest,omitempty"`
 	Repository        string            `json:"repository,omitempty"`

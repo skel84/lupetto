@@ -71,6 +71,54 @@ func TestApkoConfigEntrypoint(t *testing.T) {
 	}
 }
 
+func TestApkoConfigCABundle(t *testing.T) {
+	created := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	selected := wolfi.Package{Name: "busybox-static", Version: "1.38.0-r3", Arch: "x86_64"}
+	got := apkoConfig("/data/builds/image-1/wolfi-signing.rsa.pub", selected, "x86_64", created, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", imageconfig.Options{CABundle: true})
+	want := strings.Replace(v010Config, "    - \"busybox-static=1.38.0-r3\"\n", "    - \"busybox-static=1.38.0-r3\"\n    - \"ca-certificates-bundle\"\n", 1) + "  lupetto.image.ca-bundle: \"true\"\n"
+	if got != want {
+		t.Fatalf("config:\n%s\nwant:\n%s", got, want)
+	}
+	// The bundle itself is not listed twice.
+	bundle := wolfi.Package{Name: "ca-certificates-bundle", Version: "20260909-r3", Arch: "x86_64"}
+	got = apkoConfig("/k", bundle, "x86_64", created, "d", imageconfig.Options{CABundle: true})
+	if strings.Count(got, "    - \"ca-certificates-bundle") != 1 || !strings.Contains(got, "    - \"ca-certificates-bundle=20260909-r3\"\narchs:") {
+		t.Fatalf("bundle package config:\n%s", got)
+	}
+}
+
+func TestCheckImageCABundle(t *testing.T) {
+	selected := wolfi.Package{Name: "valkey-9.1", Version: "9.1.2-r1", Arch: "x86_64"}
+	for name, entries := range map[string][]tar.Header{
+		"regular file":     {{Name: "etc/ssl/certs/ca-certificates.crt", Typeflag: tar.TypeReg, Mode: 0644}},
+		"symlinked parent": {{Name: "etc/ssl", Typeflag: tar.TypeSymlink, Linkname: "../usr/share/ssl"}, {Name: "usr/share/ssl/certs/ca-certificates.crt", Typeflag: tar.TypeReg, Mode: 0644}},
+	} {
+		dir, _ := makeOCIWith(t, "9.1.2-r1", entries, nil)
+		if _, err := checkImage(dir, selected, imageconfig.Options{CABundle: true}); err != nil {
+			t.Errorf("%s rejected: %v", name, err)
+		}
+	}
+	for name, tc := range map[string]struct {
+		entries []tar.Header
+		want    string
+	}{
+		"missing":   {nil, "/etc does not exist"},
+		"directory": {[]tar.Header{{Name: "etc/ssl/certs/ca-certificates.crt/", Typeflag: tar.TypeDir, Mode: 0755}}, "not a regular file"},
+		"dangling":  {[]tar.Header{{Name: "etc/ssl/certs/ca-certificates.crt", Typeflag: tar.TypeSymlink, Linkname: "/nowhere"}}, "/nowhere does not exist"},
+	} {
+		dir, _ := makeOCIWith(t, "9.1.2-r1", tc.entries, nil)
+		_, err := checkImage(dir, selected, imageconfig.Options{CABundle: true})
+		if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "CA bundle /etc/ssl/certs/ca-certificates.crt is not usable in the image of valkey-9.1@9.1.2-r1") {
+			t.Errorf("%s: err=%v", name, err)
+		}
+	}
+	// Without the option the file is not required.
+	dir, _ := makeOCIWith(t, "9.1.2-r1", nil, nil)
+	if _, err := checkImage(dir, selected, imageconfig.Options{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCheckImageEntrypoint(t *testing.T) {
 	selected := wolfi.Package{Name: "valkey-9.1", Version: "9.1.2-r1", Arch: "x86_64"}
 	entries := []tar.Header{
@@ -181,6 +229,9 @@ func TestRunWithoutImageOptionsKeepsV010Inputs(t *testing.T) {
 		}
 		if strings.Contains(string(record), `"entrypoint"`) != (entrypoint != nil) {
 			t.Fatalf("record entrypoint presence wrong for %q:\n%s", entrypoint, record)
+		}
+		if strings.Contains(string(record), `"caBundle"`) {
+			t.Fatalf("record without a CA bundle request mentions it:\n%s", record)
 		}
 	}
 }

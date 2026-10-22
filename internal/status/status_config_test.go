@@ -80,3 +80,56 @@ func TestParseProductsEntrypoint(t *testing.T) {
 		}
 	}
 }
+
+func TestRunCABundleState(t *testing.T) {
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	index := signedIndexReader(t, "P:curl\nV:8.2.0-r1\nA:x86_64\nC:Q1a\n\n")
+	security := func(context.Context) (SecurityFeed, string, error) {
+		return SecurityFeed{}, strings.Repeat("a", 64), nil
+	}
+	built := imageconfig.Options{CABundle: true}.Annotations()
+	for _, scenario := range []struct {
+		name        string
+		annotations map[string]string
+		desired     bool
+		want        string
+	}{
+		{"requested and built", built, true, Current},
+		{"added", nil, true, ConfigChanged},
+		{"removed", built, false, ConfigChanged},
+		{"malformed annotation", map[string]string{imageconfig.CABundleAnnotation: "yes"}, true, Error},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			image := testImage("8.2.0-r1", "a", now)
+			image.Annotations = scenario.annotations
+			registry := &testRegistry{listings: map[string]RegistryListing{"team/images/curl": {Images: []Image{image}}}, installed: map[string][]wolfi.InstalledPackage{image.Digest: {{Name: "curl", Version: "8.2.0-r1", Arch: "x86_64"}}}}
+			products := Products{Version: 1, Products: []Product{{Package: "curl", Selectors: []string{"8"}, CABundle: scenario.desired}}}
+			services := Services{Architecture: "x86_64", ReadIndex: index, ReadSecurity: security, Registry: registry, Cache: &testCache{sets: map[string][]wolfi.InstalledPackage{}}, Now: func() time.Time { return now }}
+			document, err := RunWith(context.Background(), products, Options{Registry: "registry.example.invalid", Repository: "team/images"}, services)
+			if err != nil || len(document.Tracks) != 1 {
+				t.Fatalf("document=%+v err=%v", document, err)
+			}
+			track := document.Tracks[0]
+			if track.State != scenario.want {
+				t.Fatalf("state=%s error=%q want %s", track.State, track.Error, scenario.want)
+			}
+			data, _ := json.Marshal(track)
+			if strings.Contains(string(data), `"caBundle":true`) != scenario.desired {
+				t.Fatalf("track caBundle presence: %s", data)
+			}
+		})
+	}
+}
+
+func TestParseProductsCABundle(t *testing.T) {
+	products, err := ParseProducts(strings.NewReader("version: 1\nproducts:\n  - package: external-dns-0.21\n    selectors: [\"0\"]\n    caBundle: true\n  - package: curl\n    selectors: [\"8\"]\n    caBundle: false\n"))
+	if err != nil || !products.Products[0].CABundle || products.Products[1].CABundle || !products.Products[0].Image().CABundle {
+		t.Fatalf("products=%+v err=%v", products, err)
+	}
+	for _, invalid := range []string{`caBundle: "true"`, "caBundle: yes", "caBundle: 1", "caBundle: null", "caBundle: [true]"} {
+		document := "version: 1\nproducts:\n  - package: curl\n    selectors: [\"8\"]\n    " + invalid + "\n"
+		if _, err := ParseProducts(strings.NewReader(document)); err == nil {
+			t.Errorf("accepted %s", invalid)
+		}
+	}
+}

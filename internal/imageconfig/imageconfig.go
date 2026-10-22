@@ -1,7 +1,8 @@
 // Package imageconfig owns the optional per-track image configuration that a
 // build applies beyond its selected APK and dependency closure: the OCI
-// entrypoint. The build writes it into the image config and a manifest
-// annotation; status reads that annotation back to detect a changed track.
+// entrypoint and the CA certificate bundle. The build writes them into the
+// image and its manifest annotations; status reads those annotations back to
+// detect a changed track.
 // An empty Options adds nothing, so such images match earlier releases.
 package imageconfig
 
@@ -20,6 +21,17 @@ import (
 // It is present only when an entrypoint was requested.
 const EntrypointAnnotation = "lupetto.image.entrypoint"
 
+// CABundleAnnotation is "true" when the build added the CA certificate
+// bundle; it is absent otherwise.
+const CABundleAnnotation = "lupetto.image.ca-bundle"
+
+// CABundlePackage is the Wolfi APK that provides CABundlePath. It is added
+// unpinned; apko's lock records the exact version installed.
+const (
+	CABundlePackage = "ca-certificates-bundle"
+	CABundlePath    = "/etc/ssl/certs/ca-certificates.crt"
+)
+
 const (
 	maxEntrypointElements = 32
 	maxElementBytes       = 1024
@@ -30,6 +42,10 @@ type Options struct {
 	// Entrypoint is the OCI config Entrypoint: an absolute executable path in
 	// the image followed by fixed leading arguments. Nil means none.
 	Entrypoint []string
+	// CABundle adds CABundlePackage to the image so TLS clients find system
+	// roots at CABundlePath. It changes nothing when the closure already has it
+	// except recording that the track requires it.
+	CABundle bool
 }
 
 // ValidateEntrypoint checks a requested entrypoint. The executable must be a
@@ -73,6 +89,9 @@ func (o Options) Annotations() map[string]string {
 		data, _ := json.Marshal(o.Entrypoint)
 		annotations[EntrypointAnnotation] = string(data)
 	}
+	if o.CABundle {
+		annotations[CABundleAnnotation] = "true"
+	}
 	return annotations
 }
 
@@ -88,12 +107,18 @@ func FromAnnotations(annotations map[string]string) (Options, error) {
 		}
 		options.Entrypoint = entrypoint
 	}
+	if value, ok := annotations[CABundleAnnotation]; ok {
+		if value != "true" {
+			return Options{}, errors.New("invalid " + CABundleAnnotation + " annotation")
+		}
+		options.CABundle = true
+	}
 	return options, nil
 }
 
 // Equal reports whether a and b configure the same image.
 func (o Options) Equal(other Options) bool {
-	return slices.Equal(o.Entrypoint, other.Entrypoint)
+	return slices.Equal(o.Entrypoint, other.Entrypoint) && o.CABundle == other.CABundle
 }
 
 // ApkoCommand renders the entrypoint as apko's entrypoint.command string.

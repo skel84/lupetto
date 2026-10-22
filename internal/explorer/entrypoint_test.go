@@ -8,21 +8,22 @@ import (
 
 func TestHTTPBuildUsesTrackedProductEntrypoint(t *testing.T) {
 	config := goodFake()
-	config.Products = `{"kind":"products","version":1,"products":[{"package":"cmd:curl","selectors":["1"],"entrypoint":["/usr/bin/curl","-s","two words"]}],"changed":false,"message":"synthetic"}`
+	config.Products = `{"kind":"products","version":1,"products":[{"package":"cmd:curl","selectors":["1"],"entrypoint":["/usr/bin/curl","-s","two words"],"caBundle":true}],"changed":false,"message":"synthetic"}`
 	server, _, calls := testServer(t, config, true)
 	form := buildForm(server)
-	// A form field cannot choose the entrypoint; only the products file does.
+	// Form fields cannot choose image options; only the products file does.
 	form.Set("entrypoint", "/bin/sh")
+	form.Set("caBundle", "false")
 	if w := request(server, "POST", "/builds", form); w.Code != 303 {
 		t.Fatalf("response = %d %s", w.Code, w.Body.String())
 	}
 	eventually(t, func() bool { _, log, ok := server.jobs.detail("1", 0); return ok && log.Done })
 	data, _ := os.ReadFile(calls)
-	if !strings.Contains(string(data), "build|cmd:curl|1.2|--no-load|--entrypoint=/usr/bin/curl|--entrypoint=-s|--entrypoint=two words|--json\n") || strings.Contains(string(data), "/bin/sh") {
+	if !strings.Contains(string(data), "build|cmd:curl|1.2|--no-load|--entrypoint=/usr/bin/curl|--entrypoint=-s|--entrypoint=two words|--ca-bundle|--json\n") || strings.Contains(string(data), "/bin/sh") {
 		t.Fatal(string(data))
 	}
 	view, _, _ := server.jobs.detail("1", 0)
-	if strings.Join(view.Request.Entrypoint, "|") != "/usr/bin/curl|-s|two words" {
+	if strings.Join(view.Request.Entrypoint, "|") != "/usr/bin/curl|-s|two words" || !view.Request.CABundle {
 		t.Fatalf("job request = %#v", view.Request)
 	}
 

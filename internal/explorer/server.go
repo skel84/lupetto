@@ -422,7 +422,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	buildRequest := BuildRequest{Package: oneField(r, "package"), Selector: oneField(r, "selector"), APKVersion: oneField(r, "apkVersion"), Mode: oneField(r, "mode")}
-	// A tracked package builds with its product's entrypoint, so Explorer
+	// A tracked package builds with its product's image options, so Explorer
 	// rebuilds produce the image status compares against. Without a readable
 	// products file the build is refused rather than built without it.
 	if s.jobs.enabled {
@@ -435,7 +435,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, product := range products.Products {
 			if product.Package == buildRequest.Package {
-				buildRequest.Entrypoint = product.Entrypoint
+				buildRequest.Entrypoint, buildRequest.CABundle = product.Entrypoint, product.CABundle
 			}
 		}
 	}

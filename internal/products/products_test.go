@@ -155,3 +155,20 @@ func TestProductsKeepEntrypointAcrossMutations(t *testing.T) {
 		t.Fatal("invalid entrypoint accepted by a mutation")
 	}
 }
+
+func TestProductsKeepCABundleAcrossMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "products.yaml")
+	if err := os.WriteFile(path, []byte("version: 1\nproducts:\n  - package: external-dns-0.21\n    selectors: [\"0\"]\n    caBundle: true\n"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(path, "add", "external-dns-0.21", []string{"1"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(path, "remove", "external-dns-0.21", []string{"0"}, false); err != nil {
+		t.Fatal(err)
+	}
+	document, err := Run(path, "list", "", nil, false)
+	if err != nil || len(document.Products) != 1 || !document.Products[0].CABundle || strings.Join(document.Products[0].Selectors, ",") != "1" {
+		t.Fatalf("products=%+v err=%v", document.Products, err)
+	}
+}
