@@ -140,7 +140,7 @@ Keyless signatures are verified by **identity**, not by a public key:
 ```bash
 cosign verify <immutable-reference> \
   --certificate-oidc-issuer <issuer URL> \
-  --certificate-identity <subject, or --certificate-identity-regexp>
+  --certificate-identity '<subject>'  # or --certificate-identity-regexp '<regexp>'
 ```
 
 `lupetto verify` and the Explorer signature status take the same policy through `--certificate-identity[-regexp]` / `--certificate-oidc-issuer` or their `LUPETTO_COSIGN_CERTIFICATE_*` variables ([`lupetto verify`](#lupetto-verify)). Keyless signing has so far been exercised only with the hermetic command-adapter tests ([verification](verification.md#keyless-signing-option-2026-10-20)); a live Fulcio exchange from CI has not yet been recorded.

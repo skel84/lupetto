@@ -2,7 +2,7 @@
 
 User-visible changes to the `lupetto` CLI, `lupetto-explorer`, and the combined container. Releases are git tags `vX.Y.Z`; the [release workflow](.github/workflows/release.yml) publishes the combined Explorer image for each tag.
 
-## v0.2.0 (unreleased)
+## v0.2.0 (2026-10-22)
 
 Lupetto images can now replace upstream images whose Helm charts pass only `args`. See the [release notes](docs/release-notes/v0.2.0.md) for upgrade guidance.
 
