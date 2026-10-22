@@ -1509,4 +1509,19 @@ Checks run on the `release-v0.2.0` branch after the [entrypoint](#image-entrypoi
 | `bash -n` on the 33 Bash-fenced blocks in `README.md`, `CHANGELOG.md`, `docs/registry-signing.md`, and the release notes | All pass (syntax only, not execution). The keyless `cosign verify` template in `docs/registry-signing.md`, which failed since v0.1.0 because of an unquoted `<…>` placeholder ending the line, now quotes its placeholders. |
 | `lupetto help` | Both `build` lines and `sbom` show `[--entrypoint <element>]... [--ca-bundle]`; the status exit-code sentence lists `config-changed`. |
 
-Not done: tagging `v0.2.0`, pushing, and the release workflow's image publication and signing, which need the maintainer's approval. There is no version constant in the source; the release is the tag.
+There is no version constant in the source; the release is the tag. The [release](#v020-release-2026-10-22) itself is recorded below.
+
+## v0.2.0 release (2026-10-22)
+
+With the maintainer's approval, `main` was fast-forwarded to `6adda2d` and pushed, and the annotated tag `v0.2.0` ("lupetto v0.2.0") was pushed on that commit. The checks below are read-only against the published image.
+
+| Check | Observed result |
+| --- | --- |
+| Release workflow run `39812453440` (tag push `v0.2.0`) | Completed `success`; `docker/build-push-action` pushed the image and `cosign sign --yes ghcr.io/skel84/lupetto@sha256:46ba422e…b2a5` ran on the pushed digest. |
+| `crane digest ghcr.io/skel84/lupetto:v0.2.0` | `sha256:46ba422e1cda5c9e49a12e85eb42aa6c1a44677490ebf680050af344926bb2a5`. |
+| `lupetto verify --json --certificate-identity-regexp '^https://github.com/skel84/lupetto/' --certificate-oidc-issuer https://token.actions.githubusercontent.com ghcr.io/skel84/lupetto@sha256:46ba422e…b2a5` (CLI built from `6adda2d`) | Exit 0; transparency log `verified`; signature `signed` (1 artifact); signer `https://github.com/skel84/lupetto/.github/workflows/release.yml@refs/tags/v0.2.0`, issuer `https://token.actions.githubusercontent.com`; attestation `absent` (the workflow signs but does not attest). |
+| `cosign verify` with the same identity policy | Claims, transparency-log inclusion, and certificate chain verified; certificate extensions show workflow ref `refs/tags/v0.2.0`, SHA `6adda2d1…f3a9`, trigger `push`. |
+| `crane config` of the digest | `linux/amd64`; `Entrypoint` `/usr/local/bin/lupetto-explorer`, `Cmd` `--listen 0.0.0.0:8080 --products /etc/lupetto/products/products.yaml`. |
+| `docker run --rm --entrypoint lupetto <digest> help` | The packaged CLI's usage lists `[--entrypoint <element>]... [--ca-bundle]` on `build` and `sbom`. |
+
+No GitHub release object was created, as for v0.1.0; the tag, changelog, and release notes are the release record.

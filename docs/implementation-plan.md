@@ -152,7 +152,7 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 **v0.2.0 release** ([changelog](../CHANGELOG.md), [release notes](release-notes/v0.2.0.md)):
 
 - [x] Changelog, release notes, and documentation for the entrypoint, CA bundle, and selection changes; race tests, link, diff, and Bash-syntax checks ([evidence](verification.md#v020-release-readiness-2026-10-22)).
-- [ ] Tag `v0.2.0`, push it, and let the release workflow publish and sign the image. Awaiting the maintainer's approval.
+- [x] Tag `v0.2.0`, push it, and let the release workflow publish and sign the image. Approved by the maintainer; workflow run `39812453440` succeeded, and `ghcr.io/skel84/lupetto@sha256:46ba422e…b2a5` verifies keylessly as signed by `release.yml@refs/tags/v0.2.0` ([evidence](verification.md#v020-release-2026-10-22)).
 
 **Exact-name provider precedence** ([decision](decisions.md#exact-name-provider-precedence-2026-10-22)):
 
