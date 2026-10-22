@@ -149,7 +149,7 @@ func TestDashboardVerdictsJoinFiltersAndDiff(t *testing.T) {
 	for _, test := range []struct {
 		state, kind, label string
 		action             bool
-	}{{"current", "ok", "Build locally", false}, {"update-available", "update", "Update", true}, {"fixes-available", "rebuild", "Rebuild for fixes", true}, {"not-built", "notbuilt", "Build & publish", true}, {"error", "error", "Edit tracking", true}} {
+	}{{"current", "ok", "Build locally", false}, {"update-available", "update", "Update", true}, {"fixes-available", "rebuild", "Rebuild for fixes", true}, {"config-changed", "rebuild", "Rebuild", true}, {"not-built", "notbuilt", "Build & publish", true}, {"error", "error", "Edit tracking", true}} {
 		track.State = test.state
 		row := joinTrack(track, &inventory)
 		if row.VerdictKind != test.kind || row.Action.Label != test.label || row.NeedsAction != test.action {

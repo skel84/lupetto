@@ -60,6 +60,7 @@
   <section class="card" aria-labelledby="inputs"><div class="card-body"><h2 id="inputs">Inputs</h2><hr class="sep"><dl class="kv">
     {{- if $r}}<dt>Requested</dt><dd><span class="mono">{{$r.Request.Package}} {{if $r.Request.APKVersion}}{{$r.Request.APKVersion}} (exact){{else}}{{$r.Request.Selector}} (newest match){{end}}</span></dd>
     <dt>Publish / sign</dt><dd>{{if $r.Request.Publish}}publish requested{{else}}no publication{{end}} · {{if $r.Request.Sign}}signing requested{{else}}no signing{{end}}{{if $r.Request.Load}} · Docker load requested{{else if and (eq $i.Mode "publish") $i.LoadReason}} · no Docker load: {{$i.LoadReason}}{{end}}</dd>
+    {{- with $r.Request.Entrypoint}}<dt>Entrypoint</dt><dd><span class="mono">{{range $n, $e := .}}{{if $n}} {{end}}{{printf "%q" $e}}{{end}}</span></dd>{{end}}
     {{- else if $i.Live}}<dt>Requested</dt><dd><span class="mono">{{.Job.Request.Package}} {{if .Job.Request.APKVersion}}{{.Job.Request.APKVersion}} (exact){{else}}{{.Job.Request.Selector}} (newest match){{end}}</span></dd>
     {{- with $i.Mode}}<dt>Mode</dt><dd>{{if eq . "local"}}build locally · load into Docker; no publication or signing{{else if $i.Load}}publish · also loads into local Docker{{else}}publish only{{with $i.LoadReason}} · {{.}}{{end}}{{end}}</dd>{{end}}{{end}}
     {{- with $r}}{{with .Selection}}<dt>Selected</dt><dd><span class="mono">{{.Package}} {{.Version}}</span> · {{.Architecture}}</dd><dt>Wolfi index</dt><dd><span class="mono">{{.IndexSHA256}}</span> · signature verified</dd>{{end}}

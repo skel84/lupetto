@@ -6,8 +6,9 @@ import (
 )
 
 type Product struct {
-	Package   string   `json:"package"`
-	Selectors []string `json:"selectors"`
+	Package    string   `json:"package"`
+	Selectors  []string `json:"selectors"`
+	Entrypoint []string `json:"entrypoint,omitempty"`
 }
 type ProductsDocument struct {
 	Kind     string    `json:"kind"`

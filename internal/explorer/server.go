@@ -422,6 +422,23 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	buildRequest := BuildRequest{Package: oneField(r, "package"), Selector: oneField(r, "selector"), APKVersion: oneField(r, "apkVersion"), Mode: oneField(r, "mode")}
+	// A tracked package builds with its product's entrypoint, so Explorer
+	// rebuilds produce the image status compares against. Without a readable
+	// products file the build is refused rather than built without it.
+	if s.jobs.enabled {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		products, err := s.cli.Products(ctx, s.config.Products, "list", "", nil)
+		cancel()
+		if err != nil {
+			http.Error(w, "cannot read the products file for the build's image configuration: "+err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		for _, product := range products.Products {
+			if product.Package == buildRequest.Package {
+				buildRequest.Entrypoint = product.Entrypoint
+			}
+		}
+	}
 	if buildRequest.Mode == "publish" {
 		buildRequest.Load, buildRequest.LoadReason = publishLoadDecision(s.dashboard.inventorySnapshot())
 	}

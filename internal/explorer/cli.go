@@ -44,6 +44,15 @@ func ValidateBuild(request BuildRequest) error {
 	if request.Mode != "" && request.Mode != "local" && request.Mode != "publish" {
 		return errors.New("invalid build mode: choose local or publish")
 	}
+	// The CLI owns full entrypoint validation; this only keeps arguments sane.
+	if len(request.Entrypoint) > 32 || (len(request.Entrypoint) > 0 && !strings.HasPrefix(request.Entrypoint[0], "/")) {
+		return errors.New("invalid entrypoint: expected an absolute executable path and at most 32 elements")
+	}
+	for _, element := range request.Entrypoint {
+		if element == "" || len(element) > 1024 || strings.ContainsRune(element, 0) {
+			return errors.New("invalid entrypoint element")
+		}
+	}
 	return nil
 }
 func validPackage(name string) bool { return len(name) <= 256 && packagePattern.MatchString(name) }
@@ -56,6 +65,10 @@ func buildArgs(request BuildRequest) []string {
 	}
 	if request.Mode != "local" && !request.Load {
 		args = append(args, "--no-load")
+	}
+	// The inline form keeps elements that start with "-" from being read as flags.
+	for _, element := range request.Entrypoint {
+		args = append(args, "--entrypoint="+element)
 	}
 	return append(args, "--json")
 }

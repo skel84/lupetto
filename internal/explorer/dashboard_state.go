@@ -261,6 +261,9 @@ func joinTrack(track Track, inventory *ImagesDocument) ProductRow {
 	case "update-available":
 		row.Verdict = "Update available"
 		row.Action.Label = "Update"
+	case "config-changed":
+		row.Verdict = "Configuration changed"
+		row.Action.Label = "Rebuild"
 	case "fixes-available":
 		row.Verdict = "Fixes available"
 		row.Action.Label = "Rebuild for fixes"
@@ -279,7 +282,7 @@ func joinTrack(track Track, inventory *ImagesDocument) ProductRow {
 		row.VerdictKind = "ok"
 	case "update-available":
 		row.VerdictKind = "update"
-	case "fixes-available":
+	case "config-changed", "fixes-available":
 		row.VerdictKind = "rebuild"
 	case "not-built":
 		row.VerdictKind = "notbuilt"
