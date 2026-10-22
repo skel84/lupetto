@@ -271,7 +271,7 @@ lupetto build nginx --apk-version 1.30.2-r0 --no-load
 lupetto build nginx 1.30 --no-load --json
 ```
 
-These are examples, **not a package allowlist**. Lupetto resolves exact package names or version-matched providers from the signed Wolfi index. A numeric selector matches leading dotted upstream components and chooses the highest APK-compatible version/revision (`17`, `9.1`, or `9.1.2`); an exact request must include the packaging revision `-rN`. Selectors and `--apk-version` cannot be combined. Missing or ambiguous matches fail rather than substituting another package or version.
+These are examples, **not a package allowlist**. Lupetto resolves exact package names or version-matched providers from the signed Wolfi index. A numeric selector matches leading dotted upstream components and chooses the highest APK-compatible version/revision (`17`, `9.1`, or `9.1.2`); an exact request must include the packaging revision `-rN`. Selectors and `--apk-version` cannot be combined. When several APKs tie at the chosen version, the one named exactly as requested wins (`busybox 1` selects `busybox`, not `busybox-full` or `busybox-static`, which provide `busybox` at the same version); any other tie, and every missing match, fails rather than substituting another package or version.
 
 For example, exercised `nginx 1.30` and `valkey 9.1` selected actual APKs `nginx-stable@1.30.2-r0` and `valkey-9.1@9.1.2-r1`. Selection can change with a new index. Both forms enter **one** resolution/lock/composition/validation pipeline.
 

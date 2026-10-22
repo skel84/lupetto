@@ -36,7 +36,7 @@ Status vocabulary:
 ## Generic signed-index selection (implemented image-only slice)
 
 - Resolve a requested name from signed APKINDEX records whose APK `P` name matches exactly **or** whose `p` provides field declares that name at the same exact APK version. Requested virtual providers may be namespaced (for example, `cmd:curl` resolves to the real `curl` APK); validate their segments but validate actual APK names separately. This avoids package-specific aliases: Wolfi advertises `postgresql` through versioned APKs, `nginx` through mainline/stable APKs, and `valkey` through both unversioned and versioned APKs. Do not guess from arbitrary name prefixes or silently choose between equally ranked providers.
-- A dotted numeric selector (major, minor, or patch) matches the corresponding leading upstream numeric components; choose the highest matching APK version and packaging revision using apko's pinned APK-compatible version comparator, not lexical or generic SemVer sorting. `--apk-version` requires an exact revision. No match is an explicit unavailable-version error; equal-ranked distinct package/byte candidates are ambiguous errors. The signed index is retained and apko still locks the exact selected package and checksum before image composition.
+- A dotted numeric selector (major, minor, or patch) matches the corresponding leading upstream numeric components; choose the highest matching APK version and packaging revision using apko's pinned APK-compatible version comparator, not lexical or generic SemVer sorting. `--apk-version` requires an exact revision. No match is an explicit unavailable-version error. Among equal-ranked distinct package/byte candidates, the single APK named exactly as requested wins over packages that only provide that name ([exact-name precedence](#exact-name-provider-precedence-2026-10-22)); any other tie is an ambiguous error. The signed index is retained and apko still locks the exact selected package and checksum before image composition.
 - Keep the same image-only apko pipeline and user-cache workspace for every requested package. nginx and Valkey are real interoperability checks, not source-level package allowlists or product recipes. Numeric selector support does not imply full package-family mapping for every Wolfi naming convention, a generic catalog, or runnable images.
 
 ## Live signed-index discovery (scoped CLI command)
@@ -324,6 +324,15 @@ Requested by the user for v0.2.0 so Lupetto images can replace upstream images i
 - Explorer passes a tracked product's entrypoint (from `lupetto products list`, never from a form field) as `--entrypoint=<element>` and refuses a build when the products file cannot be read, so its rebuilds produce what status expects. `config-changed` shows as "Configuration changed" with a "Rebuild" action; the build page lists the recorded entrypoint.
 - Shared ownership: `internal/imageconfig` (no in-module imports) owns validation, the annotation encoding, and comparison for `internal/build` and `internal/status`; Explorer keeps its own minimal argument checks.
 - Not chosen: per-selector entrypoints, `CMD`, working directory, user, or environment settings; image-content changes beyond the selected closure.
+
+## Exact-name provider precedence (2026-10-22)
+
+Requested by the user for v0.2.0: `busybox` with selector `1` failed as ambiguous because `busybox-full` and `busybox-static` also provide `busybox=<the same version>`. Asking for an APK by its own name means that APK. Evidence in [verification](verification.md#exact-name-provider-precedence-v020).
+
+- Ranking is unchanged: the highest matching version wins first (or the exact `--apk-version`). Only when several distinct APKs (name, version, checksum) tie at that rank does the APK whose name equals the request win, and only if it is the sole such APK. Repeated identical index entries are still one candidate.
+- Still ambiguous: ties among providers with no APK of the requested name (for example several `gdal-tools-py3.*` packages providing the same `cmd:` name), and two different builds of the exact-name APK at one version.
+- Not chosen: preferring the exact name before version ranking. Against the live x86_64 index it would have moved many selections to an older exact-name APK instead of a newer provider; the chosen rule changes only requests that previously failed as ambiguous.
+- This replaces the earlier rule that every equal-ranked distinct candidate is ambiguous; the old test case for a same-version `valkey`/`valkey-9.1` pair now selects `valkey`.
 
 ## Proposed design choices
 

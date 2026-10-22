@@ -145,6 +145,10 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 
 - [x] Optional per-product `entrypoint` and repeatable `build`/`sbom` `--entrypoint`, written to the OCI config, checked against the image closure, recorded as `request.entrypoint` and the `lupetto.image.entrypoint` annotation, compared by `status` (`config-changed`, exit 3 with `--exit-code`), and passed by Explorer from the products file. Real apko builds set and rejected entrypoints as specified; against a loopback registry an args-only `docker run` failed without an entrypoint and worked after the `config-changed` rebuild, and an Explorer "Rebuild" in Chrome returned the track to `current`. Without an entrypoint the apko configuration matched v0.1.0's byte for byte for the same inputs and apko reproduced v0.1.0's digest from it; separate builds never had reproducible digests (workspace path in `/etc/apko.json`) ([evidence](verification.md#image-entrypoint-v020)).
 
+**Exact-name provider precedence** ([decision](decisions.md#exact-name-provider-precedence-2026-10-22)):
+
+- [x] When distinct APKs tie at the selected version, select the single APK named exactly as requested; other ties stay ambiguous. Against the live index, `build busybox 1` and `build busybox --apk-version 1.38.0-r3` failed as ambiguous with the v0.1.0 binary and now build `busybox@1.38.0-r3` with validated SPDX; `cmd:CMakeLists.txt 3.12` and `--apk-version 3.12.3-r0` still fail as ambiguous. Hermetic and mutation tests cover both paths ([evidence](verification.md#exact-name-provider-precedence-v020)).
+
 ### 4. Add Explorer as an optional application
 
 - [ ] Decide Explorer product/repository/module packaging without introducing a CLI dependency on Explorer.

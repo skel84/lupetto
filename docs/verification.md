@@ -1456,3 +1456,19 @@ Status does not compare digests: a product without `entrypoint` and an image wit
 **Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test ./...` passed.
 
 Not exercised: an aarch64 entrypoint build, signing or attesting an image with an entrypoint (the Cosign path is unchanged), a real Kubernetes Deployment with an args-only chart, the combined container, and browsers other than Chrome.
+
+## Exact-name provider precedence (v0.2.0)
+
+This records the evidence for the [exact-name provider precedence decision](decisions.md#exact-name-provider-precedence-2026-10-22), observed 2026-10-22 on darwin/amd64 with Go 1.27.1 and apko 1.4.5 against the live signed x86_64 Wolfi index (it was republished during the session: `db3d0…8562`, later `99551…c615`). No registry, Docker load, or signing was involved.
+
+| Check | Observed result |
+| --- | --- |
+| `internal/wolfi` `TestSelectPackagePrefersExactNameAmongEqualProviders` | `busybox` with selector `1`, selector `1.38.0`, and `--apk-version 1.38.0-r3` selects the `busybox` APK over `busybox-full`/`busybox-static` providing `busybox` at the same version, with a repeated identical index entry and other-architecture and older entries present. A newer provider still wins over an older exact-name APK, in either index order. A single provider is still selected; two providers without an exact-name APK stay ambiguous on both paths. |
+| `internal/wolfi` `TestSelectPackageRejectsAmbiguousRevisionAndProvider` | Two builds of one name at one version, two non-exact providers, and two exact-name builds alongside a provider remain ambiguous for a selector and `--apk-version`. |
+| Mutations | Accepting several exact-name candidates fails the ambiguity test; removing the preference fails the new test; preferring an exact name before version ranking fails the newer-provider case. |
+| Live-index comparison (before implementing) | Of the requested names and selectors the old rule rejected as ambiguous, the chosen rule resolved 19, including `busybox 1` → `busybox@1.38.0-r3`, and changed no other selection; preferring exact names before version ranking would have changed 97 selections to older versions. |
+| v0.1.0 binary: `build busybox 1 --no-load` and `build busybox --apk-version 1.38.0-r3 --no-load` | Both failed: `ambiguous package providers for busybox at 1.38.0-r3` / `…for busybox@1.38.0-r3`. |
+| New binary, same two commands with `--json` | Both succeeded with selection `busybox` `1.38.0-r3`, build `completed`, `spdxValidated: true`; the apko lock holds `busybox` `1.38.0-r3` (plus `wolfi-baselayout`, `ca-certificates-bundle`, glibc, `libgcc`, `libxcrypt`, `libcrypt1`), so apko installed the selected APK, not a provider. The earlier [progress-rendering run](#live-build-feedback-evidence) that used `build busybox 1` as an ambiguous example now selects `busybox`. |
+| New binary, `build cmd:CMakeLists.txt --apk-version 3.12.3-r0 --no-load` and `build cmd:CMakeLists.txt 3.12 --no-load` | Still fail: `ambiguous package providers for cmd:CMakeLists.txt@3.12.3-r0` and `…at 3.12.4-r1` (several `gdal-tools-py3.*` providers, no `cmd:CMakeLists.txt` APK). A live scan found 189 exact versions resolved by the exact-name rule and 5,895 provider versions that stay ambiguous. |
+
+**Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test ./...` passed.
