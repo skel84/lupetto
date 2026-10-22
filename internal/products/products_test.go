@@ -131,3 +131,27 @@ func TestProductsRejectMalformedFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestProductsKeepEntrypointAcrossMutations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "products.yaml")
+	if err := os.WriteFile(path, []byte("version: 1\nproducts:\n  - package: kyverno\n    selectors: [\"1\"]\n    entrypoint: [/usr/bin/kyverno, \"--v=2\"]\n"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []struct {
+		action, name, selector string
+	}{{"add", "kyverno", "2"}, {"add", "curl", "8"}, {"remove", "kyverno", "1"}} {
+		if _, err := Run(path, step.action, step.name, []string{step.selector}, false); err != nil {
+			t.Fatalf("%s %s %s: %v", step.action, step.name, step.selector, err)
+		}
+	}
+	document, err := Run(path, "list", "", nil, false)
+	if err != nil || len(document.Products) != 2 || strings.Join(document.Products[0].Entrypoint, " ") != "/usr/bin/kyverno --v=2" || strings.Join(document.Products[0].Selectors, ",") != "2" || document.Products[1].Entrypoint != nil {
+		t.Fatalf("products=%+v err=%v", document.Products, err)
+	}
+	if err := os.WriteFile(path, []byte("version: 1\nproducts:\n  - package: kyverno\n    selectors: [\"1\"]\n    entrypoint: [kyverno]\n"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(path, "add", "kyverno", []string{"2"}, false); err == nil {
+		t.Fatal("invalid entrypoint accepted by a mutation")
+	}
+}

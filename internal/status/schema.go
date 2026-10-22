@@ -7,9 +7,13 @@ const Version = 2
 const (
 	NotBuilt        = "not-built"
 	UpdateAvailable = "update-available"
-	FixesAvailable  = "fixes-available"
-	Current         = "current"
-	Error           = "error"
+	// ConfigChanged means the newest image matches the selected APK but was
+	// built with a different image configuration (entrypoint) than the
+	// product now requests.
+	ConfigChanged  = "config-changed"
+	FixesAvailable = "fixes-available"
+	Current        = "current"
+	Error          = "error"
 )
 
 type Identity struct {
@@ -78,6 +82,7 @@ type Track struct {
 	Package           string            `json:"package"`
 	Selector          string            `json:"selector"`
 	State             string            `json:"state"`
+	Entrypoint        []string          `json:"entrypoint,omitempty"`
 	Error             string            `json:"error,omitempty"`
 	Latest            *Identity         `json:"latest,omitempty"`
 	Repository        string            `json:"repository,omitempty"`

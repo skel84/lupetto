@@ -160,6 +160,8 @@ func TestStatusExitCodeSignalsRebuildAndErrors(t *testing.T) {
 		{[]string{"current", "not-built"}, 3},
 		{[]string{"update-available"}, 3},
 		{[]string{"fixes-available", "current"}, 3},
+		{[]string{"config-changed", "current"}, 3},
+		{[]string{"config-changed", "error"}, 4},
 		{[]string{"update-available", "error"}, 4},
 		{[]string{"error", "current"}, 4},
 	} {

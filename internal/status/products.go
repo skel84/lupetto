@@ -10,6 +10,7 @@ import (
 	"regexp"
 
 	"go.yaml.in/yaml/v3"
+	"lupetto/internal/imageconfig"
 	"lupetto/internal/wolfi"
 )
 
@@ -20,6 +21,14 @@ var selectorPattern = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)*$`)
 type Product struct {
 	Package   string   `yaml:"package" json:"package"`
 	Selectors []string `yaml:"selectors" json:"selectors"`
+	// Entrypoint is the optional image ENTRYPOINT for every selector of
+	// this product; absent means none, as in images built before it existed.
+	Entrypoint []string `yaml:"entrypoint,omitempty" json:"entrypoint,omitempty"`
+}
+
+// Image returns the image configuration the product's tracks build with.
+func (p Product) Image() imageconfig.Options {
+	return imageconfig.Options{Entrypoint: p.Entrypoint}
 }
 
 type Products struct {
@@ -97,6 +106,16 @@ func checkYAMLTypes(node *yaml.Node) error {
 					}
 				}
 			}
+			if key.Value == "entrypoint" {
+				if value.Kind != yaml.SequenceNode {
+					return errors.New("entrypoint must be a YAML list of strings")
+				}
+				for _, element := range value.Content {
+					if element.Kind != yaml.ScalarNode || element.Tag != "!!str" {
+						return errors.New("entrypoint elements must be YAML strings")
+					}
+				}
+			}
 		}
 	}
 	for _, child := range node.Content {
@@ -125,6 +144,9 @@ func validateProducts(products Products, allowEmpty bool) error {
 		}
 		if len(product.Selectors) == 0 {
 			return errors.New("each product requires at least one selector")
+		}
+		if err := product.Image().Validate(); err != nil {
+			return fmt.Errorf("invalid products entrypoint for %s: %w", product.Package, err)
 		}
 		for _, selector := range product.Selectors {
 			if !selectorPattern.MatchString(selector) {

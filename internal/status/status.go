@@ -8,6 +8,7 @@ import (
 	"time"
 
 	apkcompare "chainguard.dev/apko/pkg/apk/apk"
+	"lupetto/internal/imageconfig"
 	"lupetto/internal/registry"
 	"lupetto/internal/wolfi"
 )
@@ -113,7 +114,7 @@ func RunWith(ctx context.Context, products Products, options Options, services S
 	installedSets := map[string][]wolfi.InstalledPackage{}
 	for _, product := range products.Products {
 		for _, selector := range product.Selectors {
-			track := Track{Package: product.Package, Selector: selector, State: NotBuilt, Images: []Image{}, Installed: []Identity{}, Outdated: []OutdatedPackage{}, MissingFixes: []MissingFix{}, UnevaluatedFixes: []UnevaluatedFix{}}
+			track := Track{Package: product.Package, Selector: selector, State: NotBuilt, Entrypoint: product.Entrypoint, Images: []Image{}, Installed: []Identity{}, Outdated: []OutdatedPackage{}, MissingFixes: []MissingFix{}, UnevaluatedFixes: []UnevaluatedFix{}}
 			selected, err := wolfi.SelectPackage(packages, product.Package, selector, "", services.Architecture)
 			if err != nil {
 				track.State, track.Error = Error, "unavailable index version for track"
@@ -213,10 +214,15 @@ func RunWith(ctx context.Context, products Products, options Options, services S
 			}
 			track.State = Current
 			comparison := compareVersion(selected.Version, track.Newest.Version)
-			if comparison > 0 {
+			built, configErr := imageconfig.FromAnnotations(track.Newest.Annotations)
+			if configErr != nil {
+				track.State, track.Error = Error, "invalid image configuration annotation on newest image"
+			} else if comparison > 0 {
 				track.State = UpdateAvailable
 			} else if comparison < 0 {
 				track.State, track.Error = Error, "newest image top-level version is newer than current index selection"
+			} else if !built.Equal(product.Image()) {
+				track.State = ConfigChanged
 			} else if reachableFix {
 				track.State = FixesAvailable
 			}
