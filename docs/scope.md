@@ -12,7 +12,7 @@ Architecture and selection rules proposed for the rebuild are identified separat
 
 1. Read the current signed Wolfi APKINDEX and discover matching packages. Persistent snapshot ingestion and catalog browsing are deferred.
 2. Select an exact package/version directly or resolve a major selector to one.
-3. Compose an OCI image locally using apko and retain its resolved dependency lock.
+3. Compose an OCI image locally using apko (the selected APK, its closure, and the Wolfi base layout) and retain its resolved dependency lock.
 4. Generate SPDX evidence and validate its APK package contents against that lock.
 5. Load the image into local Docker unless loading is explicitly disabled.
 6. Optionally tag/push to a compatible OCI registry and obtain the pushed immutable digest.
@@ -47,7 +47,7 @@ Where behavior is specified:
 | Registry/signing inputs and precedence, publication and readback, Cosign, verification, partial outcomes | [Registry/signing guide](registry-signing.md) |
 | Why each contract was chosen, and what it superseded | [Decisions](decisions.md) |
 
-Output-directory flags, an Explorer compatibility contract, and runtime image recipes remain undecided. Two explicit, recorded image options exist: an optional OCI [entrypoint](../README.md#image-entrypoint) and an optional [CA certificate bundle](../README.md#ca-certificate-bundle); neither is a recipe, and neither is guessed from the package name. Failures and cancellation are nonzero, retain the workspace without a success record, and never roll back local or remote side effects.
+Output-directory flags, an Explorer compatibility contract, and runtime image recipes remain undecided. Two explicit, recorded image options exist: an optional OCI [entrypoint](../README.md#image-entrypoint) and an optional [CA certificate bundle](../README.md#ca-certificate-bundle); neither is a recipe, and neither is guessed from the package name. Every image also gets the [Wolfi base layout](../README.md#os-identity-and-base-layout) (`wolfi-baselayout`, recorded in the lock and SPDX like any dependency) so vulnerability scanners can identify it as Wolfi; this fixed addition is the only package beyond the selected APK and its closure that is not an explicit option. Failures and cancellation are nonzero, retain the workspace without a success record, and never roll back local or remote side effects.
 
 ### Numeric selection: implemented live-index rule
 
