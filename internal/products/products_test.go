@@ -202,3 +202,68 @@ func TestProductsUpstreamFollowsSelectors(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// configMapVolume lays out a products file the way a Kubernetes ConfigMap
+// volume mounts it: products.yaml -> ..data/products.yaml, with ..data a
+// symlink to a timestamped directory holding the regular file.
+func configMapVolume(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "..2026_10_23_12_00_00.000000001"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "..2026_10_23_12_00_00.000000001", "products.yaml"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("..2026_10_23_12_00_00.000000001", filepath.Join(dir, "..data")); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "products.yaml")
+	if err := os.Symlink("..data/products.yaml", path); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestListFollowsConfigMapSymlinks(t *testing.T) {
+	original := "version: 1\nproducts:\n  - package: metrics-server\n    selectors: [\"0\"]\n    upstream:\n      \"0\": registry.k8s.io/metrics-server/metrics-server:v0.8.0\n"
+	path := configMapVolume(t, original)
+	document, err := Run(path, "list", "", nil, false)
+	if err != nil || len(document.Products) != 1 || document.Products[0].Upstream["0"] != "registry.k8s.io/metrics-server/metrics-server:v0.8.0" || document.Changed {
+		t.Fatalf("list through ConfigMap symlinks: %+v %v", document, err)
+	}
+	// Edits replace the file by rename, which would replace the symlink, so
+	// they still refuse it and leave the volume untouched.
+	for _, action := range []string{"add", "remove"} {
+		if _, err := Run(path, action, "metrics-server", []string{"1"}, false); err == nil || !strings.Contains(err.Error(), "not a directory or symlink") {
+			t.Errorf("%s through a symlink: %v", action, err)
+		}
+	}
+	if target, err := os.Readlink(path); err != nil || target != "..data/products.yaml" {
+		t.Fatalf("symlink changed: %q %v", target, err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != original {
+		t.Fatalf("target changed:\n%s", data)
+	}
+}
+
+func TestListRejectsWhatIsNotAFile(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Run(dir, "list", "", nil, false); err == nil || !strings.Contains(err.Error(), "regular file or a symlink to one") {
+		t.Fatalf("directory: %v", err)
+	}
+	link := filepath.Join(t.TempDir(), "products.yaml")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(link, "list", "", nil, false); err == nil || !strings.Contains(err.Error(), "regular file or a symlink to one") {
+		t.Fatalf("symlink to a directory: %v", err)
+	}
+	dangling := filepath.Join(t.TempDir(), "products.yaml")
+	if err := os.Symlink(filepath.Join(dir, "missing.yaml"), dangling); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(dangling, "list", "", nil, false); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dangling symlink: %v", err)
+	}
+}

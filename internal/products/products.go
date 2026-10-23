@@ -57,17 +57,30 @@ func Run(path, action, name string, selectors []string, create bool) (Document, 
 	}
 	var node yaml.Node
 	mode := os.FileMode(0600)
-	info, err := os.Lstat(path)
+	// list only reads, so it follows symlinks (a Kubernetes ConfigMap volume
+	// mounts each key as one); add and remove replace the file by atomic
+	// rename, which would replace a symlink rather than its target.
+	stat := os.Lstat
+	if action == "list" {
+		stat = os.Stat
+	}
+	info, err := stat(path)
 	if errors.Is(err, os.ErrNotExist) && create && action == "add" {
 		if err := yaml.Unmarshal([]byte("version: 1\nproducts: []\n"), &node); err != nil {
 			return Document{}, err
 		}
 	} else {
-		if err != nil {
+		if err != nil && action == "add" {
 			return Document{}, fmt.Errorf("read products file: %w (use --create with add to create it)", err)
 		}
+		if err != nil {
+			return Document{}, fmt.Errorf("read products file: %w", err)
+		}
+		if action == "list" && !info.Mode().IsRegular() {
+			return Document{}, fmt.Errorf("products file must be a regular file or a symlink to one, not a directory or device")
+		}
 		if !info.Mode().IsRegular() {
-			return Document{}, fmt.Errorf("products file must be a regular file, not a directory or symlink")
+			return Document{}, fmt.Errorf("products file must be a regular file, not a directory or symlink, to be edited")
 		}
 		mode = info.Mode().Perm()
 		file, err := os.Open(path)
