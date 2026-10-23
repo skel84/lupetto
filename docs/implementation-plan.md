@@ -181,6 +181,12 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 - [x] Changelog, [release notes](release-notes/v0.4.0.md), and documentation; race tests, link, diff, and Bash-syntax checks ([evidence](verification.md#v040-release-readiness-2026-10-23)). The combined container was not rebuilt locally.
 - [x] Tag `v0.4.0`, push it, and let the release workflow publish and sign the image. Approved by the maintainer; workflow run `39951565783` succeeded, `ghcr.io/skel84/lupetto@sha256:bc1a107e…a717` verifies keylessly as signed by `release.yml@refs/tags/v0.4.0`, and the GitHub release is published ([evidence](verification.md#v040-release-2026-10-23)). The published container was not run locally.
 
+**v0.4.1 products-file fix** ([decision](decisions.md#products-file-symlinks-and-load-failures-2026-10-23), [changelog](../CHANGELOG.md), [release notes](release-notes/v0.4.1.md)):
+
+- [x] `lupetto products list` reads a products file through a ConfigMap's symlinks; `add` and `remove` still refuse a symlink and leave it unchanged ([evidence](verification.md#products-file-symlinks-and-load-failures-v041)).
+- [x] Explorer shows a products-load failure on the Vulnerabilities page and as `503` on track pages, logs it once and its recovery, and exports `lupetto_products_load_success`; checked with a real Explorer and in headless Chrome ([evidence](verification.md#products-file-symlinks-and-load-failures-v041)).
+- [ ] Tag `v0.4.1` and let the release workflow publish it. Waiting for the maintainer's confirmation.
+
 ### 4. Add Explorer as an optional application
 
 - [ ] Decide Explorer product/repository/module packaging without introducing a CLI dependency on Explorer.

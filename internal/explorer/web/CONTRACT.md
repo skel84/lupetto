@@ -218,7 +218,7 @@ Product          { Package string; Selectors []string; Entrypoint []string; CABu
 
 ```
 VulnerabilitiesView { BaseView; Scan VulnScanView; Rows []VulnRow; Totals *VulnTotals; StatusMissing bool }
-VulnScanView { GrypeVersion, Interval string; Running bool; Current string; DB *DBInfo; DBCheckedAt time.Time; DBError, StoreError, SaveError string }
+VulnScanView { GrypeVersion, Interval string; Running bool; Current string; DB *DBInfo; DBCheckedAt time.Time; DBError, StoreError, SaveError, ProductsError string }
 DBInfo       { Built time.Time; Schema string }
 VulnRow      { Package, Selector, DetailURL string; Lupetto, Upstream VulnSide; Delta *VulnDelta; DBMismatch bool }
 VulnSide     { Configured bool; Reference string; Counts *Counts; Digest string; ScannedAt, DBBuilt *time.Time; Stale bool;
@@ -230,7 +230,7 @@ VulnTotals   { Tracks int; Lupetto, Upstream Counts; Delta VulnDelta }
 
 - One row per tracked selector, in products-file order. Lupetto's side is the track's newest registry image (`Track.Repository@Track.Newest.Digest`; not `Configured` without one); upstream is `Product.Upstream[selector]` (not `Configured` without an entry). `Counts` are unique issues in the last successful scan of that side, so they can belong to an older image or an older interval: then `Stale` is true. A side without a successful scan has nil `Counts` and renders "Not scanned yet" or "No result: the scan failed", **never 0**. `Error` is the last failed attempt's cause (URL query strings removed, at most 512 bytes).
 - `Delta` (both sides have counts) is upstream − Lupetto: positive means Lupetto has fewer. `Magnitude`, `Percent` (share of the upstream total, "" when that is 0) and `Detail` (the critical and high differences from Lupetto's side, such as "critical: same · high: 5 more") are for wording. `Interval` is the scan interval without zero units ("24h"). `DBMismatch` flags results from different database builds. `Totals` sums only rows with `Delta`.
-- `Scan.Running` adds a `data-poll-field="scan.running"` element that reloads the page when the pass ends. `DBError` (the last update check failed; scans then use the installed database, if any) `StoreError` (the results file could not be read at startup and will be replaced) and `SaveError` (the last save failed; results are kept in memory) render as warning banners. `StatusMissing` explains that nothing is scanned before the first successful status check.
+- `Scan.Running` adds a `data-poll-field="scan.running"` element that reloads the page when the pass ends. `DBError` (the last update check failed; scans then use the installed database, if any) `StoreError` (the results file could not be read at startup and will be replaced) and `SaveError` (the last save failed; results are kept in memory) render as warning banners. `ProductsError` (`lupetto products list` failed; JSON `productsError`) renders as an error banner instead of the "No tracks" empty state; rows are then empty and earlier results are kept. `StatusMissing` explains that nothing is scanned before the first successful status check.
 - The page carries the `vuln-note` (`<details id="about-counts">`) explaining how counts are made, and the Rescan form.
 
 ### `vulnerability`: `VulnTrackView`
@@ -243,7 +243,7 @@ Issue         { ID string; Aliases []string; Severity string; Packages []Affecte
 Affected      { Name, Version, Type string; FixVersions []string }
 ```
 
-- `404` for a package/selector not in the products file. With both results, `Comparison` splits issues: **Removed** (upstream only), **Remaining** (both; render the Lupetto issue), **New** (Lupetto only). Issues match when they share any ID or alias. With one result, `Source` (`lupetto`|`upstream`) and `Issues` list it uncompared; with none, an empty state.
+- `404` for a package/selector not in the products file. If the products file cannot be read, `503` with only `Row.Package`, `Row.Selector` and `Scan` (with `ProductsError`) set; the page shows the error banner and no results. With both results, `Comparison` splits issues: **Removed** (upstream only), **Remaining** (both; render the Lupetto issue), **New** (Lupetto only). Issues match when they share any ID or alias. With one result, `Source` (`lupetto`|`upstream`) and `Issues` list it uncompared; with none, an empty state.
 - `Severity` is one of `critical`, `high`, `medium`, `low`, `negligible`, `unknown` (the highest of its findings; each finding keeps its own record's severity, using a related record's only when its own is unknown). `FixState` is `fixed` (show each package's `FixVersions`), `not-fixed`, `wont-fix` or `unknown`.
 
 ## Live updates (polling, no push)

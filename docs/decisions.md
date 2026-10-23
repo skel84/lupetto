@@ -393,6 +393,18 @@ Requested by the user for v0.4.0: show how many vulnerabilities each Lupetto ima
 - **Fix versions are the advisory's.** *Found during verification:* Wolfi advisories for an origin package can name fixed versions that the public Wolfi index does not contain (for `kubernetes-1.33`, fixes in 1.33.6–1.33.13 while the newest `kubectl-1.33` is 1.33.4-r3). Grype counts these as fixed issues of the Lupetto image; the page says so instead of hiding them, and "Latest in Wolfi" remains what a rebuild can use.
 - Not chosen: running the `grype` executable (a second binary to install and pin), scanning every published image rather than the newest (cost grows with history), CVE or digest labels in metrics (unbounded cardinality), and reporting zero for a failed scan.
 
+## Products-file symlinks and load failures (2026-10-23)
+
+Reported by the user for v0.4.1 after running v0.4.0 on Kubernetes: a ConfigMap volume mounts `products.yaml` as a symlink (`products.yaml -> ..data/products.yaml`, with `..data` itself a symlink to a timestamped directory), and `lupetto products list` refused it, so Explorer with the documented read-only mount had no tracks. The user specified the first three points; the rest were chosen during implementation.
+
+- **`list` follows symlinks.** It uses `os.Stat` and requires the target to be a regular file. `status` already read the file through symlinks.
+- **`add` and `remove` keep refusing symlinks** (`os.Lstat`). They write a temporary file and rename it over the path, which would replace the link instead of its target and, on a ConfigMap, diverge from the next update.
+- **Explorer shows a products-load failure** instead of treating it as an empty list: an error banner on the Vulnerabilities page (JSON `scan.productsError`), and `503` with that banner on a track page, because whether the track is configured is unknown. A scan pass without a products file does nothing and keeps earlier results.
+- **Logging.** *Chosen:* Explorer gains a log writer, stderr in `lupetto-explorer`. Each `products list` records its outcome; a failure is logged when it starts or its text changes, and recovery once, so the status check and each page view do not repeat it. A list cancelled by its caller records nothing.
+- **Metrics.** *Chosen:* `lupetto_products_load_success` (1/0) and `lupetto_products_load_timestamp_seconds`, without labels (the path stays out of metrics), absent until the first load completes, and exported with `--scan-interval 0` too.
+- **Messages.** *Chosen:* `list` reports "products file must be a regular file or a symlink to one, not a directory or device"; edits report "…not a directory or symlink, to be edited"; the "use --create with add" hint for a missing file is printed only for `add`.
+- Not chosen: following symlinks for edits (writing through a link into a ConfigMap's read-only directory would fail anyway, and elsewhere would change which file is replaced), and a path label on the metric.
+
 ## Proposed design choices
 
 | ID | Proposal | Tradeoff |

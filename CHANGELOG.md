@@ -2,6 +2,19 @@
 
 User-visible changes to the `lupetto` CLI, `lupetto-explorer`, and the combined container. Releases are git tags `vX.Y.Z`; the [release workflow](.github/workflows/release.yml) publishes the combined Explorer image for each tag.
 
+## v0.4.1 (unreleased)
+
+Fixes Explorer with a products file mounted from a Kubernetes ConfigMap. See the [release notes](docs/release-notes/v0.4.1.md).
+
+### Fixed
+
+- **`lupetto products list` follows symlinks.** A ConfigMap volume mounts each key as a symlink (`products.yaml -> ..data/products.yaml`), which v0.4.0 refused with "products file must be a regular file, not a directory or symlink"; with the documented read-only mount, Explorer showed no tracks. `list` now accepts a symlink to a regular file. `add` and `remove` still refuse symlinks, because they replace the file by rename. ([decision](docs/decisions.md#products-file-symlinks-and-load-failures-2026-10-23))
+- **Explorer no longer hides a products file it cannot read.** The Vulnerabilities page showed "No tracks", every track page answered 404 "track is not in the products file", and scanning stopped without a message. Now the Vulnerabilities page shows the error, track pages answer 503 with it, and Explorer logs the failure to stderr when it starts or changes and again on recovery.
+
+### Added
+
+- `lupetto_products_load_success` (1 or 0) and `lupetto_products_load_timestamp_seconds` on `GET /metrics`, without labels, also with `--scan-interval 0`.
+
 ## v0.4.0 (2026-10-23)
 
 Explorer compares each Lupetto image's vulnerabilities with the upstream image it replaces, and exports its state as Prometheus metrics. The `lupetto` CLI is unchanged apart from the products-file field. See the [release notes](docs/release-notes/v0.4.0.md) for upgrade guidance.

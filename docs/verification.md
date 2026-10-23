@@ -1698,3 +1698,23 @@ With the maintainer's approval, `main` was fast-forwarded to `485ed02` and pushe
 `gh release create v0.4.0 --verify-tag --title "lupetto v0.4.0" --latest` published the [GitHub release](https://github.com/skel84/lupetto/releases/tag/v0.4.0) with `docs/release-notes/v0.4.0.md` at the tag as its body, its relative links rewritten to the tagged files. The repository's latest release is `v0.4.0`, neither draft nor prerelease.
 
 Not exercised: running the published container (Docker was unavailable on this host), so its first database download and scans were observed only with the darwin build above.
+
+## Products-file symlinks and load failures (v0.4.1)
+
+This records the evidence for the [products-file fix](decisions.md#products-file-symlinks-and-load-failures-2026-10-23), observed 2026-10-23 on darwin/amd64 with Go 1.27.1 on the `v0.4.1-products-symlink` branch. The ConfigMap layout was built by hand as kubelet builds it: a read-only (mode 0555) directory `..2026_10_23_12_00_00.1/` holding `products.yaml`, `..data -> ..2026_10_23_12_00_00.1`, and `products.yaml -> ..data/products.yaml`.
+
+| Check | Observed result |
+| --- | --- |
+| `internal/products` `TestListFollowsConfigMapSymlinks`, `TestListRejectsWhatIsNotAFile` | `list` reads through both symlinks; `add` and `remove` fail with "not a directory or symlink" and leave the link and its content unchanged; a directory, a symlink to a directory, and a dangling symlink are refused. With the v0.4.0 `products.go`, the first test fails with the reported "products file must be a regular file, not a directory or symlink". |
+| `internal/explorer` `TestVulnProductsLoadFailureIsVisible` | With `products list` failing: no database opened, the Vulnerabilities page shows the error and not "No tracks", JSON `scan.productsError` is set, a track page is 503 in HTML and JSON with the error and without "not in the products file", `lupetto_products_load_success 0`, and one log line across repeated attempts. After the file is fixed: scans run, the metric is 1, the track page is 200 (an unknown selector 404), and recovery is logged. Reverting `vulnRows` to drop the error, or logging every failure, fails the test. |
+| `internal/explorer` `TestDashboardProductsEditsAndVersions` | A failed tracking edit writes its 400 status once; with the handler's former `WriteHeader` before `render`, twice. |
+| v0.4.0 `lupetto products list --products <layout>/products.yaml --json` | Exit 1: "products file must be a regular file, not a directory or symlink" (reproduces the report). |
+| Branch `lupetto products list` / `add metrics-server 1` / `status` on the same path | `list` exit 0 with the product and its `upstream`; `add` exit 1 "…not a directory or symlink, to be edited"; `status` exit 0. |
+| v0.4.0 `lupetto-explorer` with the v0.4.0 CLI, `--products <layout>/products.yaml` | `/vulnerabilities` "No tracks"; `/vulnerabilities/metrics-server/0` 404 "track is not in the products file"; nothing logged (reproduces the report). |
+| Branch `lupetto-explorer` with the branch CLI, same path | `/vulnerabilities` lists `metrics-server` with its upstream reference; the track page is 200; `lupetto_products_load_success 1` with a timestamp. |
+| `..data` swapped (symlink rename) to a revision without `products.yaml`, then back | While missing: the error banner with "no such file or directory" (without the `--create` hint), the track page 503 with the banner, `lupetto_products_load_success 0` with a foreign Host, and one stderr line "products file … could not be read: …" over several requests. After the swap back: the track page 200, the metric 1, and one "products file … can be read again". |
+| Headless Chrome at 1280 and 390 px, light and dark, with the file missing | The Vulnerabilities and track pages show the error banner without horizontal scroll or console errors (screenshots inspected; the 503 itself is the only logged resource error). |
+| `gofmt -l .`, `go vet -composites=false ./...`, `go test ./... -count=1`, `go test -race ./... -count=1` | Empty, passed, passed, passed. |
+| `git diff --check 8c1d490` and on the working tree | No whitespace errors. |
+
+Not exercised: a real Kubernetes cluster or kubelet's own ConfigMap update, and the combined container (Docker was unavailable on this host). The fix was checked against the layout described above.
