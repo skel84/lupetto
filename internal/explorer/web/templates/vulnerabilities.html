@@ -17,16 +17,16 @@
 <td data-label="Scanned">{{with .ScannedAt}}{{template "time" .}}{{end}}{{if .Stale}} <span class="chip warn" title="The last attempt failed, the image changed, or the result is older than twice the scan interval">Stale</span>{{end}}{{if .Error}}<span class="verdict-sub warn">{{with .LastAttempt}}Failed {{template "time" .}}: {{end}}{{.Error}}</span>{{end}}{{with .DBBuilt}}<span class="verdict-sub">DB {{template "time" .}}</span>{{end}}</td>{{end}}
 
 {{/* Root: VulnDelta. */}}
-{{define "vuln-delta"}}<span class="delta{{if gt .Total 0}} better{{else if lt .Total 0}} worse{{end}}">{{if gt .Total 0}}{{.Magnitude}} fewer than upstream{{else if lt .Total 0}}{{.Magnitude}} more than upstream{{else}}Same total as upstream{{end}}{{with .Percent}} ({{.}}){{end}}</span><span class="verdict-sub">Critical {{.Critical}} · high {{.High}} (upstream − Lupetto)</span>{{end}}
+{{define "vuln-delta"}}<span class="delta{{if gt .Total 0}} better{{else if lt .Total 0}} worse{{end}}">{{if gt .Total 0}}{{.Magnitude}} fewer than upstream{{else if lt .Total 0}}{{.Magnitude}} more than upstream{{else}}Same total as upstream{{end}}{{with .Percent}} ({{.}}){{end}}</span><span class="verdict-sub">{{.Detail}}</span>{{end}}
 
 {{define "vuln-thead"}}<thead><tr><th scope="col">Image</th><th scope="col" class="num">Critical</th><th scope="col" class="num">High</th><th scope="col" class="num">Medium</th><th scope="col" class="num">Low</th><th scope="col" class="num">Negl.</th><th scope="col" class="num">Unknown</th><th scope="col" class="num">Total</th><th scope="col">Scanned</th></tr></thead>{{end}}
 
 {{define "vuln-note"}}<details class="datanote" id="about-counts">
   <summary>{{template "icon" "info"}}<span><strong>How these counts are made.</strong> Both images are scanned the same way with Grype’s default settings.</span><span class="more"><span class="open-l">What this means</span><span class="close-l">Hide</span></span></summary>
   <div class="note-body"><ul>
-    <li><strong>Unique issues.</strong> A finding’s ID and its related IDs (for example a GHSA and its CVE) count as one issue, once per image however many packages it affects. Its severity is the highest any record gives.</li>
+    <li><strong>Unique issues.</strong> A finding’s ID and its related IDs (for example a GHSA and its CVE) count as one issue, once per image however many packages it affects. Each finding has Grype’s severity (its own record’s, or a related record’s when its own is unknown, so a distribution’s triage such as Debian’s “negligible” is kept), and an issue takes the highest of its findings.</li>
     <li><strong>The same images you would run.</strong> Lupetto’s side is the track’s newest published image; upstream is the image named in the products file. Both are scanned for this Explorer’s architecture, and upstream tags are resolved to a digest at scan time.</li>
-    <li><strong>Fixed and unfixed.</strong> Unlike the security-feed counts elsewhere in the Explorer, these include issues with no fix yet.</li>
+    <li><strong>Fixed and unfixed.</strong> Unlike the security-feed counts elsewhere in the Explorer, these include issues with no fix yet. “Fixed in” comes from the advisory data, which can name a version the Wolfi index doesn’t have, for example when a version stream’s later builds aren’t published there; “Latest in Wolfi” on Images is what a rebuild can use.</li>
     <li><strong>Same database.</strong> Counts are only comparable when both scans used the same database build; differing builds are flagged.</li>
     <li><strong>Stale or failed.</strong> A failed scan keeps the previous result and marks it stale; a result also goes stale when the newest image changes or it is older than twice the scan interval. A failed or missing scan is never shown as zero.</li>
   </ul></div>

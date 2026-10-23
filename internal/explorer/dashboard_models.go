@@ -417,6 +417,9 @@ type VulnDelta struct {
 	// total ("" when that is zero), for display.
 	Magnitude int    `json:"magnitude"`
 	Percent   string `json:"percent,omitempty"`
+	// Detail describes the critical and high differences from Lupetto's side,
+	// for display ("critical: same · high: 5 more").
+	Detail string `json:"detail"`
 }
 
 type VulnTotals struct {

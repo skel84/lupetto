@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -312,7 +313,7 @@ func (s *Server) vulnScanView() VulnScanView {
 	state := v.store.Snapshot()
 	v.mu.Lock()
 	defer v.mu.Unlock()
-	return VulnScanView{GrypeVersion: vulnscan.GrypeVersion, Interval: v.interval.String(), Running: v.running, Current: v.current, DB: state.DB, DBCheckedAt: state.DBCheckedAt, DBError: state.DBError, StoreError: v.storeErr, SaveError: v.saveErr}
+	return VulnScanView{GrypeVersion: vulnscan.GrypeVersion, Interval: intervalText(v.interval), Running: v.running, Current: v.current, DB: state.DB, DBCheckedAt: state.DBCheckedAt, DBError: state.DBError, StoreError: v.storeErr, SaveError: v.saveErr}
 }
 
 // vulnRows builds one row per tracked selector, in products-file order.
@@ -368,7 +369,31 @@ func vulnDelta(lupetto, upstream vulnscan.Counts) VulnDelta {
 	if upstream.Total > 0 {
 		delta.Percent = fmt.Sprintf("%.0f%%", 100*float64(delta.Magnitude)/float64(upstream.Total))
 	}
+	delta.Detail = "critical: " + vulnDifference(delta.Critical) + " · high: " + vulnDifference(delta.High)
 	return delta
+}
+
+// vulnDifference describes upstream minus Lupetto from Lupetto's side.
+func vulnDifference(n int) string {
+	switch {
+	case n > 0:
+		return fmt.Sprintf("%d fewer", n)
+	case n < 0:
+		return fmt.Sprintf("%d more", -n)
+	}
+	return "same"
+}
+
+// intervalText formats a scan interval without zero units ("24h", not "24h0m0s").
+func intervalText(d time.Duration) string {
+	text := d.String()
+	if strings.HasSuffix(text, "m0s") {
+		text = strings.TrimSuffix(text, "0s")
+	}
+	if strings.HasSuffix(text, "h0m") {
+		text = strings.TrimSuffix(text, "0m")
+	}
+	return text
 }
 
 func (s *Server) vulnerabilities(w http.ResponseWriter, r *http.Request) {

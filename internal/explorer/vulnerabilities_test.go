@@ -435,13 +435,28 @@ func TestVulnDelta(t *testing.T) {
 		lupetto, upstream int
 		want              VulnDelta
 	}{
-		{1, 3, VulnDelta{Total: 2, Magnitude: 2, Percent: "67%"}},
-		{4, 2, VulnDelta{Total: -2, Magnitude: 2, Percent: "100%"}},
-		{0, 0, VulnDelta{}},
-		{3, 0, VulnDelta{Total: -3, Magnitude: 3}},
+		{1, 3, VulnDelta{Total: 2, Magnitude: 2, Percent: "67%", Detail: "critical: same · high: same"}},
+		{4, 2, VulnDelta{Total: -2, Magnitude: 2, Percent: "100%", Detail: "critical: same · high: same"}},
+		{0, 0, VulnDelta{Detail: "critical: same · high: same"}},
+		{3, 0, VulnDelta{Total: -3, Magnitude: 3, Detail: "critical: same · high: same"}},
 	} {
 		if got := vulnDelta(vulnscan.Counts{Total: test.lupetto}, vulnscan.Counts{Total: test.upstream}); got != test.want {
 			t.Errorf("delta(%d, %d) = %+v, want %+v", test.lupetto, test.upstream, got, test.want)
+		}
+	}
+}
+
+func TestVulnDeltaDetail(t *testing.T) {
+	got := vulnDelta(vulnscan.Counts{Critical: 2, High: 35, Total: 37}, vulnscan.Counts{Critical: 3, High: 30, Total: 33})
+	if got.Critical != 1 || got.High != -5 || got.Detail != "critical: 1 fewer · high: 5 more" {
+		t.Errorf("delta = %+v", got)
+	}
+}
+
+func TestIntervalText(t *testing.T) {
+	for in, want := range map[time.Duration]string{24 * time.Hour: "24h", 90 * time.Minute: "1h30m", time.Minute: "1m", 45 * time.Second: "45s", time.Hour + 30*time.Second: "1h0m30s"} {
+		if got := intervalText(in); got != want {
+			t.Errorf("intervalText(%v) = %q, want %q", in, got, want)
 		}
 	}
 }
