@@ -481,8 +481,7 @@ func (s *Server) editProducts(w http.ResponseWriter, r *http.Request) {
 	d, err := s.cli.Products(ctx, s.config.Products, action, name, strings.Fields(raw))
 	s.productsMu.Unlock()
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		s.render(w, r, "tracking", TrackingView{BaseView: s.base(), Package: name, Selector: raw, Error: fmt.Sprintf("Tracking could not be changed: %v. The products file and its directory must be writable (mount the directory, not a single file).", err)})
+		s.renderStatus(w, r, "tracking", TrackingView{BaseView: s.base(), Package: name, Selector: raw, Error: fmt.Sprintf("Tracking could not be changed: %v. The products file and its directory must be writable (mount the directory, not a single file).", err)}, http.StatusBadRequest)
 		return
 	}
 	s.refreshAfterBuild()

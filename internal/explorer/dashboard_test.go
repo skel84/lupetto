@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -253,6 +254,15 @@ func TestDashboardProductsEditsAndVersions(t *testing.T) {
 	w := request(server, "POST", "/products/add", url.Values{"csrfToken": {server.token}, "package": {"curl"}, "selector": {"1"}})
 	if w.Code != 400 || !strings.Contains(w.Body.String(), "writable") {
 		t.Fatalf("read-only: %d %s", w.Code, w.Body.String())
+	}
+	headers := &headerCounter{ResponseRecorder: httptest.NewRecorder()}
+	form := url.Values{"csrfToken": {server.token}, "package": {"curl"}, "selector": {"1"}}
+	r := httptest.NewRequest("POST", "http://127.0.0.1:8080/products/add", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Origin", "http://127.0.0.1:8080")
+	server.Handler().ServeHTTP(headers, r)
+	if headers.Code != 400 || headers.calls != 1 {
+		t.Fatalf("read-only: status %d written %d times", headers.Code, headers.calls)
 	}
 	if w := request(server, "POST", "/products/remove", url.Values{"package": {"curl"}}); w.Code != 403 {
 		t.Fatal("products bypassed CSRF")
@@ -942,4 +952,16 @@ func TestDashboardConfigChangeDetail(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"package":"metrics-server","selector":"0","state":"config-changed","configChanges":["baseLayout"]}`), &decoded); err != nil || strings.Join(decoded.ConfigChanges, ",") != "baseLayout" {
 		t.Fatalf("decoded=%+v err=%v", decoded, err)
 	}
+}
+
+// headerCounter counts WriteHeader calls; net/http logs every one after the
+// first as superfluous.
+type headerCounter struct {
+	*httptest.ResponseRecorder
+	calls int
+}
+
+func (h *headerCounter) WriteHeader(code int) {
+	h.calls++
+	h.ResponseRecorder.WriteHeader(code)
 }
