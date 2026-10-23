@@ -2,6 +2,26 @@
 
 User-visible changes to the `lupetto` CLI, `lupetto-explorer`, and the combined container. Releases are git tags `vX.Y.Z`; the [release workflow](.github/workflows/release.yml) publishes the combined Explorer image for each tag.
 
+## v0.3.0 (unreleased)
+
+Vulnerability scanners can now identify every Lupetto image as Wolfi. See the [release notes](docs/release-notes/v0.3.0.md) for upgrade guidance.
+
+### Added
+
+- **Wolfi base layout in every image.** Every build adds Wolfi's `wolfi-baselayout`, which installs `/etc/os-release`. Without it, Trivy detected no OS in images of packages such as `metrics-server` and reported no vulnerabilities at all, and Grype matched only Go modules, not APKs against Wolfi's feed. apko's retained lock records the exact version and SPDX is validated against it. The build fails unless the package is installed and `/etc/os-release` has `ID=wolfi` and a `VERSION_ID`. ([README](README.md#os-identity-and-base-layout))
+- **`configChanges` status field.** Tracks list how their newest image differs from what a build would now produce: `entrypoint`, `caBundle`, or `baseLayout`. The status table prints one line per such track, and Explorer shows the list under "Configuration changed".
+
+### Changed
+
+- `status` reports a track as `config-changed` when its newest image's installed APKs lack `wolfi-baselayout`, so images built from packages that did not depend on it are rebuilt once.
+- Every image now also contains `ca-certificates-bundle`, a dependency of the base layout, along with its `/etc/passwd`, `/etc/group`, `/etc/nsswitch.conf`, and `/bin` → `usr/bin` style links: about 146 KB compressed. `caBundle` and `--ca-bundle` keep their meaning, annotation, and file check.
+
+### Compatibility
+
+- v0.2.0's promise that builds without options give apko v0.1.0's configuration byte for byte no longer holds; every configuration lists `wolfi-baselayout`. Annotations and record version 6 are unchanged.
+- Status document version 2 is unchanged; `configChanges` is optional. Consumers should show unknown `configChanges` values as a change. The v0.2.0 Explorer shows the new `config-changed` tracks as "Configuration changed" without the reason, and the v0.1.0 Explorer as "Unable to compare".
+- Images whose closure already contained `wolfi-baselayout` (for example `busybox`) stay `current`.
+
 ## v0.2.0 (2026-10-22)
 
 Lupetto images can now replace upstream images whose Helm charts pass only `args`. See the [release notes](docs/release-notes/v0.2.0.md) for upgrade guidance.

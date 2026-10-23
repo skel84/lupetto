@@ -158,6 +158,11 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 
 - [x] When distinct APKs tie at the selected version, select the single APK named exactly as requested; other ties stay ambiguous. Against the live index, `build busybox 1` and `build busybox --apk-version 1.38.0-r3` failed as ambiguous with the v0.1.0 binary and now build `busybox@1.38.0-r3` with validated SPDX; `cmd:CMakeLists.txt 3.12` and `--apk-version 3.12.3-r0` still fail as ambiguous. Hermetic and mutation tests cover both paths ([evidence](verification.md#exact-name-provider-precedence-v020)).
 
+**Wolfi base layout** ([decision](decisions.md#wolfi-base-layout-in-every-image-2026-10-23)):
+
+- [x] Add unpinned `wolfi-baselayout` to every build (version recorded by the retained lock and validated SPDX), fail the build unless it is installed and `/etc/os-release` identifies the image as Wolfi, and report images without it as `config-changed` with the optional track field `configChanges` (status document version 2), shown by Explorer. Real builds of six packages carried it with validated SPDX; Trivy found no OS and no vulnerabilities in a v0.2.0 `metrics-server` image and `wolfi 20230201` with 20 in the rebuilt one; on a loopback registry status reported the v0.2.0 image `config-changed` (exit 3) and an Explorer Rebuild in Chrome returned it to `current` (exit 0) ([evidence](verification.md#wolfi-base-layout-v030)).
+- [ ] v0.3.0 release (changelog and [release notes](release-notes/v0.3.0.md) drafted; tag, push, and GitHub release await the maintainer's approval).
+
 ### 4. Add Explorer as an optional application
 
 - [ ] Decide Explorer product/repository/module packaging without introducing a CLI dependency on Explorer.

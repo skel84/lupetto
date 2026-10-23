@@ -1525,3 +1525,36 @@ With the maintainer's approval, `main` was fast-forwarded to `6adda2d` and pushe
 | `docker run --rm --entrypoint lupetto <digest> help` | The packaged CLI's usage lists `[--entrypoint <element>]... [--ca-bundle]` on `build` and `sbom`. |
 
 `gh release create v0.2.0 --verify-tag --title "lupetto v0.2.0" --latest` published the [GitHub release](https://github.com/skel84/lupetto/releases/tag/v0.2.0) with `docs/release-notes/v0.2.0.md` at the tag as its body, its relative links rewritten to the tagged files. `gh release view v0.2.0` reports it as the latest, neither draft nor prerelease. v0.1.0 has no GitHub release object.
+
+## Wolfi base layout (v0.3.0)
+
+This records the evidence for the [Wolfi base layout decision](decisions.md#wolfi-base-layout-in-every-image-2026-10-23), observed 2026-10-23 on darwin/amd64 with Go 1.27.1, apko 1.4.5, Trivy 0.74.0, Grype 0.119.0, headless Google Chrome 155, and a disposable `crane registry serve` (crane 0.21.6) on `127.0.0.1:55321` (repository `lupetto/images`, an empty Docker config, no signing). Builds used a scratch `LUPETTO_DATA_DIR`. Afterwards the registry, Explorer, and browser were stopped.
+
+| Check | Observed result |
+| --- | --- |
+| `internal/build` `TestApkoConfigAddsOnlyBaseLayoutToV010`, `TestApkoConfigCABundle`, `TestRunApkoInputs` | The configuration is v0.1.0's plus one unpinned `wolfi-baselayout` line after the selected APK, then the CA bundle line when requested; neither is listed twice when it is the selected APK. |
+| `internal/build` `TestCheckImageBaseLayout` | Accepts `os-release` as a regular file, with unquoted and single-quoted values, through a symlink, a symlinked parent, and a hard link. Rejects it missing, a directory, a dangling link (`/usr/lib/os-release does not exist`), empty, another distribution's ID, `ID` without `VERSION_ID`, an empty `VERSION_ID`, a commented-out `ID`, a file over 64 KiB, and an image whose installed set lacks `wolfi-baselayout`. |
+| `internal/status` `TestRunBaseLayoutState`; `cmd/lupetto` `TestStatusTableListsConfigChanges`; `internal/explorer` `TestDashboardConfigChangeDetail` | With the base layout installed: `current` (and `fixes-available` when fixes exist). Without: `config-changed` with `configChanges: ["baseLayout"]`, also from the installed-set cache; it outranks fixes; an update outranks it but the track still lists it; entrypoint, CA bundle, and base layout changes appear together in that order. The table prints one `newest image configuration differs` line per track; Explorer shows "Rebuild changes: …", naming unknown values as they are. |
+| Mutations | Skipping the `os-release` check fails `TestCheckImageBaseLayout`; not adding the package fails the three apko-configuration tests; not reporting `baseLayout` fails `TestRunBaseLayoutState`. Each was reverted. |
+| Real `build … --no-load --json`: `metrics-server 0`, `kubectl-1.34 1 --entrypoint /usr/bin/kubectl-1.34`, `kubernetes-csi-external-provisioner 6`, `busybox 1`, `wolfi-baselayout 20230201`, `external-dns-0.21 0 --ca-bundle` | All succeeded with `spdxValidated: true` (`0.8.1-r10`, `6.3.0-r0`, `1.38.0-r3` with 9 packages, among others). Every lock contains `wolfi-baselayout 20230201-r30` and `ca-certificates-bundle 20260909-r3`. The `wolfi-baselayout` build lists one apko package; the `--ca-bundle` build lists the selected APK, `wolfi-baselayout`, and `ca-certificates-bundle`. |
+
+Scans of the same package before and after (`metrics-server 0.8.1-r10`; image vulnerabilities only, current databases):
+
+| Image | `trivy image` | `grype` | `trivy sbom` on the retained SPDX |
+| --- | --- | --- | --- |
+| v0.2.0 build, no `os-release` | OS not detected, no results | no distro; 35 `go-module` matches | OS unknown; 57 |
+| v0.3.0 build | `wolfi 20230201`; 20 | `wolfi`; 59 `apk` + 35 `go-module` | `wolfi`; 77 |
+| v0.3.0 `kubernetes-csi-external-provisioner 6` | `wolfi`; 18 | 51 `apk` + 32 `go-module` | 62 |
+| v0.3.0 `kubectl-1.34 1` | `wolfi`; 0 | `wolfi`; 0 | `wolfi`; 0 |
+
+The false clean is Trivy's; Grype without `os-release` lost only the APK matches against Wolfi's feed (the user saw the same with Grype 0.121.0). The published v0.3.0 `metrics-server` image scanned from the loopback registry gave the same Trivy (`wolfi 20230201`, 20) and Grype (59 `apk` + 35 `go-module`) results.
+
+| Upgrade path on the loopback registry | Observed result |
+| --- | --- |
+| v0.2.0 binary publishes `metrics-server 0` and `busybox 1` (`--no-load`); v0.3.0 `status --products … --exit-code` | Exit 3. `metrics-server` `config-changed`, `configChanges: ["baseLayout"]`, table line `metrics-server 0: newest image configuration differs: baseLayout`. `busybox`, whose closure already had the base layout, `current`. |
+| v0.3.0 Explorer (`--enable-builds`, Docker deliberately unreachable) in Chrome | The Images page showed `metrics-server` "Configuration changed" with "Rebuild changes: adds Wolfi base layout (scanner OS identity)" and `busybox` "Up to date" (screenshot inspected). Clicking Rebuild ran job 1: resolve, build, and validate completed, load skipped, publish `published`, sign and attest skipped (unsigned); record outcome `succeeded`. |
+| `status --exit-code` afterwards, and Explorer "Check now" | Exit 0; both tracks `current` without `configChanges`; `metrics-server` lists 2 images, newest `sha256:ab568770d403…`. Explorer showed "Up to date". |
+
+**Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test -race ./... -count=1` passed. The first `go test ./... -count=1` failed `TestSeverityRateWaitHonorsBudget` (`got unknown/pending, want high/nvd-cvss-v3.1`), a timing test this branch does not change; it failed once in 50 isolated runs both here and on `main`, and the full suite passed on rerun.
+
+Not exercised: an aarch64 build, signing or attesting an image with the base layout, Docker-loaded images with it, and a real image whose `os-release` is wrong (covered hermetically).
