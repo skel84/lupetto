@@ -1571,3 +1571,19 @@ Checks run on the `v0.3.0-baselayout` branch after the [base layout](#wolfi-base
 | Relative links and anchors in `README.md`, `CHANGELOG.md`, `docs/*.md`, `docs/release-notes/*.md`, `AGENTS.md`, and the Explorer contract | All resolve. |
 | `bash -n` on the 42 Bash-fenced blocks in `README.md`, `CHANGELOG.md`, `docs/*.md`, and the release notes | All pass (syntax only, not execution). |
 | `lupetto help` | States that every image gets `wolfi-baselayout` and its `/etc/os-release` is checked, and that a track is `config-changed` when its newest image lacks the base layout. |
+
+The [release](#v030-release-2026-10-23) itself is recorded below.
+
+## v0.3.0 release (2026-10-23)
+
+With the maintainer's approval, `main` was fast-forwarded to `72f433d` and pushed, and the annotated tag `v0.3.0` ("lupetto v0.3.0") was pushed on that commit. The checks below are read-only against the published image.
+
+| Check | Observed result |
+| --- | --- |
+| Release workflow run `39931386707` (tag push `v0.3.0`) | Completed `success`; `docker/build-push-action` pushed the image and `cosign sign --yes ghcr.io/skel84/lupetto@sha256:5e09b59e…6a0e` ran on the pushed digest. |
+| `crane digest ghcr.io/skel84/lupetto:v0.3.0` | `sha256:5e09b59e930b597d44e65acdf2f786ddc77a9bfa27a385d08bbe0ca599126a0e`. |
+| `lupetto verify --json --certificate-identity-regexp '^https://github.com/skel84/lupetto/' --certificate-oidc-issuer https://token.actions.githubusercontent.com ghcr.io/skel84/lupetto@sha256:5e09b59e…6a0e` (CLI built from `72f433d`) | Exit 0; transparency log `verified`; signature `signed`; signer `https://github.com/skel84/lupetto/.github/workflows/release.yml@refs/tags/v0.3.0`, issuer `https://token.actions.githubusercontent.com`; attestation `absent` (the workflow signs but does not attest). |
+| `crane config` of the digest | `linux/amd64`; `Entrypoint` `/usr/local/bin/lupetto-explorer`, `Cmd` `--listen 0.0.0.0:8080 --products /etc/lupetto/products/products.yaml`. |
+| `docker run --rm --entrypoint lupetto <digest> help` | The packaged CLI's usage states that every image gets `wolfi-baselayout` and that a track lacking it is `config-changed`. |
+
+`gh release create v0.3.0 --verify-tag --title "lupetto v0.3.0" --latest` published the [GitHub release](https://github.com/skel84/lupetto/releases/tag/v0.3.0) with `docs/release-notes/v0.3.0.md` at the tag as its body, its relative links rewritten to the tagged files. `gh release view v0.3.0` reports it as the latest, neither draft nor prerelease.
