@@ -1524,4 +1524,4 @@ With the maintainer's approval, `main` was fast-forwarded to `6adda2d` and pushe
 | `crane config` of the digest | `linux/amd64`; `Entrypoint` `/usr/local/bin/lupetto-explorer`, `Cmd` `--listen 0.0.0.0:8080 --products /etc/lupetto/products/products.yaml`. |
 | `docker run --rm --entrypoint lupetto <digest> help` | The packaged CLI's usage lists `[--entrypoint <element>]... [--ca-bundle]` on `build` and `sbom`. |
 
-No GitHub release object was created, as for v0.1.0; the tag, changelog, and release notes are the release record.
+`gh release create v0.2.0 --verify-tag --title "lupetto v0.2.0" --latest` published the [GitHub release](https://github.com/skel84/lupetto/releases/tag/v0.2.0) with `docs/release-notes/v0.2.0.md` at the tag as its body, its relative links rewritten to the tagged files. `gh release view v0.2.0` reports it as the latest, neither draft nor prerelease. v0.1.0 has no GitHub release object.
