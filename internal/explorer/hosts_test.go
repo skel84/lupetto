@@ -16,6 +16,7 @@ func TestAllowedHostsForEveryListener(t *testing.T) {
 			config.Listen = listen
 			config.Products = "products.yaml"
 			config.LupettoBinary = binary
+			config.ScanInterval = 0 // scanning tests inject a fake engine
 			server, err := New(config)
 			if err != nil {
 				t.Fatal(err)
@@ -74,6 +75,7 @@ func TestExplicitAllowedHostsAndPorts(t *testing.T) {
 	config.Products = "p"
 	config.LupettoBinary = binary
 	config.AllowedHosts = []string{"dashboard.example.invalid"}
+	config.ScanInterval = 0 // scanning tests inject a fake engine
 	instance, err := New(config)
 	if err != nil {
 		t.Fatal(err)

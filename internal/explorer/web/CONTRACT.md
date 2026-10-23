@@ -19,8 +19,10 @@ The UI is visual direction **B · Pista** from the approved mockup (`design/mock
 | `jobs` | `GET /builds`, alias `GET /jobs` | `JobsView` | `builds.html` |
 | `job` | `GET /builds/{id}`, alias `GET /jobs/{id}` | `JobDetailView` | `builds.html` |
 | `tracking` | `GET /products/track` | `TrackingView` | `tracking.html` |
+| `vulnerabilities` | `GET /vulnerabilities` | `VulnerabilitiesView` | `vulnerabilities.html` |
+| `vulnerability` | `GET /vulnerabilities/{package}/{selector}` | `VulnTrackView` | `vulnerabilities.html` |
 
-- Shared names: `layout.html` (page shell: `head`, `rail-images`/`rail-catalog`/`rail-builds`, `page-end`, `doc-end`), `partials.html` (severity, verdicts, stages, data note, track dialog, …), `icons.html` (`icon`, `icon-lg`, `icon-xl`, `icon-paths`, `logo`). Every `define` name is global: a duplicate silently replaces the other.
+- Shared names: `layout.html` (page shell: `head`, `rail-images`/`rail-catalog`/`rail-vulnerabilities`/`rail-builds`, `page-end`, `doc-end`), `partials.html` (severity, verdicts, stages, data note, track dialog, …), `icons.html` (`icon`, `icon-lg`, `icon-xl`, `icon-paths`, `logo`). Every `define` name is global: a duplicate silently replaces the other.
 - No custom template functions are registered. Use built-ins (`len`, `index`, `slice`, `eq` — which accepts several right-hand values —, `ne`, `lt`, `gt`, `and`, `or`, `not`, `printf`, `urlquery`) and methods such as `.Format`/`.IsZero` on `time.Time`. Templates cannot do arithmetic, so every count the UI shows is a Go field.
 - A sub-template call resets `$` to its argument. Anything needing `$.CSRFToken`, `$.BuildsEnabled` or `$.Shell` inside a `range` must be inline in the page template or receive those values as its root.
 - Output is buffered. A missing template or an execution error returns a plain-text `500` with the error and no partial HTML. With no `.html` files, every HTML page returns `500` `Explorer template "<name>" is missing; dashboard UI is not installed`; `?format=json` still works.
@@ -59,7 +61,8 @@ Every page model embeds `BaseView`, so its fields are at the root (`{{.CSRFToken
 ```
 ShellView { Registry, RegistryState, DockerState, DockerReason string; RunningBuild *BuildItem;
             StatusComputedAt time.Time; StatusRefreshing bool; IndexSHA256, FeedSHA256, Architecture string;
-            PublishLoad bool; PublishLoadReason string; PublishSigning string; Signatures SignatureConfigView }
+            PublishLoad bool; PublishLoadReason string; PublishSigning string; Signatures SignatureConfigView;
+            Vulnerabilities bool }
 SignatureConfigView { Enabled bool; Reason string }
 ```
 
@@ -68,6 +71,7 @@ SignatureConfigView { Enabled bool; Reason string }
 - `PublishSigning` says whether a "Build & publish" started now would be signed, decided from Explorer's own environment (presence of values only; the key file is never read): `""` when builds are disabled or `LUPETTO_REGISTRY`/`LUPETTO_REPOSITORY` is not set, `key` when `LUPETTO_COSIGN_KEY` or `LUPETTO_COSIGN_IDENTITY_TOKEN_FILE` (keyless) is set, `refused` when neither is and `LUPETTO_REQUIRE_SIGNING` is `true` (the CLI rejects the publish build with exit 2), otherwise `unsigned`. For `unsigned` and `refused` the `publish-signing-note` partial (root `Shell`, a `banner warn` marked `data-publish-signing="<state>"`) is shown once above the build controls: on Images (in its banners), on the catalog version list, and on an image detail whose primary action is a publish build. Builds may still be submitted; the notice explains the result.
 - `RunningBuild` is non-nil while a build runs. Only one build runs at a time: render every build control disabled with "Another build is running", show the nav count and a link to the running build.
 - `Signatures.Enabled` is true when Explorer was started with `LUPETTO_COSIGN_PUBLIC_KEY`, `LUPETTO_COSIGN_CERTIFICATE_IDENTITY`, or `LUPETTO_COSIGN_CERTIFICATE_IDENTITY_REGEXP` set (the CLI validates the combination; an invalid one shows every check as `error`). When false, nothing is verified, every registry image's signature is `not-checked`, and pages show `Signatures.Reason` once (the `sig-note` partial) instead of repeating it per image.
+- `Vulnerabilities` is false when Explorer runs with `--scan-interval 0`: the Vulnerabilities nav item, the Images links to it, and its routes (`404`) are absent.
 - `StatusComputedAt` can be zero (no successful check yet). The footer offers `POST /status/refresh` ("Check now").
 
 ## Read-only JSON (`?format=json`)
@@ -109,7 +113,8 @@ ImagesNotice { Tracked, Untracked string }
 ProductRow   { Package, Selector string; Track Track; DetailURL string; Versions []VersionRow;
                Verdict, VerdictKind, VerdictDetail string; UnreachableCount int; NeedsAction bool;
                Severity SeverityCounts; Action PrimaryAction;
-               Signatures map[string]*SignatureView; NewestSignature *SignatureView }
+               Signatures map[string]*SignatureView; NewestSignature *SignatureView; Vulnerabilities *VulnLink }
+VulnLink     { URL string; Lupetto, Upstream *int; Stale bool }
 SignatureView{ State, Label, Detail, Attestation, AttestationLabel, AttestationDetail string; SBOMPackages int; SBOMURL string;
                TransparencyLog string; LocalOnly bool; KeySHA256 string; Signer string; CheckedAt time.Time; Rechecking bool }
 VersionRow   { Identity PackageIdentity; Key string; Registry []Image; LocalImages []DockerImage; Builds []BuildItem; Latest bool }
@@ -122,6 +127,7 @@ InventoryView{ Document *ImagesDocument; Error string }
 - The ledger renders one `ProductGroup` per product (`product-head` + one `tracks` row per selector). Columns: Version (`Selector`, `Track.Latest.Name`), Registry (`Track.Newest`, `len Track.Images`), Local (first `VersionRow` with `LocalImages`, else first with `Builds`, else "None"; "Docker unavailable" when `Shell.DockerState` is `unavailable`), Latest in Wolfi (`Track.Latest.Version`), Missing fixes (`Severity` meter + "`UnreachableCount` need another version"; "No registry image" without `Track.Newest`; "Unknown (track error)" when `Track.State` is `error`), Verdict, Action.
 - Signatures on the home page are compact: each row's `Signatures` holds only its newest registry image (also `NewestSignature`), rendered as a `sig-chip` under the Registry cell. `SignaturesPending` (any shown image still `checking`) adds a `data-poll-field="signaturesPending"` element that reloads the page when checks finish. With `Shell.Signatures.Enabled` false the page shows the reason once.
 - `Severity` counts unique advisory IDs over all missing and unevaluated fixes of the newest registry image. `UnreachableCount` counts fixes that need a version outside the selector.
+- `Vulnerabilities` (nil when scanning is off) links the row to its comparison under the Version cell: total unique issues in the last successful scans, Lupetto vs upstream; a nil side (never scanned successfully, or no upstream) shows "–", never 0. `Stale` adds "stale".
 - `Notice.Tracked`/`Untracked` come from `?tracked=`/`?untracked=` after a products POST and render a confirmation banner.
 - States: `Status.Document == nil && Status.Refreshing` → "Checking your images…" (polls `status.refreshing`, reloads); `Status.LastError` → error banner (with stale data if `Document` is set, showing `ComputedAt`); no tracks and no filter → "No products tracked yet" empty state; filter/query with no rows → "No images match"; `!BuildsEnabled` → read-only banner; `Shell.RunningBuild` → building banner; Docker unavailable / `Inventory.Error` → warning banners.
 - The page carries the track dialog (see [Tracking](#tracking-trackingview)) and the single [security-data note](#security-evidence-required-wording).
@@ -202,17 +208,50 @@ LogChunk { Offset, NextOffset int64; Text string; Truncated, Done bool }
 ```
 TrackingView     { BaseView; Package, Selector string; Products *ProductsDocument; Error, Message string }
 ProductsDocument { Kind string; Version int; Products []Product; Changed bool; Message string }
-Product          { Package string; Selectors []string }
+Product          { Package string; Selectors []string; Entrypoint []string; CABundle bool; Upstream map[string]string }
 ```
 
 - `GET /products/track[?package=&selector=]` prefills the form. It is the no-JavaScript fallback for the "Track a product" dialog: every opener is `<a href="/products/track…" data-opens="track-dialog" [data-package="…"]>`; with JavaScript the page's `<dialog id="track-dialog">` opens instead (`[data-closes]` closes it).
 - The page lists every tracked package/selector with a "Stop tracking" POST form. `Error` (e.g. a read-only products file) and `Message` are shown verbatim.
+
+### `vulnerabilities`: `VulnerabilitiesView`
+
+```
+VulnerabilitiesView { BaseView; Scan VulnScanView; Rows []VulnRow; Totals *VulnTotals; StatusMissing bool }
+VulnScanView { GrypeVersion, Interval string; Running bool; Current string; DB *DBInfo; DBCheckedAt time.Time; DBError, StoreError, SaveError string }
+DBInfo       { Built time.Time; Schema string }
+VulnRow      { Package, Selector, DetailURL string; Lupetto, Upstream VulnSide; Delta *VulnDelta; DBMismatch bool }
+VulnSide     { Configured bool; Reference string; Counts *Counts; Digest string; ScannedAt, DBBuilt *time.Time; Stale bool;
+               LastAttempt *time.Time; Error string }
+Counts       { Critical, High, Medium, Low, Negligible, Unknown, Total int }
+VulnDelta    { Critical, High, Total, Magnitude int; Percent string }
+VulnTotals   { Tracks int; Lupetto, Upstream Counts; Delta VulnDelta }
+```
+
+- One row per tracked selector, in products-file order. Lupetto's side is the track's newest registry image (`Track.Repository@Track.Newest.Digest`; not `Configured` without one); upstream is `Product.Upstream[selector]` (not `Configured` without an entry). `Counts` are unique issues in the last successful scan of that side, so they can belong to an older image or an older interval: then `Stale` is true. A side without a successful scan has nil `Counts` and renders "Not scanned yet" or "No result: the scan failed", **never 0**. `Error` is the last failed attempt's cause (URL query strings removed, at most 512 bytes).
+- `Delta` (both sides have counts) is upstream − Lupetto: positive means Lupetto has fewer. `Magnitude` and `Percent` (share of the upstream total, "" when that is 0) are for wording. `DBMismatch` flags results from different database builds. `Totals` sums only rows with `Delta`.
+- `Scan.Running` adds a `data-poll-field="scan.running"` element that reloads the page when the pass ends. `DBError` (the last update check failed; scans then use the installed database, if any) `StoreError` (the results file could not be read at startup and will be replaced) and `SaveError` (the last save failed; results are kept in memory) render as warning banners. `StatusMissing` explains that nothing is scanned before the first successful status check.
+- The page carries the `vuln-note` (`<details id="about-counts">`) explaining how counts are made, and the Rescan form.
+
+### `vulnerability`: `VulnTrackView`
+
+```
+VulnTrackView { BaseView; Scan VulnScanView; Row VulnRow; Comparison *Comparison; Source string; Issues []Issue }
+Comparison    { Removed []Issue; Remaining []Pair; New []Issue }
+Pair          { Lupetto, Upstream Issue }
+Issue         { ID string; Aliases []string; Severity string; Packages []Affected; FixState string }
+Affected      { Name, Version, Type string; FixVersions []string }
+```
+
+- `404` for a package/selector not in the products file. With both results, `Comparison` splits issues: **Removed** (upstream only), **Remaining** (both; render the Lupetto issue), **New** (Lupetto only). Issues match when they share any ID or alias. With one result, `Source` (`lupetto`|`upstream`) and `Issues` list it uncompared; with none, an empty state.
+- `Severity` is one of `critical`, `high`, `medium`, `low`, `negligible`, `unknown` (the highest any related record gives). `FixState` is `fixed` (show each package's `FixVersions`), `not-fixed`, `wont-fix` or `unknown`.
 
 ## Live updates (polling, no push)
 
 - **Status:** background refreshes run at startup, every refresh interval (default 15 min), after each build ends, after products change, and on `POST /status/refresh`. Elements with `data-poll-url` + `data-poll-field` poll that JSON every ~2.5 s and reload the page when the field becomes false. With `data-poll-error-field` + `data-poll-unless-field` (the catalog uses `lastError`/`document`), an error while the second value is still missing stops polling and replaces the loading state with the error as text, because each catalog GET without a document starts another discovery.
 - **Stages:** an element with `data-live-url="/builds/{id}?format=json"` polls every ~2 s and updates each `[data-stage="<name>"]` item's class, icon and `[data-stage-state]` text from `item.stages` (a skipped Load stage keeps "Skipped · <item.loadReason>" when `item.mode` is `publish` and `item.load` is false); when `item.state` is no longer `running` the page reloads for the record.
 - **Log:** `GET /builds/{id}/logs?offset=N` (alias `/jobs/{id}/logs`) returns `LogChunk` JSON, never a template. `offset` is an absolute byte position (omitted = 0; negative/non-integer = `400`; unknown job = `404`). Only the most recent 1 MiB is kept: an older `offset` starts at the oldest retained byte with `truncated: true`; an offset past the end is clamped with empty `text`. Append `text`, set `offset = nextOffset`, repeat every ~1.5 s until `done: true` (that response already holds the final bytes), then reload. `text` may split lines or multibyte characters and invalid UTF-8 becomes U+FFFD; append with text nodes only. The log is CLI progress and tool diagnostics, not the result.
+- **Vulnerability scans:** one pass at a time, after each successful status check (only images that are new, changed, or last attempted at least one `--scan-interval` ago) and on `POST /vulnerabilities/scan` (every image). A request during a pass queues one more pass.
 - **Build buttons:** forms marked `data-build-form` are disabled on submit and while `/builds?format=json` reports `running`; pages rendered during a build reload when it ends.
 
 ## POST actions
@@ -221,7 +260,7 @@ All POSTs:
 
 - Body `application/x-www-form-urlencoded` (a normal `<form method="post">`), ≤ 8 KiB. Multipart bodies are not parsed: a `FormData` `fetch` body fails CSRF; use `URLSearchParams`.
 - `csrfToken` must be **in the body** (the query string is ignored). Each field must appear exactly once; a duplicated field counts as empty.
-- The `Host` must pass the allowlist first (an unlisted `Host` is `403` before token or Origin are examined).
+- The `Host` must pass the allowlist first (an unlisted `Host` is `403` before token or Origin are examined). The only exemption from the allowlist is `GET`/`HEAD /metrics`, so Prometheus can scrape a pod address; it serves aggregates and no token.
 - The request must be same-origin. If `Origin` is present, its scheme must be `http` or `https` and its authority must exactly equal the request `Host`, including any port (no path, query or userinfo). Either scheme is accepted so a TLS-terminating ingress that forwards plain HTTP works; no forwarded headers (`X-Forwarded-*`, `Forwarded`) are trusted. Without `Origin`, `Sec-Fetch-Site: same-origin` is required. Any `Sec-Fetch-Site` other than `same-origin` is rejected. Ordinary same-origin form posts from browsers satisfy this because the server sends `Referrer-Policy: same-origin`: under `no-referrer`, browsers send `Origin: null` on form posts, and `Origin: null` is always rejected (do not set a stricter referrer policy in templates). `same-origin` still sends no referrer to any other origin.
 - Success is `303 See Other`. Failures are plain text (not templates), except products edits, which re-render `tracking` with `Error`.
 
@@ -230,6 +269,7 @@ All POSTs:
 | `POST /status/refresh` | `csrfToken` | 303 → `/`; asynchronous, no second run while one is running | 403 Host/origin/CSRF; 400 bad form |
 | `POST /builds` | `csrfToken`, `package`, **exactly one** non-empty `selector` or `apkVersion`, `mode` (`publish`\|`local`; absent = `publish`) | 303 → `/builds/{id}` | 400 validation; 403 Host, builds disabled, origin/CSRF; 409 a build is already running; 503 shutting down or products file unreadable |
 | `POST /builds/{id}/cancel` (alias `/jobs/{id}/cancel`) | `csrfToken` | 303 → `/builds/{id}` | 404 unknown job; 409 no longer running; 403 Host/origin/CSRF |
+| `POST /vulnerabilities/scan` | `csrfToken` | 303 → `/vulnerabilities`; asynchronous, queued behind a running pass | 403 Host/origin/CSRF; 503 scanning off or shutting down |
 | `POST /products/add` | `csrfToken`, `package`, `selector` (one or more selectors separated by whitespace) | 303 → `/?tracked=<package>` | `tracking` page with `Error`; 403 Host/origin/CSRF |
 | `POST /products/remove` | `csrfToken`, `package`, `selector` | 303 → `/?untracked=<package>` | `tracking` page with `Error`; 403 Host/origin/CSRF |
 
@@ -275,4 +315,4 @@ Explorer never verifies signatures itself. With a trusted key or keyless identit
 
 ## Other routes
 
-`GET /builds/{id}/sbom` downloads a local build's validated SPDX JSON (the `SPDXURL` fields). `GET /images/{package}/{selector}/sbom/{digest}` downloads a registry image's signed SPDX SBOM (`SignatureView.SBOMURL`): the digest must be `sha256:<64 hex>` (else `400`), the image must be in that track of the cached status (else `404`), and its cached result must be `attested` (else `409`, also when no key is configured). Explorer then verifies again with `--sbom-out` into a new private temporary directory, requires the fresh result to still be `attested` (`409` and the cache is updated if not) and the file's SHA-256 to equal `attestation.sbom.sha256` (`502` on mismatch, CLI failure or invalid JSON), and serves it as `application/spdx+json` attachment `lupetto-<name>-<version>-<digest12>.spdx.json`. The temporary file is always removed. At most two downloads run at once (`503` when busy); each has 25 seconds. `GET /healthz` returns `text/plain` `ok` (the process is serving; nothing more). `GET /static/<path>` serves embedded assets. There are no other routes.
+`GET /builds/{id}/sbom` downloads a local build's validated SPDX JSON (the `SPDXURL` fields). `GET /images/{package}/{selector}/sbom/{digest}` downloads a registry image's signed SPDX SBOM (`SignatureView.SBOMURL`): the digest must be `sha256:<64 hex>` (else `400`), the image must be in that track of the cached status (else `404`), and its cached result must be `attested` (else `409`, also when no key is configured). Explorer then verifies again with `--sbom-out` into a new private temporary directory, requires the fresh result to still be `attested` (`409` and the cache is updated if not) and the file's SHA-256 to equal `attestation.sbom.sha256` (`502` on mismatch, CLI failure or invalid JSON), and serves it as `application/spdx+json` attachment `lupetto-<name>-<version>-<digest12>.spdx.json`. The temporary file is always removed. At most two downloads run at once (`503` when busy); each has 25 seconds. `GET /metrics` serves Prometheus text from cached status and stored scan results only (a scrape never runs the CLI or a scan): `lupetto_track_state`, `lupetto_status_timestamp_seconds`, and, unless scanning is off, `lupetto_vulnerabilities{package,selector,source,severity}` (absent until a side has a successful scan) with the scan timestamp, success, stale and database metrics, plus Go and process collectors; labels never carry issue IDs or digests. `GET /healthz` returns `text/plain` `ok` (the process is serving; nothing more). `GET /static/<path>` serves embedded assets. There are no other routes.

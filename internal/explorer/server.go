@@ -28,10 +28,21 @@ type Config struct {
 	EnableBuilds    bool
 	RefreshInterval time.Duration
 	Renderer        Renderer
+	// ScanInterval is the vulnerability rescan interval; 0 turns scanning,
+	// its pages and its metrics off.
+	ScanInterval time.Duration
+	// ScanMaxImageSize rejects images with more compressed layer bytes.
+	ScanMaxImageSize int64
+	// ScanResults and ScanCache override the results file and the Grype
+	// database directory (tests); empty means the data and cache defaults.
+	ScanResults, ScanCache string
+	// Version identifies the Explorer to the Grype database server.
+	Version    string
+	scanEngine scanEngine
 }
 
 func DefaultConfig() Config {
-	return Config{Listen: "127.0.0.1:8080", LupettoBinary: "lupetto", RefreshInterval: 15 * time.Minute}
+	return Config{Listen: "127.0.0.1:8080", LupettoBinary: "lupetto", RefreshInterval: 15 * time.Minute, ScanInterval: DefaultScanInterval, ScanMaxImageSize: DefaultScanMaxImageSize}
 }
 
 type Server struct {
@@ -46,6 +57,7 @@ type Server struct {
 	dashboard     dashboardState
 	signatures    signatureCache
 	jobs          jobRunner
+	vulns         *vulnScanner
 	ctx           context.Context
 	cancel        context.CancelFunc
 	mu            sync.Mutex
@@ -63,6 +75,12 @@ func New(config Config) (*Server, error) {
 	}
 	if config.RefreshInterval <= 0 {
 		return nil, errors.New("--refresh-interval must be positive")
+	}
+	if config.ScanInterval < 0 {
+		return nil, errors.New("--scan-interval must not be negative")
+	}
+	if config.ScanInterval > 0 && config.ScanMaxImageSize <= 0 {
+		return nil, errors.New("--scan-max-image-size must be positive")
 	}
 	_, _, err := net.SplitHostPort(config.Listen)
 	if err != nil {
@@ -83,12 +101,16 @@ func New(config Config) (*Server, error) {
 			return nil, err
 		}
 	}
+	vulns, err := newVulnScanner(config)
+	if err != nil {
+		return nil, err
+	}
 	var entropy [32]byte
 	if _, err := rand.Read(entropy[:]); err != nil {
 		return nil, fmt.Errorf("create CSRF token: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &Server{config: config, cli: cli, renderer: renderer, token: hex.EncodeToString(entropy[:]), allowedHosts: allowedHosts, discoverSlots: make(chan struct{}, 4), signatures: newSignatureCache(), ctx: ctx, cancel: cancel}
+	s := &Server{config: config, cli: cli, renderer: renderer, token: hex.EncodeToString(entropy[:]), allowedHosts: allowedHosts, discoverSlots: make(chan struct{}, 4), signatures: newSignatureCache(), vulns: vulns, ctx: ctx, cancel: cancel}
 	s.jobs = jobRunner{cli: cli, ctx: ctx, enabled: config.EnableBuilds, limit: HistoryLimit, logBytes: defaultLogBytes, afterFinish: func(record *BuildRecord) {
 		s.invalidateSignatures(record)
 		s.refreshAfterBuild()
@@ -150,6 +172,9 @@ func (s *Server) refreshStatusLocked() bool {
 			s.status.finish(document, err)
 			if err == nil {
 				s.warmSignatures(document)
+				// Scans the images that are new or due; status supplies the
+				// newest digests.
+				s.requestScan(false)
 			}
 		}
 		s.mu.Lock()
@@ -256,6 +281,10 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /status/refresh", s.refresh)
 	mux.HandleFunc("POST /builds", s.build)
 	mux.HandleFunc("POST /jobs/{id}/cancel", s.cancelJob)
+	mux.HandleFunc("GET /vulnerabilities", s.vulnerabilities)
+	mux.HandleFunc("GET /vulnerabilities/{package}/{selector}", s.vulnerabilityTrack)
+	mux.HandleFunc("POST /vulnerabilities/scan", s.rescan)
+	mux.Handle("GET /metrics", s.metricsHandler())
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok\n"))
@@ -482,7 +511,9 @@ func (s *Server) safe(next http.Handler) http.Handler {
 		// "Origin: null" on same-origin form POSTs, which authorize rejects.
 		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("Cache-Control", "no-store")
-		if !s.hostAllowed(r.Host) {
+		// Prometheus scrapes pod addresses; /metrics serves read-only
+		// aggregates and no CSRF token, so it needs no DNS-rebinding guard.
+		if !s.hostAllowed(r.Host) && !(r.URL.Path == "/metrics" && (r.Method == http.MethodGet || r.Method == http.MethodHead)) {
 			http.Error(w, "Host is not allowed; configure --allowed-host for the intended external hostname", http.StatusForbidden)
 			return
 		}

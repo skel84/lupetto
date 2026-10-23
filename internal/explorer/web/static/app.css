@@ -232,6 +232,7 @@ pre.errtext { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-si
 }
 .chip.mono { font-family: var(--font-mono); }
 .chip.accent { background: var(--accent-soft); border-color: transparent; color: var(--accent-text); }
+.chip.warn { background: var(--warn-bg); border-color: transparent; color: var(--warn); }
 .tag-loc { display: inline-flex; align-items: center; gap: 6px; }
 
 .verdict {
@@ -360,6 +361,15 @@ table.data td.num, table.data th.num { text-align: right; }
 table.data .mono { font-size: .9em; }
 table.data th .ver { text-transform: none; letter-spacing: 0; }
 table.data .actions-cell { text-align: right; white-space: nowrap; }
+table.vulns tbody + tbody { border-top: 2px solid var(--line-strong); }
+table.vulns tr.track-head th { text-align: left; text-transform: none; letter-spacing: 0; font-size: var(--fs); font-weight: 400; color: var(--ink); background: var(--surface-2); }
+table.vulns tbody.totals { background: var(--surface-2); }
+.delta.better { color: var(--ok); font-weight: 650; }
+.delta.worse { color: var(--danger); font-weight: 650; }
+.track-head .verdict-sub, .page-head .lede .verdict-sub { display: inline; margin: 0 0 0 8px; }
+.vuln-scan { font-size: var(--fs-small); }
+table.vulns tr.track-head th { white-space: normal; }
+.vuln-link { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 12px; }
 table.data tbody tr:hover { background: var(--surface-2); }
 .digest { font-family: var(--font-mono); font-size: .88em; color: var(--muted); }
 .ver { font-family: var(--font-mono); font-size: .93em; }

@@ -3,6 +3,8 @@ package explorer
 import (
 	"encoding/json"
 	"time"
+
+	"lupetto/internal/explorer/vulnscan"
 )
 
 type Product struct {
@@ -205,6 +207,17 @@ type ProductRow struct {
 	// Signatures is keyed by registry digest; NewestSignature is Track.Newest's.
 	Signatures      map[string]*SignatureView `json:"signatures"`
 	NewestSignature *SignatureView            `json:"newestSignature,omitempty"`
+	// Vulnerabilities is the track's scan comparison link and totals; nil
+	// when scanning is off.
+	Vulnerabilities *VulnLink `json:"vulnerabilities,omitempty"`
+}
+
+// VulnLink summarizes a track's last successful scans for the Images page.
+type VulnLink struct {
+	URL      string `json:"url"`
+	Lupetto  *int   `json:"lupetto,omitempty"`
+	Upstream *int   `json:"upstream,omitempty"`
+	Stale    bool   `json:"stale"`
 }
 type ImagesView struct {
 	BaseView
@@ -330,4 +343,96 @@ type ShellView struct {
 	FeedSHA256        string              `json:"feedSHA256"`
 	Architecture      string              `json:"architecture"`
 	Signatures        SignatureConfigView `json:"signatures"`
+	// Vulnerabilities is true unless scanning is off (--scan-interval 0).
+	Vulnerabilities bool `json:"vulnerabilities"`
+}
+
+// VulnerabilitiesView compares each track's newest Lupetto image with its
+// configured upstream image. Counts are unique issues (aliases merged) in the
+// last successful Grype scan of each side; a side without one has nil Counts.
+type VulnerabilitiesView struct {
+	BaseView
+	Scan VulnScanView `json:"scan"`
+	Rows []VulnRow    `json:"rows"`
+	// Totals sums the rows where both sides have a result; nil when none do.
+	Totals *VulnTotals `json:"totals,omitempty"`
+	// StatusMissing is true until the first status check succeeds; targets
+	// come from it.
+	StatusMissing bool `json:"statusMissing"`
+}
+
+// VulnScanView describes the scanner and its database.
+type VulnScanView struct {
+	GrypeVersion string `json:"grypeVersion"`
+	Interval     string `json:"interval"`
+	Running      bool   `json:"running"`
+	// Current is "package selector source" while that image is scanned.
+	Current     string           `json:"current,omitempty"`
+	DB          *vulnscan.DBInfo `json:"db,omitempty"`
+	DBCheckedAt time.Time        `json:"dbCheckedAt"`
+	DBError     string           `json:"dbError,omitempty"`
+	// StoreError reports a results file that could not be read at startup.
+	StoreError string `json:"storeError,omitempty"`
+	// SaveError reports that the last results save failed; results are kept
+	// in memory until a save succeeds or Explorer stops.
+	SaveError string `json:"saveError,omitempty"`
+}
+
+type VulnRow struct {
+	Package   string   `json:"package"`
+	Selector  string   `json:"selector"`
+	DetailURL string   `json:"detailURL"`
+	Lupetto   VulnSide `json:"lupetto"`
+	Upstream  VulnSide `json:"upstream"`
+	// Delta is set when both sides have a result.
+	Delta *VulnDelta `json:"delta,omitempty"`
+	// DBMismatch is true when the two results used different databases.
+	DBMismatch bool `json:"dbMismatch"`
+}
+
+// VulnSide is one image of a track.
+type VulnSide struct {
+	// Configured is false without a published Lupetto image or without an
+	// upstream entry in the products file.
+	Configured bool   `json:"configured"`
+	Reference  string `json:"reference,omitempty"`
+	// Counts, Digest, ScannedAt and DBBuilt come from the last successful
+	// scan, which may be of an older reference (then Stale is true).
+	Counts    *vulnscan.Counts `json:"counts,omitempty"`
+	Digest    string           `json:"digest,omitempty"`
+	ScannedAt *time.Time       `json:"scannedAt,omitempty"`
+	DBBuilt   *time.Time       `json:"dbBuilt,omitempty"`
+	Stale     bool             `json:"stale"`
+	// LastAttempt and Error describe the last attempt when it failed.
+	LastAttempt *time.Time `json:"lastAttempt,omitempty"`
+	Error       string     `json:"error,omitempty"`
+}
+
+// VulnDelta is upstream minus Lupetto: positive means Lupetto has fewer.
+type VulnDelta struct {
+	Critical int `json:"critical"`
+	High     int `json:"high"`
+	Total    int `json:"total"`
+	// Magnitude is the absolute Total and Percent its share of the upstream
+	// total ("" when that is zero), for display.
+	Magnitude int    `json:"magnitude"`
+	Percent   string `json:"percent,omitempty"`
+}
+
+type VulnTotals struct {
+	Tracks   int             `json:"tracks"`
+	Lupetto  vulnscan.Counts `json:"lupetto"`
+	Upstream vulnscan.Counts `json:"upstream"`
+	Delta    VulnDelta       `json:"delta"`
+}
+
+// VulnTrackView lists one track's issues. With both results, Comparison
+// splits them; otherwise Issues lists the one side that has a result.
+type VulnTrackView struct {
+	BaseView
+	Scan       VulnScanView         `json:"scan"`
+	Row        VulnRow              `json:"row"`
+	Comparison *vulnscan.Comparison `json:"comparison,omitempty"`
+	Source     string               `json:"source,omitempty"`
+	Issues     []vulnscan.Issue     `json:"issues,omitempty"`
 }

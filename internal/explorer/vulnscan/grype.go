@@ -202,6 +202,7 @@ func (s *Session) Scan(ctx context.Context, reference, platform string) (Scan, e
 	if err != nil {
 		return Scan{}, err
 	}
+	info.Reference = reference
 	ref, _ := name.ParseReference(reference)
 	input := ref.Context().Name() + "@" + info.ManifestDigest
 	imagePlatform, err := image.NewPlatform(platform)

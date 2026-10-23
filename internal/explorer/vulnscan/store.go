@@ -7,8 +7,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Sources of a track's two scans.
@@ -147,10 +150,36 @@ func (s *State) RecordSuccess(pkg, selector, source string, scan Scan) {
 func (s *State) RecordFailure(pkg, selector, source, reference string, at time.Time, err error) {
 	side := s.side(pkg, selector, source)
 	side.Reference, side.LastAttempt, side.Success = reference, at, false
-	side.Error = "scan failed"
-	if err != nil {
-		side.Error = err.Error()
+	side.Error = ErrorText(err)
+}
+
+// MaxErrorBytes bounds a stored scan or database error.
+const MaxErrorBytes = 512
+
+var urlQuery = regexp.MustCompile(`(https?://[^\s?"']+)\?[^\s"']*`)
+
+// ErrorText is err's message without URL query strings (registry blob
+// redirects carry signed, short-lived ones) or control characters, cut to
+// MaxErrorBytes.
+func ErrorText(err error) string {
+	if err == nil {
+		return "scan failed"
 	}
+	text := urlQuery.ReplaceAllString(err.Error(), "$1?…")
+	text = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, text)
+	if len(text) > MaxErrorBytes {
+		text = text[:MaxErrorBytes-len("…")]
+		for !utf8.ValidString(text) {
+			text = text[:len(text)-1]
+		}
+		text += "…"
+	}
+	return text
 }
 
 // Prune drops tracks, and upstream sides, that are no longer configured.

@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"lupetto/internal/explorer/vulnscan"
 )
 
 func (s *Server) inventory(ctx context.Context) InventoryView {
@@ -138,8 +140,16 @@ func (s *Server) images(w http.ResponseWriter, r *http.Request) {
 	if view.Status.Document != nil {
 		tracks := append([]Track(nil), view.Status.Document.Tracks...)
 		sort.SliceStable(tracks, func(i, j int) bool { return tracks[i].Package < tracks[j].Package })
+		var vulns *vulnscan.State
+		if s.vulns != nil {
+			state := s.vulns.store.Snapshot()
+			vulns = &state
+		}
 		for _, track := range tracks {
 			row := joinTrack(track, view.Inventory.Document)
+			if vulns != nil {
+				row.Vulnerabilities = s.vulnLink(vulns, track)
+			}
 			view.Summary.All++
 			if row.Severity.Critical > 0 {
 				view.Summary.MissingCritical++
@@ -486,7 +496,7 @@ func (s *Server) editProducts(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) shell() ShellView {
 	status := s.status.snapshot()
-	shell := ShellView{StatusRefreshing: status.Refreshing, RegistryState: "unknown", DockerState: "unknown", Signatures: s.signatures.config()}
+	shell := ShellView{StatusRefreshing: status.Refreshing, RegistryState: "unknown", DockerState: "unknown", Signatures: s.signatures.config(), Vulnerabilities: s.vulns != nil}
 	if d := status.Document; d != nil {
 		shell.Registry = d.Registry + "/" + d.Repository
 		shell.StatusComputedAt = d.ComputedAt

@@ -12,6 +12,7 @@ require (
 	github.com/docker/cli v29.8.2+incompatible
 	github.com/docker/docker-credential-helpers v0.9.8
 	github.com/google/go-containerregistry v0.22.1
+	github.com/prometheus/client_golang v1.24.1
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/sync v0.24.0
 	golang.org/x/term v0.47.0
@@ -256,7 +257,6 @@ require (
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/pquerna/cachecontrol v0.0.0-20180517163645-1555304b9b35 // indirect
 	github.com/proglottis/gpgme v0.1.6 // indirect
-	github.com/prometheus/client_golang v1.24.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/prometheus/common v0.70.1 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect

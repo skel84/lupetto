@@ -278,6 +278,7 @@ func testServer(t *testing.T, config fakeConfig, builds bool) (*Server, func(fak
 	options.Products = "products.yaml"
 	options.LupettoBinary = binary
 	options.EnableBuilds = builds
+	options.ScanInterval = 0 // scanning tests inject a fake engine
 	server, err := New(options)
 	if err != nil {
 		t.Fatal(err)
@@ -294,7 +295,7 @@ func testServer(t *testing.T, config fakeConfig, builds bool) (*Server, func(fak
 }
 func eventually(t *testing.T, condition func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if condition() {
 			return

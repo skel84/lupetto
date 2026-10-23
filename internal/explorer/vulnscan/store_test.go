@@ -4,8 +4,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func scanOf(reference string, at time.Time, counts Counts) Scan {
@@ -128,5 +130,19 @@ func TestSnapshotIsACopy(t *testing.T) {
 	snapshot.Tracks[0].Lupetto.Result.Counts.Total = 99
 	if store.Snapshot().Tracks[0].Lupetto.Result.Counts.Total != 1 {
 		t.Fatal("snapshot shares memory with the store")
+	}
+}
+
+func TestErrorTextDropsQueriesAndIsBounded(t *testing.T) {
+	if got := ErrorText(nil); got != "scan failed" {
+		t.Fatalf("nil = %q", got)
+	}
+	got := ErrorText(errors.New("GET https://auth.example.invalid/token?scope=repo&access_token=abc: 401\nretry"))
+	if strings.Contains(got, "access_token") || strings.Contains(got, "\n") || !strings.Contains(got, "/token?… 401 retry") {
+		t.Fatalf("got %q", got)
+	}
+	long := ErrorText(errors.New(strings.Repeat("é", 1000)))
+	if len(long) > MaxErrorBytes || !strings.HasSuffix(long, "…") || !utf8.ValidString(long) {
+		t.Fatalf("long = %d bytes, valid %v", len(long), utf8.ValidString(long))
 	}
 }

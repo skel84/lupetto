@@ -41,7 +41,7 @@
   <table class="tracks stackable">
     <thead><tr><th scope="col">Version</th><th scope="col">Registry</th><th scope="col">Local</th><th scope="col">Latest in Wolfi</th><th scope="col">Missing fixes</th><th scope="col">Verdict</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead>
     <tbody>{{range $r := $g.Rows}}<tr>
-  <td class="lead" data-label="Version"><a class="sel" href="{{$r.DetailURL}}">{{$r.Selector}}</a><span class="sel-sub">{{with $r.Track.Latest}}{{.Name}}{{else}}—{{end}}</span></td>
+  <td class="lead" data-label="Version"><a class="sel" href="{{$r.DetailURL}}">{{$r.Selector}}</a><span class="sel-sub">{{with $r.Track.Latest}}{{.Name}}{{else}}—{{end}}</span>{{with $r.Vulnerabilities}}<a class="vuln-link" href="{{.URL}}" title="Unique issues in the last scans: Lupetto’s newest image vs upstream">{{template "icon" "shield"}}{{if .Lupetto}}{{.Lupetto}}{{else}}–{{end}} vs {{if .Upstream}}{{.Upstream}}{{else}}–{{end}} upstream{{if .Stale}} · stale{{end}}</a>{{end}}</td>
   <td data-label="Registry">{{template "where-registry" $r.Track}}{{with $r.NewestSignature}}<span class="where-line sig-line">{{template "sig-chip" .}}</span>{{end}}</td>
   <td data-label="Local">{{if ne $.Shell.DockerState "available"}}<span class="where-line">{{template "icon" "plug"}}<span class="none">{{if eq $.Shell.DockerState "unavailable"}}Docker unavailable{{else}}Docker state unknown{{end}}</span></span>{{end}}{{template "where-local" $r}}</td>
   <td data-label="Latest in Wolfi">{{with $r.Track.Latest}}<span class="ver">{{.Version}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
