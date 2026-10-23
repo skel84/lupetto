@@ -171,6 +171,16 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 - [x] Changelog, [release notes](release-notes/v0.3.1.md), and documentation for both fixes; race tests, link, diff, and Bash-syntax checks ([evidence](verification.md#v031-release-readiness-2026-10-23)).
 - [x] Tag `v0.3.1`, push it, and let the release workflow publish and sign the image. Approved by the maintainer; workflow run `39942200542` succeeded, `ghcr.io/skel84/lupetto@sha256:61df5b1a…6e85` verifies keylessly as signed by `release.yml@refs/tags/v0.3.1`, builds `kubectl-1.33 1.33` with validated SPDX, and the GitHub release is published ([evidence](verification.md#v031-release-2026-10-23)).
 
+**v0.4.0 upstream vulnerability comparison** ([decision](decisions.md#upstream-vulnerability-comparison-2026-10-23), [changelog](../CHANGELOG.md), [release notes](release-notes/v0.4.0.md)):
+
+- [x] Optional per-selector `upstream` map in the products file, accepted and preserved by the CLI and ignored by builds and `status`; files without it parse as before ([evidence](verification.md#upstream-vulnerability-comparison-v040)).
+- [x] Scan each track's newest published image and its upstream image with the Grype v0.121.0 library in Explorer, one image at a time, on `--scan-interval` and "Rescan all", within `--scan-max-image-size`; merge aliases; keep failed results stale and never zero. Real scans of `kubectl-1.33` (108 vs 51 issues) and `postgres:17` (114) matched the `grype` v0.121.0 executable; a size-limit failure kept the result stale; nothing was rescanned after a restart ([evidence](verification.md#upstream-vulnerability-comparison-v040)).
+- [x] Vulnerabilities and per-track pages and the Images link, checked in headless Chrome at desktop and phone widths in light and dark ([evidence](verification.md#upstream-vulnerability-comparison-v040)).
+- [x] `GET /metrics` without issue or digest labels, exempt from `--allowed-host` for GET and HEAD only; observed with a foreign Host on a real run ([evidence](verification.md#upstream-vulnerability-comparison-v040)).
+- [x] Egress, disk, memory, and binary-size documentation from measurements: peak 330 MiB, 10 MB → 87 MB stripped ([evidence](verification.md#upstream-vulnerability-comparison-v040)).
+- [ ] Release readiness: race tests, link, diff, and Bash-syntax checks on the final branch.
+- [ ] Tag `v0.4.0` and publish. Not authorized yet; needs the maintainer's approval.
+
 ### 4. Add Explorer as an optional application
 
 - [ ] Decide Explorer product/repository/module packaging without introducing a CLI dependency on Explorer.

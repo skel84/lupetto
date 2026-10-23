@@ -141,6 +141,10 @@ products:
   - package: external-dns-0.21
     selectors: ["0"]
     caBundle: true
+  - package: metrics-server
+    selectors: ["0.8"]
+    upstream:
+      "0.8": registry.k8s.io/metrics-server/metrics-server:v0.8.0
 ```
 
 | Field | Required | Meaning |
@@ -150,8 +154,9 @@ products:
 | `products[].selectors` | yes | One or more quoted dotted numeric selectors; each is one track. |
 | `products[].entrypoint` | no | [Image entrypoint](#image-entrypoint) for every track of this product: a list of strings whose first element is an absolute executable path. Absent means no entrypoint, as in images built before it existed. |
 | `products[].caBundle` | no | `true` adds the [CA certificate bundle](#ca-certificate-bundle) to every track of this product; `false` or absent adds nothing. |
+| `products[].upstream` | no | Maps a quoted selector of this product to the upstream image its Lupetto image replaces, with a tag or digest. Only Explorer reads it, for its [vulnerability comparison](#upstream-vulnerability-comparison); builds and `status` ignore it. |
 
-Unknown fields, duplicate tracks, unsupported versions, empty products/selectors, malformed package names/selectors, and invalid entrypoints (empty list, relative path, non-string element), and a non-boolean `caBundle` are rejected. Products are tracking groups, **not runtime recipes**: the entrypoint and CA bundle are the only image settings, and each image otherwise holds exactly one selected APK and its dependency closure. The file is limited to 1 MiB.
+Unknown fields, duplicate tracks, unsupported versions, empty products/selectors, malformed package names/selectors, and invalid entrypoints (empty list, relative path, non-string element), a non-boolean `caBundle`, and `upstream` entries whose key is not one of the product's selectors or whose value is not an image reference with a tag or digest (at most 512 bytes) are rejected. `products remove` also drops the removed selectors' `upstream` entries. Products are tracking groups, **not runtime recipes**: the entrypoint and CA bundle are the only image settings, and each image otherwise holds exactly one selected APK and its dependency closure. The file is limited to 1 MiB.
 
 ```bash
 lupetto status --products products.yaml \
@@ -234,7 +239,7 @@ These commands never contact the network. Names/providers and dotted numeric sel
 
 A missing file is an error unless **`add --create`** explicitly permits creation (mode 0600). Edits use a same-directory temporary file, fsync, and atomic rename, preserving the existing file's permission mode. YAML node editing retains comments and ordering on surviving nodes, but formatting may be normalized and comments attached to removed nodes disappear. Symlinks are rejected. Read-only files/directories fail clearly; mount the **products directory writable**, not a single bind-mounted file, so atomic replacement can work. Concurrent editors are not serialized; the last atomic replacement wins.
 
-`--json` returns one document with `kind: "products"`, `version: 1`, `products: [{package, selectors: [...]}, ...]`, `changed`, and `message`. Lists are arrays, including an empty products list. Human output is a compact package/selector table plus the message. Invalid invocation or products YAML exits **2**; filesystem failures exit **1**; both report stderr diagnostics without JSON. Successful no-ops exit **0**. See [products evidence](docs/verification.md#products-management-redesign-round).
+`--json` returns one document with `kind: "products"`, `version: 1`, `products: [{package, selectors: [...]}, ...]` (each product also carries its `entrypoint`, `caBundle` and `upstream` when set), `changed`, and `message`. Lists are arrays, including an empty products list. Human output is a compact package/selector table plus the message. Invalid invocation or products YAML exits **2**; filesystem failures exit **1**; both report stderr diagnostics without JSON. Successful no-ops exit **0**. See [products evidence](docs/verification.md#products-management-redesign-round).
 
 ## Inventory local images and build history
 
@@ -466,6 +471,8 @@ lupetto-explorer --products products.yaml --lupetto-binary lupetto
 | `--lupetto-binary` | `lupetto`, resolved on `PATH`; an explicit executable path is accepted. |
 | `--enable-builds` | `false`; enables one CLI build at a time, not a queue. |
 | `--refresh-interval` | `15m`; positive Go duration for background status and package-catalog refresh. |
+| `--scan-interval` | `24h`; how often each image is rescanned for the [vulnerability comparison](#upstream-vulnerability-comparison). `0` turns scanning, its pages and its metrics off; negative values are rejected. |
+| `--scan-max-image-size` | `2GiB`; images with more compressed layer bytes are not scanned and count as a failed scan. Bytes, or a whole number with `KiB`, `MiB` or `GiB`. |
 
 Explorer passes no registry, repository, credentials, keys, or passwords as arguments. Publication builds inherit the server process environment, including `LUPETTO_REGISTRY`, `LUPETTO_REPOSITORY`, `LUPETTO_COSIGN_KEY` or `LUPETTO_COSIGN_IDENTITY_TOKEN_FILE`, optional signing configuration/HTTP consent, `COSIGN_PASSWORD`, and `DOCKER_CONFIG`. Local-only builds exclude publication/signing settings (including `LUPETTO_REQUIRE_SIGNING`) while retaining Docker configuration. Use the existing [registry/signing configuration guide](docs/registry-signing.md#configuration-and-upfront-errors); Explorer performs no login and never logs the environment. Read-only operation needs no signing key. To publish UI-triggered builds, configure registry/repository before starting Explorer with `--enable-builds`.
 
@@ -497,11 +504,44 @@ Status refreshes at startup, on the interval, after builds and tracking edits, a
 
 `POST /builds/{id}/cancel` sends SIGTERM, which the CLI handles through context cancellation; after five seconds Explorer kills an unresponsive CLI. SIGINT/SIGTERM cancels the active job/background work and gracefully drains HTTP. Cancellation is best-effort, can retain a failure record, and does not roll back images/tags/signatures; a CLI that completes successfully remains successful if cancel races its final record.
 
+### Upstream vulnerability comparison
+
+Explorer scans each track's newest registry image and the upstream image named by its products-file `upstream` entry with the [Grype](https://github.com/anchore/grype) **v0.121.0** library, using Grype's CLI default settings. Both are scanned for the status architecture (`x86_64` → `linux/amd64`, `aarch64` → `linux/arm64`); an upstream tag is resolved to a digest at scan time and that digest is recorded. Scanning is **on by default**; start with `--scan-interval 0` to turn it off.
+
+- **Counts.** A finding's ID and its related IDs (for example a GHSA and its CVE) are one issue, counted once per image however many packages it affects. Each finding has the severity Grype reports (its own record's, or a related record's when its own is unknown, so a distribution's triage such as Debian's "negligible" is kept over NVD's score), and an issue takes the highest of its findings. Counts include unfixed issues, unlike the [security feed](#security-data-limitations). A fix version comes from the advisory data and may be absent from the Wolfi index: in the verification run, Wolfi advisories for `kubernetes-1.33` named fixes in 1.33.6–1.33.13 while the index's newest `kubectl-1.33` was 1.33.4-r3, so a current Lupetto image had 59 issues upstream did not. "Latest in Wolfi" on Images is what a rebuild can use. Severity levels are Grype's: critical, high, medium, low, negligible and unknown.
+- **Pages.** Vulnerabilities (`/vulnerabilities`) shows, per track, both images' counts, the difference (upstream − Lupetto, with its share of the upstream total), scan and database times, a stale marker, and a totals row over tracks where both sides have results. A track's page (`/vulnerabilities/{package}/{selector}`) lists the issues removed (upstream only), remaining (both) and new (Lupetto only), with IDs, aliases, severity, packages and fix versions. Images links each track to it. "Rescan all" (`POST /vulnerabilities/scan`) rescans every image now.
+- **Schedule.** One pass at a time and one image at a time. After each successful status check, Explorer scans the images that were never scanned, changed (a new Lupetto image or a different upstream reference), or were last attempted at least `--scan-interval` ago; at startup that covers missing and old results. Nothing is scanned before the first successful status check, and a Lupetto side needs a published image.
+- **Failures.** A failed scan keeps the previous result and marks it **stale**; so does a newer Lupetto image or a result older than twice the interval. A failed or never-run scan is never shown or exported as zero. Error text is shown with URL query strings removed.
+- **Storage.** Results are one versioned JSON file, `lupetto/explorer/vulnerabilities.json` under the [data root](#retained-evidence-and-failures) (`/var/lib/lupetto/lupetto/explorer/` in the container), written atomically. The vulnerability database is under the OS user cache directory's `lupetto/grype/` (`/var/cache/lupetto/lupetto/grype/` in the container). An unreadable results file is reported on the page and replaced by the next save.
+- **Database.** Each pass that has something to scan checks for a newer database and opens it only for that pass. If the check or download fails, the installed database is used and the page says so; with none installed, the pass records a failed scan for every due image. The page shows each result's database build time and flags a track whose two results used different builds.
+- **Registry access.** Pulls use Docker credentials from Explorer's inherited `DOCKER_CONFIG` (the same file as publication) and fall back to anonymous access. Plain HTTP is used only for loopback registries.
+
+**Network egress** (Explorer only; the CLI is unchanged): `grype.anchore.io` (a listing of about 250 B each pass, and a database archive of about 195 MB when a newer build exists, typically daily), each upstream registry and the hosts it redirects layer downloads to (for example `registry.k8s.io` redirects to `cdn.registry.k8s.io`), and the Lupetto registry.
+
+**Disk.** The database expands to about 3.3 GB, and an update unpacks the new one beside the old, so allow about **7 GB** on the cache volume. Image layers are unpacked under `TMPDIR` (`/tmp` by default) during a scan and removed afterwards, up to the uncompressed size of the largest image. In the container `/tmp` is the container's writable layer; pass `-e TMPDIR=/var/cache/lupetto` to use the cache volume instead.
+
+**Memory.** Measured on the run in the [verification record](docs/verification.md#upstream-vulnerability-comparison-v040): peak resident memory was about **260 MiB** for a pass over two kubectl images (about 225 MiB while unpacking the database) and about **330 MiB** for `postgres:17` (154 MiB of compressed layers), measured on macOS; idle Explorer uses about 60 MiB. Set a memory limit of at least **512 MiB**; **1 GiB** leaves headroom for larger images, which were not measured.
+
+**Metrics.** `GET /metrics` serves Prometheus text format with these gauges, plus the standard Go and process collectors:
+
+| Metric | Labels | Meaning |
+| --- | --- | --- |
+| `lupetto_track_state` | `package`, `selector`, `state` | 1 for the track's state in the last successful status check, 0 for the other five states. |
+| `lupetto_status_timestamp_seconds` | | Time of the last successful status check. |
+| `lupetto_vulnerabilities` | `package`, `selector`, `source`, `severity` | Unique issues in the last successful scan; `source` is `lupetto` or `upstream`. Absent until that side has a successful scan. |
+| `lupetto_vulnerability_scan_timestamp_seconds` | `package`, `selector`, `source` | Time of that successful scan. |
+| `lupetto_vulnerability_scan_success` | `package`, `selector`, `source` | 1 if the last attempt succeeded, 0 if it failed. |
+| `lupetto_vulnerability_result_stale` | `package`, `selector`, `source` | 1 if the reported result is stale. |
+| `lupetto_vulnerability_result_db_built_timestamp_seconds` | `package`, `selector`, `source` | Build time of the database the result used. |
+| `lupetto_vulnerability_db_built_timestamp_seconds` | | Build time of the newest database loaded. |
+
+Sum `lupetto_vulnerabilities` over `severity` for a total. A scrape reads cached state only and never runs the CLI or a scan. Labels carry no issue IDs or digests. With `--scan-interval 0` only the track and status metrics remain.
+
 ### Explorer HTTP security
 
 **No login or user isolation.** Protect access with an operator-controlled network boundary (local connection, port-forward, or authenticating ingress). Builds are off by default and listening defaults to loopback; do not expose a build-enabled instance unauthenticated to an untrusted network.
 
-Refresh/build/cancel/tracking edits are POST-only, require the per-process hidden form field `csrfToken` (not a query parameter), and check `Origin` or `Sec-Fetch-Site: same-origin`. An Origin must use `http` or `https` and its host and explicit port must exactly equal the request Host; either scheme is accepted to support TLS-terminating ingress forwarding plain HTTP. No `X-Forwarded-*` headers are trusted: an ingress must preserve the external Host and enforce authentication itself. Every request on every listener must also match `--allowed-host`, preventing DNS rebinding even when Explorer listens on `0.0.0.0` behind Docker/Kubernetes loopback port-forwarding. Defaults allow only `localhost`, `127.0.0.1`, and `[::1]` at any port. For ingress, explicitly list its external hostname, for example `--allowed-host explorer.example.invalid --allowed-host localhost`; explicit flags replace the defaults. IPv6 literals must be bracketed. Hostnames are case-insensitive; a configured port must match exactly. Host/CSRF/origin checks are not authentication.
+Refresh/build/cancel/tracking edits are POST-only, require the per-process hidden form field `csrfToken` (not a query parameter), and check `Origin` or `Sec-Fetch-Site: same-origin`. An Origin must use `http` or `https` and its host and explicit port must exactly equal the request Host; either scheme is accepted to support TLS-terminating ingress forwarding plain HTTP. No `X-Forwarded-*` headers are trusted: an ingress must preserve the external Host and enforce authentication itself. Every request on every listener (except `GET`/`HEAD /metrics`, so Prometheus can scrape a pod address) must also match `--allowed-host`, preventing DNS rebinding even when Explorer listens on `0.0.0.0` behind Docker/Kubernetes loopback port-forwarding. Defaults allow only `localhost`, `127.0.0.1`, and `[::1]` at any port. For ingress, explicitly list its external hostname, for example `--allowed-host explorer.example.invalid --allowed-host localhost`; explicit flags replace the defaults. IPv6 literals must be bracketed. Hostnames are case-insensitive; a configured port must match exactly. Host/CSRF/origin checks are not authentication.
 
 Responses set CSP `default-src 'self'; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, and `Referrer-Policy: same-origin` (under `no-referrer`, browsers send `Origin: null` on form posts, which the same-origin check rejects); embedded `html/template` rendering escapes CLI metadata. Server read/header/write/idle timeouts and request/output limits are set. The dashboard must keep unsigned/fixed-only/Wolfi-only feed limitations and unreachable/unevaluated-fix warnings visible, including on `current` tracks. The server was exercised by curl and the dashboard in headless Chromium, both with real loopback publication/status runs; the combined container was verified separately with a non-root build/publication and dashboard JSON run. See [Explorer server evidence](docs/verification.md#explorer-server-checkpoint-3), [dashboard UI evidence](docs/verification.md#explorer-dashboard-ui-checkpoint-4), and [container evidence](docs/verification.md#combined-container-checkpoint-5).
 

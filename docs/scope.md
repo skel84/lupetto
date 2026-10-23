@@ -65,7 +65,7 @@ The user-approved [registry-comparison dashboard](decisions.md#registry-comparis
 
 Restoring package metadata, recipe history, snapshot provenance, durable SBOM downloads, and local Docker image availability remains in the full compatibility target. The specification also names Products and package series; the dashboard's products file defines tracked package/selector groupings and their two optional image options (entrypoint, CA bundle), not runtime recipes.
 
-Local Docker availability is not registry availability. Missing security fixes are not a vulnerability scan, and signature status is not shown.
+Local Docker availability is not registry availability. Missing security fixes are not a vulnerability scan, and signature status is not shown. Since v0.4.0 Explorer also scans each track's newest image and its configured upstream image with Grype and compares their counts ([decision](decisions.md#upstream-vulnerability-comparison-2026-10-23)); the CLI does not scan.
 
 ## Evidence distinctions
 
@@ -80,7 +80,7 @@ These are not interchangeable or automatically synchronized. Signature validity 
 
 ## Non-goals and security boundary
 
-Remote Konflux/Tekton execution (until a later checkpoint), policy enforcement, full vulnerability scanning (the dashboard reports only known fixed vulnerabilities from Wolfi's security feed), source-package builds, and production credential/key management are outside this local rebuild.
+Remote Konflux/Tekton execution (until a later checkpoint), policy enforcement, vulnerability scanning beyond Explorer's upstream comparison (`status` reports only known fixed vulnerabilities from Wolfi's security feed; Explorer's Grype counts are a comparison, not a policy gate), source-package builds, and production credential/key management are outside this local rebuild.
 
 HTTP registry access is local-development only. Production use requires HTTPS, least-privilege registry credentials, and protected signing keys. Keyless/KMS interoperability and production key management are not established by upstream Cosign support. See the [operator security boundaries](registry-signing.md).
 

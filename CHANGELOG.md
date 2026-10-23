@@ -2,6 +2,26 @@
 
 User-visible changes to the `lupetto` CLI, `lupetto-explorer`, and the combined container. Releases are git tags `vX.Y.Z`; the [release workflow](.github/workflows/release.yml) publishes the combined Explorer image for each tag.
 
+## v0.4.0 (unreleased)
+
+Explorer compares each Lupetto image's vulnerabilities with the upstream image it replaces, and exports its state as Prometheus metrics. The `lupetto` CLI is unchanged apart from the products-file field. See the [release notes](docs/release-notes/v0.4.0.md) for upgrade guidance.
+
+### Added
+
+- **Upstream vulnerability comparison.** An optional `upstream` map per product in the products file names, per selector, the image a Lupetto image replaces. Explorer scans each track's newest published image and that upstream image with the embedded Grype v0.121.0 library, counts unique issues per severity (aliases merged), and shows the difference on a new Vulnerabilities page, a per-track page of removed, remaining, and new issues, and a link on Images. Failed scans keep the previous result marked stale and are never shown as zero. ([README](README.md#upstream-vulnerability-comparison), [decision](docs/decisions.md#upstream-vulnerability-comparison-2026-10-23))
+- **`--scan-interval`** (default `24h`; `0` turns scanning off) and **`--scan-max-image-size`** (default `2GiB` of compressed layers) for `lupetto-explorer`, and a CSRF-protected "Rescan all".
+- **`GET /metrics`** in Prometheus text format: track state, status time, per-severity vulnerability counts, scan time, success, staleness, and database build times, plus Go and process metrics. It is exempt from `--allowed-host` for GET and HEAD.
+
+### Changed
+
+- `lupetto-explorer` now downloads Grype's vulnerability database from `grype.anchore.io` (about 195 MB, about 3.3 GB unpacked; allow about 7 GB of cache) and pulls upstream images from their registries, unless started with `--scan-interval 0`.
+- The `lupetto-explorer` binary grows from about 10 MB to about 87 MB (stripped). Peak memory during scans was 260–330 MiB in verification; set a limit of at least 512 MiB.
+
+### Compatibility
+
+- Products files without `upstream` keep working unchanged; builds and `status` ignore the field. A v0.3.1 CLI rejects products files that use it, so run the v0.4.0 CLI with the v0.4.0 Explorer.
+- The status document and build records are unchanged.
+
 ## v0.3.1 (2026-10-23)
 
 Fixes a v0.3.0 regression that rejected builds of some packages. See the [release notes](docs/release-notes/v0.3.1.md).
