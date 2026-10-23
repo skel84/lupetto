@@ -2,7 +2,7 @@
 
 User-visible changes to the `lupetto` CLI, `lupetto-explorer`, and the combined container. Releases are git tags `vX.Y.Z`; the [release workflow](.github/workflows/release.yml) publishes the combined Explorer image for each tag.
 
-## v0.4.1 (unreleased)
+## v0.4.1 (2026-10-23)
 
 Fixes Explorer with a products file mounted from a Kubernetes ConfigMap. See the [release notes](docs/release-notes/v0.4.1.md).
 
