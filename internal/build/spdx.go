@@ -96,12 +96,13 @@ func validateSPDX(lockPath, spdxPath, arch string) (string, error) {
 		}
 		seen[kind][id] = true
 	}
+	// apko copies every APK entry from the SBOM each package ships. Each
+	// locked APK must appear exactly once as a distro entry. Only newer
+	// package SBOMs add an origin entry, so origin entries are optional per
+	// package; any that appear must still name a locked APK, once (above).
 	for id := range want {
 		if !seen["distro"][id] {
 			return "", fmt.Errorf("SPDX missing locked APK %s@%s (%s)", id.name, id.version, id.arch)
-		}
-		if len(seen["origin"]) > 0 && !seen["origin"][id] {
-			return "", fmt.Errorf("SPDX missing installed APK entry %s@%s (%s)", id.name, id.version, id.arch)
 		}
 	}
 	return wolfi.SHA256Hex(data), nil

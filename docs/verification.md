@@ -1587,3 +1587,54 @@ With the maintainer's approval, `main` was fast-forwarded to `72f433d` and pushe
 | `docker run --rm --entrypoint lupetto <digest> help` | The packaged CLI's usage states that every image gets `wolfi-baselayout` and that a track lacking it is `config-changed`. |
 
 `gh release create v0.3.0 --verify-tag --title "lupetto v0.3.0" --latest` published the [GitHub release](https://github.com/skel84/lupetto/releases/tag/v0.3.0) with `docs/release-notes/v0.3.0.md` at the tag as its body, its relative links rewritten to the tagged files. `gh release view v0.3.0` reports it as the latest, neither draft nor prerelease.
+
+## Optional SPDX origin entries (v0.3.1)
+
+This records the evidence for the [optional SPDX origin entries](decisions.md#optional-spdx-origin-entries-2026-10-23) and [local stage causes on stderr](decisions.md#local-stage-causes-on-stderr-2026-10-23) decisions, observed 2026-10-23 on darwin/amd64 with Go 1.27.1 and apko 1.4.5. "main" is the CLI built from `16f2fb6` (v0.3.0 plus documentation); "fixed" is built from this branch. Publication runs named `127.0.0.1:5999`, where nothing listened, so nothing was pushed. The `kubectl-1.33` runs used the default data directory; the others used a scratch `LUPETTO_DATA_DIR`.
+
+| Check | Observed result |
+| --- | --- |
+| `internal/build` `TestValidateSPDX` | Accepts origin entries for only some packages. Rejects an origin entry without the APK's distro entry (`SPDX missing locked APK`), and an extra, duplicate, or changed-revision origin entry (`extra or duplicate SPDX APK`). |
+| `internal/build` `TestValidateSPDXKubectlWithoutOriginEntry` | The architecture document apko wrote in the failing `kubectl-1.33` build (distro purls for `kubectl-1.33`, `wolfi-baselayout`, and `ca-certificates-bundle`; origin purls for the last two only) validates against its lock; adding `glibc@2.44-r8` to the lock fails with `SPDX missing locked APK glibc@2.44-r8 (x86_64)`. With main's `spdx.go`, both new tests fail with the reported `SPDX missing installed APK entry` error. |
+| `cmd/lupetto` `TestBuildPublicationLocalCauseReachesStderr`, `TestBuildPublicationEarlyToolFailureIsTypedAndSanitized`; `internal/build` `TestBuildSigningEarlierApkoFailureKeepsRequestedNotAttempted` | A publication build with `--json` whose SPDX validation fails prints `build stage failed (workspace: …): validate SPDX against apko lock: …` on stderr, while stdout and `failure.json` carry the same record with `failure.error` `build failed`. Tool output never reaches the record. With main's `record.go`, the first test fails: stderr lacks the cause. |
+| main: `build kubectl-1.33 1.33 --no-load --json --registry 127.0.0.1:5999 --repository test/kubectl` | Exit 1. Stderr ends `build stage failed (workspace: …/image-2936173068): build failed`; the record says `{"stage":"build","error":"build failed"}`. This is the symptom reported from the pipeline. |
+| fixed: the same command | SPDX validated (`spdxValidated: true`); exit 1 only at publication: `publication push failed (registry unreachable)`. |
+| fixed: `build kubectl-1.33 1.33 --no-load --json` | Exit 0, `kubectl-1.33@1.33.4-r3`, `spdxValidated: true`. |
+| fixed, `PATH=/usr/bin:/bin` (no apko), the publication command | Exit 1; stderr `build stage failed: apko 1.4.5 is required: exec: "apko": executable file not found in $PATH`; record error `build failed`. |
+| main and fixed: `build helm --apk-version 4.0.1-r0` and `build flux --apk-version 2.7.5-r1`, `--no-load --json` | main fails with `SPDX missing installed APK entry helm@4.0.1-r0 (x86_64)` and `… flux@2.7.5-r1 …`; fixed succeeds with `spdxValidated: true`. |
+| fixed: `build helm 4`, `metrics-server 0`, `flux 2` | All succeed (`4.3.1-r1`, `0.8.1-r10`, `2.9.6-r3`) with `spdxValidated: true`; each document has 3 distro and 3 origin APK purls. |
+
+**Package SBOM survey.** From the current x86_64 APKINDEX, a script downloaded the most recently built APK of 22 named packages (Kubernetes tools and controllers) and of 120 random names under 4 MiB, and read every `var/lib/db/sbom/*.spdx.json` inside. 134 have distro and origin entries. Eight have only a distro entry: `kubectl-1.33` 1.33.4-r3, `helm` 4.0.1-r0, `flux` 2.7.5-r1, `istio-envoy-1.27-compat`, `mysql-9.4-dev`, `py3-ffwd`, `ruby3.4-aes_key_wrap`, and `py3-supported-mwoauth`. All 142 ship an SBOM, and every APK entry names its own package and version. Origin purls name the origin package (for example `origin=ca-certificates` for `ca-certificates-bundle`), not the subpackage.
+
+**Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test ./... -count=1` and `go test -race ./... -count=1` passed; `git diff --check` clean.
+
+Not exercised: an aarch64 build, and a publication run against a live registry.
+
+## v0.3.1 release readiness (2026-10-23)
+
+Checks run on the `v0.3.1-spdx-origin` branch after the [SPDX and stderr fixes](#optional-spdx-origin-entries-v031), on darwin/amd64 with Go 1.27.1.
+
+| Check | Observed result |
+| --- | --- |
+| `gofmt -l .`, `go vet -composites=false ./...`, `go test ./... -count=1` | Empty, passed, passed. |
+| `go test -race ./... -count=1` | Passed. |
+| `git diff --check v0.3.0` | No whitespace errors. |
+| Relative links and anchors in `README.md`, `CHANGELOG.md`, `docs/*.md`, `docs/release-notes/*.md`, and `AGENTS.md` | All resolve. |
+| `bash -n` on the 42 Bash-fenced blocks in `README.md`, `CHANGELOG.md`, `docs/*.md`, and the release notes | All pass (syntax only, not execution). |
+| `lupetto help` | Unchanged by these fixes; it does not describe SPDX entry kinds or failure sanitization. |
+
+The [release](#v031-release-2026-10-23) itself is recorded below.
+
+## v0.3.1 release (2026-10-23)
+
+With the maintainer's approval, the maintainer fast-forwarded `main` to `69bd006`, pushed it, and pushed the annotated tag `v0.3.1` ("lupetto v0.3.1") on that commit. The checks below are read-only against the published image, except the local build in it.
+
+| Check | Observed result |
+| --- | --- |
+| Release workflow run `39942200542` (tag push `v0.3.1`) | Completed `success`; `docker/build-push-action` pushed the image and `cosign sign --yes ghcr.io/skel84/lupetto@sha256:61df5b1a…6e85` ran on the pushed digest. |
+| `crane digest ghcr.io/skel84/lupetto:v0.3.1` | `sha256:61df5b1a688679bd03052faf814d876b3574584fbc6aea830f5a2bef1e206e85`. |
+| `lupetto verify --json --certificate-identity-regexp '^https://github.com/skel84/lupetto/' --certificate-oidc-issuer https://token.actions.githubusercontent.com ghcr.io/skel84/lupetto@sha256:61df5b1a…6e85` (CLI built from `69bd006`) | Exit 0; transparency log `verified`; signature `signed`; signer `https://github.com/skel84/lupetto/.github/workflows/release.yml@refs/tags/v0.3.1`, issuer `https://token.actions.githubusercontent.com`; attestation `absent` (the workflow signs but does not attest). |
+| `crane config` of the digest | `linux/amd64`; `Entrypoint` `/usr/local/bin/lupetto-explorer`, `Cmd` `--listen 0.0.0.0:8080 --products /etc/lupetto/products/products.yaml`. |
+| `docker run --rm --platform linux/amd64 --entrypoint lupetto <digest> build kubectl-1.33 1.33 --no-load --json` | Outcome `succeeded`, `kubectl-1.33@1.33.4-r3` for `x86_64`, `spdxValidated: true`: the build v0.3.0's image rejected. |
+
+`gh release create v0.3.1 --verify-tag --title "lupetto v0.3.1" --latest` published the [GitHub release](https://github.com/skel84/lupetto/releases/tag/v0.3.1) with `docs/release-notes/v0.3.1.md` at the tag as its body, its relative links rewritten to the tagged files. `gh release view v0.3.1` reports it as the latest, neither draft nor prerelease.

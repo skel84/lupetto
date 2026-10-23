@@ -86,7 +86,7 @@ Catalog access is a separate decision. A colocated, UI-independent catalog packa
 | OCI registry | In-process go-containerregistry client: push from the OCI layout, digest-addressed readback; Docker-config-only keychain; loopback-only plain HTTP guard. | Sanitized to fixed classifications; registry bodies never surfaced. |
 | Cosign v3.1.3 | Separate secret-safe subprocess adapter; inherits `COSIGN_PASSWORD` from the environment. `verify` runs only `cosign verify` / `verify-attestation` with a public key. | Signing: all output discarded; only a bounded version probe is parsed. `verify`: bounded stdout parsed; stderr only pattern-matched to classify outages, never surfaced. |
 
-All subprocesses use argument arrays (no shell interpolation), propagate cancellation, and never receive secrets as arguments. Records never contain environment or credentials. Publication/signing workflows record only sanitized stage messages; local-only failure records may include captured apko or Docker load output (capped at 8 KiB), as the CLI already prints.
+All subprocesses use argument arrays (no shell interpolation), propagate cancellation, and never receive secrets as arguments. Records never contain environment or credentials. Publication/signing workflows record only sanitized stage messages; local-only failure records may include captured apko or Docker load output (capped at 8 KiB). The CLI prints the detailed cause of the local build, load, readable-tag, and record stages on stderr in every workflow.
 
 ## One exact-build pipeline
 
