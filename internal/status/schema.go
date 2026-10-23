@@ -8,12 +8,20 @@ const (
 	NotBuilt        = "not-built"
 	UpdateAvailable = "update-available"
 	// ConfigChanged means the newest image matches the selected APK but was
-	// built with a different image configuration (entrypoint) than the
-	// product now requests.
+	// built with a different image configuration than a build would now
+	// produce; Track.ConfigChanges says which.
 	ConfigChanged  = "config-changed"
 	FixesAvailable = "fixes-available"
 	Current        = "current"
 	Error          = "error"
+)
+
+// Track.ConfigChanges values. Consumers should show unknown values as a
+// configuration change rather than ignore them.
+const (
+	ChangeEntrypoint = "entrypoint"
+	ChangeCABundle   = "caBundle"
+	ChangeBaseLayout = "baseLayout"
 )
 
 type Identity struct {
@@ -79,11 +87,15 @@ type UnevaluatedFix struct {
 }
 
 type Track struct {
-	Package           string            `json:"package"`
-	Selector          string            `json:"selector"`
-	State             string            `json:"state"`
-	Entrypoint        []string          `json:"entrypoint,omitempty"`
-	CABundle          bool              `json:"caBundle,omitempty"`
+	Package    string   `json:"package"`
+	Selector   string   `json:"selector"`
+	State      string   `json:"state"`
+	Entrypoint []string `json:"entrypoint,omitempty"`
+	CABundle   bool     `json:"caBundle,omitempty"`
+	// ConfigChanges lists how the newest image's configuration differs from
+	// what a build would now produce. It is omitted when nothing differs and
+	// can accompany update-available as well as config-changed.
+	ConfigChanges     []string          `json:"configChanges,omitempty"`
 	Error             string            `json:"error,omitempty"`
 	Latest            *Identity         `json:"latest,omitempty"`
 	Repository        string            `json:"repository,omitempty"`

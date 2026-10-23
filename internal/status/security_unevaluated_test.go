@@ -38,8 +38,8 @@ func TestMalformedSecdbFixedVersionIsReportedWithoutGuessingOrGlobalFailure(t *t
 			"images/curl":      {Images: []Image{curl}},
 		},
 		installed: map[string][]wolfi.InstalledPackage{
-			opa.Digest:  {{Name: "opa-envoy", Version: opa.Version, Arch: "x86_64"}},
-			curl.Digest: {{Name: "curl", Version: curl.Version, Arch: "x86_64"}, {Name: "opa-envoy", Version: opa.Version, Arch: "x86_64"}},
+			opa.Digest:  {{Name: "opa-envoy", Version: opa.Version, Arch: "x86_64"}, baseLayout},
+			curl.Digest: {{Name: "curl", Version: curl.Version, Arch: "x86_64"}, {Name: "opa-envoy", Version: opa.Version, Arch: "x86_64"}, baseLayout},
 		},
 	}
 	packages := []wolfi.Package{
@@ -128,6 +128,7 @@ func TestGOOnlyAndUnrecognisedOnlySecurityEntries(t *testing.T) {
 				installed: map[string][]wolfi.InstalledPackage{image.Digest: {
 					{Name: "curl", Version: image.Version, Arch: "x86_64"},
 					{Name: "cni-plugins", Version: "1.9.1-r10", Arch: "x86_64"},
+					baseLayout,
 				}},
 			}
 			packages := []wolfi.Package{

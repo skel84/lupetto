@@ -3,6 +3,7 @@ package status
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -215,13 +216,16 @@ func RunWith(ctx context.Context, products Products, options Options, services S
 			track.State = Current
 			comparison := compareVersion(selected.Version, track.Newest.Version)
 			built, configErr := imageconfig.FromAnnotations(track.Newest.Annotations)
+			if configErr == nil {
+				track.ConfigChanges = configChanges(built, product.Image(), installed)
+			}
 			if configErr != nil {
 				track.State, track.Error = Error, "invalid image configuration annotation on newest image"
 			} else if comparison > 0 {
 				track.State = UpdateAvailable
 			} else if comparison < 0 {
 				track.State, track.Error = Error, "newest image top-level version is newer than current index selection"
-			} else if !built.Equal(product.Image()) {
+			} else if len(track.ConfigChanges) > 0 {
 				track.State = ConfigChanged
 			} else if reachableFix {
 				track.State = FixesAvailable
@@ -244,6 +248,25 @@ func globalError(ctx context.Context, message string) error {
 		return err
 	}
 	return errors.New(message)
+}
+
+// configChanges lists what a rebuild would change in the newest image's
+// configuration: the product's entrypoint or CA bundle setting differs from
+// the image's annotations, or the image lacks the base layout every build now
+// adds. The installed APK set is the evidence for the base layout, so images
+// that got it through their closure need no rebuild.
+func configChanges(built, wanted imageconfig.Options, installed []wolfi.InstalledPackage) []string {
+	var changes []string
+	if !slices.Equal(built.Entrypoint, wanted.Entrypoint) {
+		changes = append(changes, ChangeEntrypoint)
+	}
+	if built.CABundle != wanted.CABundle {
+		changes = append(changes, ChangeCABundle)
+	}
+	if !slices.ContainsFunc(installed, func(pkg wolfi.InstalledPackage) bool { return pkg.Name == imageconfig.BaseLayoutPackage }) {
+		changes = append(changes, ChangeBaseLayout)
+	}
+	return changes
 }
 
 func hasTopLevel(packages []wolfi.InstalledPackage, image Image) bool {

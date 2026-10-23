@@ -74,7 +74,7 @@ func simpleServices(reader RegistryReader, cache InstalledCache, packages []wolf
 
 func TestTopLevelSecurityFixOutsideSelectorRemainsVisibleNotReachable(t *testing.T) {
 	image := testImage("8.1-r0", "a", time.Now().UTC())
-	reader := &testRegistry{listings: map[string]RegistryListing{"images/curl": {Images: []Image{image}}}, installed: map[string][]wolfi.InstalledPackage{image.Digest: {{Name: "curl", Version: image.Version, Arch: "x86_64"}, {Name: "dependency", Version: "1.0-r0", Arch: "x86_64"}}}}
+	reader := &testRegistry{listings: map[string]RegistryListing{"images/curl": {Images: []Image{image}}}, installed: map[string][]wolfi.InstalledPackage{image.Digest: {{Name: "curl", Version: image.Version, Arch: "x86_64"}, {Name: "dependency", Version: "1.0-r0", Arch: "x86_64"}, baseLayout}}}
 	packages := []wolfi.Package{{Name: "curl", Version: "8.1-r0", Arch: "x86_64", Checksum: "Q1a"}, {Name: "curl", Version: "9.0-r0", Arch: "x86_64", Checksum: "Q1b"}, {Name: "dependency", Version: "1.1-r0", Arch: "x86_64", Checksum: "Q1c"}}
 	feed := SecurityFeed{"curl": {"9.0-r0": {"CVE-2024-0001"}}}
 	products := Products{Version: 1, Products: []Product{{Package: "curl", Selectors: []string{"8"}}}}

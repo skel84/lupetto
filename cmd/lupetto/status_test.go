@@ -270,3 +270,20 @@ func TestStatusSeverityBudgetAndCounts(t *testing.T) {
 		t.Fatalf("human severity output: %v %s", err, &out)
 	}
 }
+
+func TestStatusTableListsConfigChanges(t *testing.T) {
+	var stdout bytes.Buffer
+	document := status.Document{Tracks: []status.Track{
+		{Package: "metrics-server", Selector: "0", State: status.ConfigChanged, ConfigChanges: []string{status.ChangeBaseLayout}},
+		{Package: "curl", Selector: "8", State: status.Current},
+	}}
+	if err := writeStatusTable(&stdout, document); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "metrics-server 0: newest image configuration differs: baseLayout\n") || strings.Contains(stdout.String(), "curl 8:") {
+		t.Fatalf("output: %s", stdout.String())
+	}
+	if code := statusExitCode(document); code != 3 {
+		t.Fatalf("exit code %d", code)
+	}
+}

@@ -16,7 +16,7 @@ import (
 	"lupetto/internal/wolfi"
 )
 
-const statusUsage = "\n\nRead-only registry comparison:\n  lupetto status --products <file> [--registry <authority> --repository <prefix>] [--arch <arch>] [--json] [--severity-budget <duration>] [--exit-code]\nStatus requires both registry/repository settings, reusing independent flag/LUPETTO_* environment precedence.\nProducts YAML version 1 lists package names/providers, dotted numeric selectors, and an optional entrypoint list; unknown fields are rejected.\nStatus --json prints a kind=status, version=2 document with index, image, installed-package, and severity-enriched security-fix facts.\nSeverity fetching defaults to 20s; --severity-budget 0 uses cache only (otherwise use a Go duration, e.g. 10s).\nStatus compares the host architecture's index and images unless --arch selects x86_64 (amd64) or aarch64 (arm64).\nStatus reads only; it never builds, publishes, signs, or loads Docker.\nThe Wolfi security feed is unsigned HTTPS and lists fixed vulnerabilities only, not a vulnerability scan.\nStatus exit 0 means computed (including track errors/updates); invocation errors exit 2, global failures exit 1.\nWith --exit-code, a computed status exits 0 when every track is current, 3 when any track needs a rebuild (not-built, update-available, config-changed, fixes-available), and 4 when any track has an error."
+const statusUsage = "\n\nRead-only registry comparison:\n  lupetto status --products <file> [--registry <authority> --repository <prefix>] [--arch <arch>] [--json] [--severity-budget <duration>] [--exit-code]\nStatus requires both registry/repository settings, reusing independent flag/LUPETTO_* environment precedence.\nProducts YAML version 1 lists package names/providers, dotted numeric selectors, and optional entrypoint and caBundle settings; unknown fields are rejected.\nStatus --json prints a kind=status, version=2 document with index, image, installed-package, and severity-enriched security-fix facts.\nSeverity fetching defaults to 20s; --severity-budget 0 uses cache only (otherwise use a Go duration, e.g. 10s).\nStatus compares the host architecture's index and images unless --arch selects x86_64 (amd64) or aarch64 (arm64).\nStatus reads only; it never builds, publishes, signs, or loads Docker.\nThe Wolfi security feed is unsigned HTTPS and lists fixed vulnerabilities only, not a vulnerability scan.\nStatus exit 0 means computed (including track errors/updates); invocation errors exit 2, global failures exit 1.\nWith --exit-code, a computed status exits 0 when every track is current, 3 when any track needs a rebuild (not-built, update-available, config-changed, fixes-available), and 4 when any track has an error.\nA track is config-changed when its newest image's entrypoint or CA bundle differs from the product, or the image lacks the Wolfi base layout every build now adds; the table lists the differences."
 
 type statusRequest struct {
 	products         string
@@ -182,6 +182,11 @@ func writeStatusTable(out io.Writer, document status.Document) error {
 	for _, track := range document.Tracks {
 		if track.Error != "" {
 			if _, err := fmt.Fprintf(out, "%s %s: %s\n", build.PlainText(track.Package), build.PlainText(track.Selector), build.PlainText(track.Error)); err != nil {
+				return err
+			}
+		}
+		if len(track.ConfigChanges) > 0 {
+			if _, err := fmt.Fprintf(out, "%s %s: newest image configuration differs: %s\n", build.PlainText(track.Package), build.PlainText(track.Selector), build.PlainText(strings.Join(track.ConfigChanges, ", "))); err != nil {
 				return err
 			}
 		}

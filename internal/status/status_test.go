@@ -23,6 +23,10 @@ type testRegistry struct {
 	listCalls, installedCalls int
 }
 
+// baseLayout is the APK every build since v0.3.0 installs; an image without it
+// is config-changed.
+var baseLayout = wolfi.InstalledPackage{Name: "wolfi-baselayout", Version: "20230201-r30", Arch: "x86_64"}
+
 func (registry *testRegistry) List(ctx context.Context, repo name.Repository) (RegistryListing, error) {
 	registry.listCalls++
 	return registry.listings[repo.RepositoryStr()], registry.listError
@@ -90,7 +94,7 @@ func TestRunStatesSelectorsSecurityAndCache(t *testing.T) {
 			if scenario.images {
 				listing.Images = []Image{image, testImage("9.1.0-r0", "b", now.Add(time.Hour)), testImage("8.0.0-r0", "c", now.Add(time.Hour))}
 			}
-			registry := &testRegistry{listings: map[string]RegistryListing{"team/images/curl": listing}, installed: map[string][]wolfi.InstalledPackage{image.Digest: {{Name: "curl", Version: scenario.version, Arch: "x86_64"}, {Name: "dependency", Version: scenario.dependency, Arch: "x86_64"}}}}
+			registry := &testRegistry{listings: map[string]RegistryListing{"team/images/curl": listing}, installed: map[string][]wolfi.InstalledPackage{image.Digest: {{Name: "curl", Version: scenario.version, Arch: "x86_64"}, {Name: "dependency", Version: scenario.dependency, Arch: "x86_64"}, baseLayout}}}
 			cache := &testCache{sets: map[string][]wolfi.InstalledPackage{}}
 			products := Products{Version: 1, Products: []Product{{Package: "curl", Selectors: []string{"8", "8.2"}}, {Package: "missing", Selectors: []string{"1"}}, {Package: "ambiguous", Selectors: []string{"1"}}, {Package: "other", Selectors: []string{"2"}}}}
 			services := Services{Architecture: "x86_64", ReadIndex: index, ReadSecurity: security, Registry: registry, Cache: cache, Now: func() time.Time { return now }}
@@ -106,7 +110,7 @@ func TestRunStatesSelectorsSecurityAndCache(t *testing.T) {
 				t.Fatalf("listing/counts: %+v, calls %d", track, registry.listCalls)
 			}
 			if scenario.images {
-				if track.Newest.Version != scenario.version || len(track.Images) != 2 || len(track.Installed) != 2 {
+				if track.Newest.Version != scenario.version || len(track.Images) != 2 || len(track.Installed) != 3 {
 					t.Fatalf("newest/images: %+v", track)
 				}
 				if registry.installedCalls != 1 {
@@ -212,7 +216,7 @@ func TestTrackFailuresDoNotLeakErrorsOrDiscardCacheFailures(t *testing.T) {
 	for _, failure := range []string{"registry", "installed", "cache load", "cache store"} {
 		t.Run(failure, func(t *testing.T) {
 			canary := errors.New("secretcanary https://token@invalid")
-			registry := &testRegistry{listings: map[string]RegistryListing{"team/images/curl": {Images: []Image{image}}}, installed: map[string][]wolfi.InstalledPackage{image.Digest: {{Name: "curl", Version: image.Version, Arch: "x86_64"}}}}
+			registry := &testRegistry{listings: map[string]RegistryListing{"team/images/curl": {Images: []Image{image}}}, installed: map[string][]wolfi.InstalledPackage{image.Digest: {{Name: "curl", Version: image.Version, Arch: "x86_64"}, baseLayout}}}
 			cache := &testCache{sets: map[string][]wolfi.InstalledPackage{}}
 			switch failure {
 			case "registry":
