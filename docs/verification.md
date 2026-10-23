@@ -1718,3 +1718,21 @@ This records the evidence for the [products-file fix](decisions.md#products-file
 | `git diff --check 8c1d490` and on the working tree | No whitespace errors. |
 
 Not exercised: a real Kubernetes cluster or kubelet's own ConfigMap update, and the combined container (Docker was unavailable on this host). The fix was checked against the layout described above.
+
+## v0.4.1 release (2026-10-23)
+
+With the maintainer's approval, `main` was fast-forwarded from `8c1d490` to `c1de8c9` (the [products-file fix](#products-file-symlinks-and-load-failures-v041) and the dated changelog) and pushed, and the annotated tag `v0.4.1` ("lupetto v0.4.1") was pushed on that commit. The checks below are read-only against the published image.
+
+| Check | Observed result |
+| --- | --- |
+| Release workflow run `39969625783` (tag push `v0.4.1`) | Completed `success`; `docker/build-push-action` pushed the image and `cosign sign --yes ghcr.io/skel84/lupetto@sha256:9c57b889…dd02` ran on the pushed digest. |
+| `crane digest ghcr.io/skel84/lupetto:v0.4.1` | `sha256:9c57b889ed69ba9699eb1ac5bea0a6f2ecaeab0da836f5771f5351c25900dd02`. |
+| `lupetto verify --json --certificate-identity https://github.com/skel84/lupetto/.github/workflows/release.yml@refs/tags/v0.4.1 --certificate-oidc-issuer https://token.actions.githubusercontent.com ghcr.io/skel84/lupetto@sha256:9c57b889…dd02` (CLI built from `c1de8c9`) | Exit 0; transparency log `verified`; signature `signed` with subject `…/release.yml@refs/tags/v0.4.1` and the GitHub Actions issuer; attestation `absent` (the workflow signs the image only, as for v0.4.0). |
+| `cosign verify` (v3.1.3) with the same exact identity and issuer | Claims, transparency-log entry, and certificate verified; certificate extensions name workflow ref `refs/tags/v0.4.1`, SHA `c1de8c9a97dffaa425e20d1cf95b7e01d772b739`, trigger `push`. With the `refs/tags/v0.4.0` identity instead, exit 12. |
+| `crane config` of the digest | `linux/amd64`; `Entrypoint` `/usr/local/bin/lupetto-explorer`, `Cmd` `--listen 0.0.0.0:8080 --products /etc/lupetto/products/products.yaml`; `XDG_CACHE_HOME=/var/cache/lupetto`, `XDG_DATA_HOME=/var/lib/lupetto`. |
+| `crane manifest` layer sizes | 131 MiB compressed (v0.4.0: 130 MiB). |
+| `crane export` of the digest; `go version -m` and `strings` on the binaries | `lupetto-explorer` (86,675,616 bytes, go1.27.1) contains `lupetto_products_load_success`; `lupetto` (20,705,440 bytes) contains the new `list` message "…or a symlink to one…". |
+
+`gh release create v0.4.1 --verify-tag --title "lupetto v0.4.1" --latest` published the [GitHub release](https://github.com/skel84/lupetto/releases/tag/v0.4.1) with `docs/release-notes/v0.4.1.md` at the tag as its body, its relative link rewritten to the tagged file. The repository's latest release is `v0.4.1`, neither draft nor prerelease.
+
+Not exercised: running the published container on Kubernetes with a ConfigMap mount (Docker was unavailable on this host); the fix itself was exercised with the darwin build [above](#products-file-symlinks-and-load-failures-v041).
