@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -359,8 +360,8 @@ func readOCIBlob(dir, digest string, maxBytes int64) ([]byte, error) {
 }
 
 // checkImage returns the validated local OCI manifest digest. It checks the
-// installed selected APK, that the config carries exactly the requested image
-// options, and that a requested entrypoint is an executable in the layer.
+// installed selected APK and base layout, that the config carries exactly the
+// requested image options, and the files the image requires in the layer.
 func checkImage(dir string, selected wolfi.Package, image imageconfig.Options) (string, error) {
 	if _, err := os.Stat(filepath.Join(dir, "oci-layout")); err != nil {
 		return "", fmt.Errorf("OCI layout missing: %w", err)
@@ -433,13 +434,14 @@ func checkImage(dir string, selected wolfi.Package, image imageconfig.Options) (
 	if !found {
 		return "", fmt.Errorf("OCI image does not contain selected %s@%s", selected.Name, selected.Version)
 	}
-	if image.Entrypoint != nil || image.CABundle {
-		if _, err := layer.Seek(0, io.SeekStart); err != nil {
-			return "", fmt.Errorf("rewind OCI layer: %w", err)
-		}
-		if err := checkImageFiles(layer, selected, image); err != nil {
-			return "", err
-		}
+	if !slices.ContainsFunc(installed, func(pkg wolfi.InstalledPackage) bool { return pkg.Name == imageconfig.BaseLayoutPackage }) {
+		return "", fmt.Errorf("OCI image of %s@%s does not contain %s", selected.Name, selected.Version, imageconfig.BaseLayoutPackage)
+	}
+	if _, err := layer.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("rewind OCI layer: %w", err)
+	}
+	if err := checkImageFiles(layer, selected, image); err != nil {
+		return "", err
 	}
 	return index.Manifests[0].Digest, nil
 }

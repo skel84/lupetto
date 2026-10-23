@@ -1,9 +1,9 @@
-// Package imageconfig owns the optional per-track image configuration that a
-// build applies beyond its selected APK and dependency closure: the OCI
-// entrypoint and the CA certificate bundle. The build writes them into the
-// image and its manifest annotations; status reads those annotations back to
-// detect a changed track.
-// An empty Options adds nothing, so such images match earlier releases.
+// Package imageconfig owns the image configuration that a build applies beyond
+// its selected APK and dependency closure. Every image gets the Wolfi base
+// layout. The optional per-track settings are the OCI entrypoint and the CA
+// certificate bundle; the build writes them into the image and its manifest
+// annotations, and status reads those annotations back to detect a changed
+// track.
 package imageconfig
 
 import (
@@ -32,6 +32,16 @@ const (
 	CABundlePath    = "/etc/ssl/certs/ca-certificates.crt"
 )
 
+// BaseLayoutPackage is the Wolfi APK every build adds, unpinned like the CA
+// bundle, so vulnerability scanners can identify the image: it provides
+// OSReleasePath, without which Trivy reports no findings and Grype ignores the
+// APK database. In Wolfi it also depends on CABundlePackage.
+const (
+	BaseLayoutPackage = "wolfi-baselayout"
+	OSReleasePath     = "/etc/os-release"
+	OSReleaseID       = "wolfi"
+)
+
 const (
 	maxEntrypointElements = 32
 	maxElementBytes       = 1024
@@ -43,8 +53,9 @@ type Options struct {
 	// the image followed by fixed leading arguments. Nil means none.
 	Entrypoint []string
 	// CABundle adds CABundlePackage to the image so TLS clients find system
-	// roots at CABundlePath. It changes nothing when the closure already has it
-	// except recording that the track requires it.
+	// roots at CABundlePath. The base layout normally brings the bundle in
+	// already; the option records and checks that the track requires it rather
+	// than relying on Wolfi's dependency graph.
 	CABundle bool
 }
 

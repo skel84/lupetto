@@ -123,9 +123,30 @@ func makeOCI(t *testing.T, version string) (string, string) {
 	return makeOCIWith(t, version, nil, nil)
 }
 
+// fixtureOSRelease is wolfi-baselayout's os-release.
+const fixtureOSRelease = "ID=wolfi\nNAME=\"Wolfi\"\nPRETTY_NAME=\"Wolfi\"\nVERSION_ID=\"20230201\"\nHOME_URL=\"https://wolfi.dev\"\n"
+
+// fixtureFile is a layer entry; a non-empty body sets the header size.
+type fixtureFile struct {
+	header tar.Header
+	body   string
+}
+
 // makeOCIWith adds extra layer entries (bodies are empty) and a config
-// entrypoint to the makeOCI fixture.
+// entrypoint to the makeOCI fixture, which installs the selected valkey-9.1
+// version and wolfi-baselayout with its os-release.
 func makeOCIWith(t *testing.T, version string, entries []tar.Header, entrypoint []string) (string, string) {
+	t.Helper()
+	files := []fixtureFile{{header: tar.Header{Name: "etc/os-release", Typeflag: tar.TypeReg, Mode: 0644}, body: fixtureOSRelease}}
+	for _, entry := range entries {
+		files = append(files, fixtureFile{header: entry})
+	}
+	return makeOCILayer(t, "P:valkey-9.1\nV:"+version+"\nA:x86_64\n\nP:wolfi-baselayout\nV:20230201-r30\nA:x86_64\n\n", files, entrypoint)
+}
+
+// makeOCILayer writes a one-layer OCI layout whose layer holds the installed
+// APK database and files.
+func makeOCILayer(t *testing.T, installed string, files []fixtureFile, entrypoint []string) (string, string) {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "blobs", "sha256"), 0700); err != nil {
@@ -134,18 +155,18 @@ func makeOCIWith(t *testing.T, version string, entries []tar.Header, entrypoint 
 	if err := os.WriteFile(filepath.Join(dir, "oci-layout"), []byte(`{"imageLayoutVersion":"1.0.0"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	installed := "P:valkey-9.1\nV:" + version + "\nA:x86_64\n\n"
 	var layer bytes.Buffer
 	gz := gzip.NewWriter(&layer)
 	archive := tar.NewWriter(gz)
-	if err := archive.WriteHeader(&tar.Header{Name: "usr/lib/apk/db/installed", Mode: 0600, Size: int64(len(installed))}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := archive.Write([]byte(installed)); err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range entries {
-		if err := archive.WriteHeader(&entry); err != nil {
+	files = append([]fixtureFile{{header: tar.Header{Name: "usr/lib/apk/db/installed", Mode: 0600}, body: installed}}, files...)
+	for _, file := range files {
+		if file.body != "" {
+			file.header.Size = int64(len(file.body))
+		}
+		if err := archive.WriteHeader(&file.header); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := archive.Write([]byte(file.body)); err != nil {
 			t.Fatal(err)
 		}
 	}

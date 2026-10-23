@@ -17,10 +17,8 @@ import (
 	"lupetto/internal/wolfi/wolfitest"
 )
 
-// v010Config is the apko configuration v0.1.0 rendered for these inputs,
-// written out literally. apko composes an image only from this file, the
-// lock, the build date, and the architecture, so equal bytes here mean a
-// track without image options keeps v0.1.0's image and digest.
+// v010Config is the apko configuration v0.1.0 and v0.2.0 rendered for these
+// inputs without image options, written out literally.
 const v010Config = `contents:
   keyring:
     - "/data/builds/image-1/wolfi-signing.rsa.pub"
@@ -39,14 +37,24 @@ annotations:
   lupetto.index.sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 `
 
-func TestApkoConfigWithoutImageOptionsMatchesV010(t *testing.T) {
+// baseConfig is v010Config with the one line every build now adds: the
+// unpinned Wolfi base layout after the selected APK.
+var baseConfig = strings.Replace(v010Config, "    - \"busybox-static=1.38.0-r3\"\n", "    - \"busybox-static=1.38.0-r3\"\n    - \"wolfi-baselayout\"\n", 1)
+
+func TestApkoConfigAddsOnlyBaseLayoutToV010(t *testing.T) {
 	selected := wolfi.Package{Name: "busybox-static", Version: "1.38.0-r3", Arch: "x86_64"}
 	created := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	for _, image := range []imageconfig.Options{{}, {Entrypoint: nil}} {
 		got := apkoConfig("/data/builds/image-1/wolfi-signing.rsa.pub", selected, "x86_64", created, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", image)
-		if got != v010Config {
-			t.Fatalf("config without image options changed from v0.1.0:\n%s", got)
+		if got != baseConfig || got == v010Config {
+			t.Fatalf("config without image options:\n%s\nwant:\n%s", got, baseConfig)
 		}
+	}
+	// The base layout itself is not listed twice.
+	layout := wolfi.Package{Name: "wolfi-baselayout", Version: "20230201-r30", Arch: "x86_64"}
+	got := apkoConfig("/k", layout, "x86_64", created, "d", imageconfig.Options{})
+	if strings.Count(got, "    - \"wolfi-baselayout") != 1 || !strings.Contains(got, "  packages:\n    - \"wolfi-baselayout=20230201-r30\"\narchs:") {
+		t.Fatalf("base layout package config:\n%s", got)
 	}
 }
 
@@ -75,14 +83,14 @@ func TestApkoConfigCABundle(t *testing.T) {
 	created := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	selected := wolfi.Package{Name: "busybox-static", Version: "1.38.0-r3", Arch: "x86_64"}
 	got := apkoConfig("/data/builds/image-1/wolfi-signing.rsa.pub", selected, "x86_64", created, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", imageconfig.Options{CABundle: true})
-	want := strings.Replace(v010Config, "    - \"busybox-static=1.38.0-r3\"\n", "    - \"busybox-static=1.38.0-r3\"\n    - \"ca-certificates-bundle\"\n", 1) + "  lupetto.image.ca-bundle: \"true\"\n"
+	want := strings.Replace(baseConfig, "    - \"wolfi-baselayout\"\n", "    - \"wolfi-baselayout\"\n    - \"ca-certificates-bundle\"\n", 1) + "  lupetto.image.ca-bundle: \"true\"\n"
 	if got != want {
 		t.Fatalf("config:\n%s\nwant:\n%s", got, want)
 	}
 	// The bundle itself is not listed twice.
 	bundle := wolfi.Package{Name: "ca-certificates-bundle", Version: "20260909-r3", Arch: "x86_64"}
 	got = apkoConfig("/k", bundle, "x86_64", created, "d", imageconfig.Options{CABundle: true})
-	if strings.Count(got, "    - \"ca-certificates-bundle") != 1 || !strings.Contains(got, "    - \"ca-certificates-bundle=20260909-r3\"\narchs:") {
+	if strings.Count(got, "    - \"ca-certificates-bundle") != 1 || !strings.Contains(got, "    - \"ca-certificates-bundle=20260909-r3\"\n    - \"wolfi-baselayout\"\narchs:") {
 		t.Fatalf("bundle package config:\n%s", got)
 	}
 }
@@ -102,7 +110,7 @@ func TestCheckImageCABundle(t *testing.T) {
 		entries []tar.Header
 		want    string
 	}{
-		"missing":   {nil, "/etc does not exist"},
+		"missing":   {nil, "/etc/ssl does not exist"},
 		"directory": {[]tar.Header{{Name: "etc/ssl/certs/ca-certificates.crt/", Typeflag: tar.TypeDir, Mode: 0755}}, "not a regular file"},
 		"dangling":  {[]tar.Header{{Name: "etc/ssl/certs/ca-certificates.crt", Typeflag: tar.TypeSymlink, Linkname: "/nowhere"}}, "/nowhere does not exist"},
 	} {
@@ -116,6 +124,53 @@ func TestCheckImageCABundle(t *testing.T) {
 	dir, _ := makeOCIWith(t, "9.1.2-r1", nil, nil)
 	if _, err := checkImage(dir, selected, imageconfig.Options{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCheckImageBaseLayout(t *testing.T) {
+	selected := wolfi.Package{Name: "valkey-9.1", Version: "9.1.2-r1", Arch: "x86_64"}
+	installed := "P:valkey-9.1\nV:9.1.2-r1\nA:x86_64\n\nP:wolfi-baselayout\nV:20230201-r30\nA:x86_64\n\n"
+	osRelease := func(body string) fixtureFile {
+		return fixtureFile{header: tar.Header{Name: "etc/os-release", Typeflag: tar.TypeReg, Mode: 0644}, body: body}
+	}
+	for name, files := range map[string][]fixtureFile{
+		"regular file":     {osRelease(fixtureOSRelease)},
+		"unquoted":         {osRelease("# comment\nID=wolfi\nVERSION_ID=20230201\n")},
+		"single quotes":    {osRelease("ID='wolfi'\nVERSION_ID='20230201'")},
+		"symlink":          {{header: tar.Header{Name: "etc/os-release", Typeflag: tar.TypeSymlink, Linkname: "../usr/lib/os-release"}}, {header: tar.Header{Name: "usr/lib/os-release", Typeflag: tar.TypeReg, Mode: 0644}, body: fixtureOSRelease}},
+		"symlinked parent": {{header: tar.Header{Name: "etc", Typeflag: tar.TypeSymlink, Linkname: "usr/etc"}}, {header: tar.Header{Name: "usr/etc/os-release", Typeflag: tar.TypeReg, Mode: 0644}, body: fixtureOSRelease}},
+		"hard link":        {{header: tar.Header{Name: "usr/lib/os-release", Typeflag: tar.TypeReg, Mode: 0644}, body: fixtureOSRelease}, {header: tar.Header{Name: "etc/os-release", Typeflag: tar.TypeLink, Linkname: "usr/lib/os-release"}}},
+	} {
+		dir, _ := makeOCILayer(t, installed, files, nil)
+		if _, err := checkImage(dir, selected, imageconfig.Options{}); err != nil {
+			t.Errorf("%s rejected: %v", name, err)
+		}
+	}
+	for name, tc := range map[string]struct {
+		files []fixtureFile
+		want  string
+	}{
+		"missing":          {nil, "/etc does not exist"},
+		"directory":        {[]fixtureFile{{header: tar.Header{Name: "etc/os-release/", Typeflag: tar.TypeDir, Mode: 0755}}}, "not a regular file"},
+		"dangling":         {[]fixtureFile{{header: tar.Header{Name: "etc/os-release", Typeflag: tar.TypeSymlink, Linkname: "/usr/lib/os-release"}}}, "/usr/lib/os-release does not exist"},
+		"empty":            {[]fixtureFile{osRelease("")}, `ID is "", not "wolfi"`},
+		"other distro":     {[]fixtureFile{osRelease("ID=alpine\nVERSION_ID=3.22\n")}, `ID is "alpine", not "wolfi"`},
+		"ID alone":         {[]fixtureFile{osRelease("ID=wolfi\nNAME=Wolfi\n")}, "VERSION_ID is missing"},
+		"empty version":    {[]fixtureFile{osRelease("ID=wolfi\nVERSION_ID=\"\"\n")}, "VERSION_ID is missing"},
+		"commented ID":     {[]fixtureFile{osRelease("#ID=wolfi\nVERSION_ID=1\n")}, `ID is "", not "wolfi"`},
+		"oversized":        {[]fixtureFile{osRelease(fixtureOSRelease + strings.Repeat("#", maxOSReleaseBytes))}, "larger than 65536 bytes"},
+		"misnamed content": {[]fixtureFile{{header: tar.Header{Name: "etc/os-release", Typeflag: tar.TypeSymlink, Linkname: "release"}}, {header: tar.Header{Name: "etc/release", Typeflag: tar.TypeReg, Mode: 0644}, body: fixtureOSRelease}}, `ID is "", not "wolfi"`},
+	} {
+		dir, _ := makeOCILayer(t, installed, tc.files, nil)
+		_, err := checkImage(dir, selected, imageconfig.Options{})
+		if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "/etc/os-release does not identify the image of valkey-9.1@9.1.2-r1 as Wolfi to vulnerability scanners") {
+			t.Errorf("%s: err=%v want %q", name, err, tc.want)
+		}
+	}
+	// The os-release file alone is not enough: the package must be installed.
+	dir, _ := makeOCILayer(t, "P:valkey-9.1\nV:9.1.2-r1\nA:x86_64\n\n", []fixtureFile{osRelease(fixtureOSRelease)}, nil)
+	if _, err := checkImage(dir, selected, imageconfig.Options{}); err == nil || err.Error() != "OCI image of valkey-9.1@9.1.2-r1 does not contain wolfi-baselayout" {
+		t.Fatalf("image without the base layout package: err=%v", err)
 	}
 }
 
@@ -170,10 +225,10 @@ func TestCheckImageEntrypoint(t *testing.T) {
 	}
 }
 
-// TestRunWithoutImageOptionsKeepsV010Inputs drives the real pipeline up to
-// apko build and checks every input apko receives against v0.1.0: the
-// configuration bytes, the build arguments, and the epoch.
-func TestRunWithoutImageOptionsKeepsV010Inputs(t *testing.T) {
+// TestRunApkoInputs drives the real pipeline up to apko build and checks
+// every input apko receives: the configuration bytes (v0.1.0's plus the base
+// layout), the build arguments, and the epoch.
+func TestRunApkoInputs(t *testing.T) {
 	created := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	for _, entrypoint := range [][]string{nil, {"/usr/bin/busybox", "sh"}} {
 		index, key := wolfitest.MakeSignedIndexFor(t, "P:busybox-static\nV:1.38.0-r3\nA:x86_64\nC:exact\n\n")
@@ -211,7 +266,7 @@ func TestRunWithoutImageOptionsKeepsV010Inputs(t *testing.T) {
 		}
 		workspace := result.Workspace
 		keyPath := filepath.Join(workspace, "wolfi-signing.rsa.pub")
-		want := strings.Replace(v010Config, `"/data/builds/image-1/wolfi-signing.rsa.pub"`, `"`+keyPath+`"`, 1)
+		want := strings.Replace(baseConfig, `"/data/builds/image-1/wolfi-signing.rsa.pub"`, `"`+keyPath+`"`, 1)
 		want = strings.Replace(want, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", wolfi.SHA256Hex(index), 1)
 		if entrypoint != nil {
 			want += "  lupetto.image.entrypoint: \"[\\\"/usr/bin/busybox\\\",\\\"sh\\\"]\"\nentrypoint:\n  command: \"'/usr/bin/busybox' 'sh'\"\n"

@@ -62,7 +62,7 @@ func TestInspectIdentifiedAndUnidentifiedCache(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if first.Kind != "inspect" || first.Version != 1 || first.Digest != digest.String() || first.Unidentified == identified || len(first.Packages) != 1 || first.Packages[0].Version != "8.2-r1" {
+		if first.Kind != "inspect" || first.Version != 1 || first.Digest != digest.String() || first.Unidentified == identified || len(first.Packages) != 2 || first.Packages[0].Version != "8.2-r1" || first.Packages[1].Name != "wolfi-baselayout" {
 			t.Fatalf("unexpected inspect: %+v", first)
 		}
 		if identified && (first.Identity == nil || first.Identity.Name != "curl" || first.Created == nil) {

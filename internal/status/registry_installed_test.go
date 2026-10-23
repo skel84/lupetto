@@ -116,7 +116,7 @@ func TestRegistryAnnotationsArtifactsUnidentifiedDedupeAndReadOnly(t *testing.T)
 		t.Fatalf("annotation/tag identity: %+v", listing.Images[0])
 	}
 	packages, err := reader.Installed(ctx, repository, listing.Images[0])
-	if err != nil || len(packages) != 1 || packages[0].Version != "8.2-r1" {
+	if err != nil || len(packages) != 2 || packages[0].Version != "8.2-r1" || packages[1].Name != "wolfi-baselayout" {
 		t.Fatalf("installed: %+v, %v", packages, err)
 	}
 	transport.mu.Lock()

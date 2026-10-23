@@ -42,7 +42,11 @@ func OCIArch(t *testing.T, arch string) string {
 	return ""
 }
 
-// A synthetic single-image OCI fixture, not an interoperability claim.
+// OSRelease is wolfi-baselayout's os-release, which MakeLoadOCI installs.
+const OSRelease = "ID=wolfi\nNAME=\"Wolfi\"\nPRETTY_NAME=\"Wolfi\"\nVERSION_ID=\"20230201\"\n"
+
+// A synthetic single-image OCI fixture, not an interoperability claim. It
+// installs pkg and wolfi-baselayout with its os-release, as every build does.
 func MakeLoadOCI(t *testing.T, dir, pkg, version, arch string) (string, []byte, []byte) {
 	t.Helper()
 	ociArch := OCIArch(t, arch)
@@ -65,12 +69,14 @@ func MakeLoadOCI(t *testing.T, dir, pkg, version, arch string) (string, []byte, 
 	}
 	var uncompressed bytes.Buffer
 	tw := tar.NewWriter(&uncompressed)
-	installed := []byte("P:" + pkg + "\nV:" + version + "\nA:" + arch + "\n\n")
-	if err := tw.WriteHeader(&tar.Header{Name: "usr/lib/apk/db/installed", Mode: 0600, Size: int64(len(installed))}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tw.Write(installed); err != nil {
-		t.Fatal(err)
+	installed := "P:" + pkg + "\nV:" + version + "\nA:" + arch + "\n\nP:wolfi-baselayout\nV:20230201-r30\nA:" + arch + "\n\n"
+	for _, file := range []struct{ name, body string }{{"usr/lib/apk/db/installed", installed}, {"etc/os-release", OSRelease}} {
+		if err := tw.WriteHeader(&tar.Header{Name: file.name, Mode: 0600, Size: int64(len(file.body))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(file.body)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := tw.Close(); err != nil {
 		t.Fatal(err)
