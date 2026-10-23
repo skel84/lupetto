@@ -2,7 +2,7 @@
 
 User-visible changes to the `lupetto` CLI, `lupetto-explorer`, and the combined container. Releases are git tags `vX.Y.Z`; the [release workflow](.github/workflows/release.yml) publishes the combined Explorer image for each tag.
 
-## v0.4.0 (unreleased)
+## v0.4.0 (2026-10-23)
 
 Explorer compares each Lupetto image's vulnerabilities with the upstream image it replaces, and exports its state as Prometheus metrics. The `lupetto` CLI is unchanged apart from the products-file field. See the [release notes](docs/release-notes/v0.4.0.md) for upgrade guidance.
 
