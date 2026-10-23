@@ -179,7 +179,7 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 - [x] `GET /metrics` without issue or digest labels, exempt from `--allowed-host` for GET and HEAD only; observed with a foreign Host on a real run ([evidence](verification.md#upstream-vulnerability-comparison-v040)).
 - [x] Egress, disk, memory, and binary-size documentation from measurements: peak 330 MiB, 10 MB → 87 MB stripped ([evidence](verification.md#upstream-vulnerability-comparison-v040)).
 - [x] Changelog, [release notes](release-notes/v0.4.0.md), and documentation; race tests, link, diff, and Bash-syntax checks ([evidence](verification.md#v040-release-readiness-2026-10-23)). The combined container was not rebuilt locally.
-- [ ] Tag `v0.4.0` and publish. Not authorized yet; needs the maintainer's approval.
+- [x] Tag `v0.4.0`, push it, and let the release workflow publish and sign the image. Approved by the maintainer; workflow run `39951565783` succeeded, `ghcr.io/skel84/lupetto@sha256:bc1a107e…a717` verifies keylessly as signed by `release.yml@refs/tags/v0.4.0`, and the GitHub release is published ([evidence](verification.md#v040-release-2026-10-23)). The published container was not run locally.
 
 ### 4. Add Explorer as an optional application
 

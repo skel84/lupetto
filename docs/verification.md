@@ -1678,4 +1678,23 @@ Checks run on the `v0.4.0-upstream-vulns` branch after the [comparison](#upstrea
 | `bash -n` on the 42 Bash-fenced blocks in `README.md`, `CHANGELOG.md`, `AGENTS.md`, the Explorer contract, `docs/*.md`, and the release notes | All pass (syntax only, not execution). |
 | `lupetto help`, `lupetto-explorer --help` | The CLI lists the optional `upstream` products setting, read only by Explorer; Explorer documents `--scan-interval` (0 turns scanning off), `--scan-max-image-size`, and the `grype.anchore.io` download, matching the README flag table. |
 
-Not run: a rebuild of the combined container (Docker was unavailable on this host); the release workflow builds it on tag push.
+Not run: a rebuild of the combined container (Docker was unavailable on this host); the release workflow builds it on tag push. `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w'`, as in the `Containerfile`, built both binaries (86,671,520 and 20,705,440 bytes).
+
+The [release](#v040-release-2026-10-23) itself is recorded below.
+
+## v0.4.0 release (2026-10-23)
+
+With the maintainer's approval, `main` was fast-forwarded to `485ed02` and pushed, and the annotated tag `v0.4.0` ("lupetto v0.4.0") was pushed on that commit. The checks below are read-only against the published image.
+
+| Check | Observed result |
+| --- | --- |
+| Release workflow run `39951565783` (tag push `v0.4.0`) | Completed `success`; `docker/build-push-action` pushed the image and `cosign sign --yes ghcr.io/skel84/lupetto@sha256:bc1a107e…a717` ran on the pushed digest. |
+| `crane digest ghcr.io/skel84/lupetto:v0.4.0` | `sha256:bc1a107e4104a19580837e1faea64fc76c0b87effd2f293135eca05fe682a717`. |
+| `lupetto verify --json --certificate-identity-regexp '^https://github.com/skel84/lupetto/' --certificate-oidc-issuer https://token.actions.githubusercontent.com ghcr.io/skel84/lupetto@sha256:bc1a107e…a717` (CLI built from `485ed02`) | Exit 0; transparency log `verified`; signature `signed`; signer `https://github.com/skel84/lupetto/.github/workflows/release.yml@refs/tags/v0.4.0`, issuer `https://token.actions.githubusercontent.com`; attestation `absent` (the workflow signs but does not attest). |
+| `crane config` of the digest | `linux/amd64`; `Entrypoint` `/usr/local/bin/lupetto-explorer`, `Cmd` `--listen 0.0.0.0:8080 --products /etc/lupetto/products/products.yaml`; `XDG_CACHE_HOME=/var/cache/lupetto`, `XDG_DATA_HOME=/var/lib/lupetto`. |
+| `crane manifest` layer sizes, v0.3.1 and v0.4.0 | 106 MiB and 130 MiB compressed. |
+| `crane export` of the digest; `go version -m` on the binaries | `lupetto-explorer` (86,667,424 bytes) built with go1.27.1 and `github.com/anchore/grype v0.121.0`, with the `--scan-max-image-size` flag; `lupetto` (20,705,440 bytes) has no Anchore modules. |
+
+`gh release create v0.4.0 --verify-tag --title "lupetto v0.4.0" --latest` published the [GitHub release](https://github.com/skel84/lupetto/releases/tag/v0.4.0) with `docs/release-notes/v0.4.0.md` at the tag as its body, its relative links rewritten to the tagged files. The repository's latest release is `v0.4.0`, neither draft nor prerelease.
+
+Not exercised: running the published container (Docker was unavailable on this host), so its first database download and scans were observed only with the darwin build above.
