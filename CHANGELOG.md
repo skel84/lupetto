@@ -2,6 +2,15 @@
 
 User-visible changes to the `lupetto` CLI, `lupetto-explorer`, and the combined container. Releases are git tags `vX.Y.Z`; the [release workflow](.github/workflows/release.yml) publishes the combined Explorer image for each tag.
 
+## v0.3.1 (unreleased)
+
+Fixes a v0.3.0 regression that rejected builds of some packages. See the [release notes](docs/release-notes/v0.3.1.md).
+
+### Fixed
+
+- **SPDX validation of packages without origin entries.** v0.3.0 failed builds such as `kubectl-1.33 1.33` with `SPDX missing installed APK entry kubectl-1.33@1.33.4-r3 (x86_64)`. Newer Wolfi package SBOMs add an `origin` purl, older ones do not, and the always-added base layout made validation demand one from every APK. Origin entries are now optional per package; every locked APK still needs exactly one `distro` entry, and extra, duplicate, or changed entries of either kind still fail. ([decision](docs/decisions.md#optional-spdx-origin-entries-2026-10-23))
+- **Failure causes in publication builds.** When a publication build failed in a local stage (build, SPDX validation, Docker load or tagging, result recording), stderr said only `build stage failed (…): build failed`. It now prints the detailed cause, as builds without publication do. `failure.json` and the `--json` record keep the sanitized message; registry and Cosign errors stay sanitized everywhere.
+
 ## v0.3.0 (2026-10-23)
 
 Vulnerability scanners can now identify every Lupetto image as Wolfi. See the [release notes](docs/release-notes/v0.3.0.md) for upgrade guidance.

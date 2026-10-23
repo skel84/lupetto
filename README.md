@@ -365,7 +365,7 @@ lupetto sbom valkey --apk-version 9.1.2-r1
 
 `sbom` composes a **new OCI image and workspace** through the same exact-build path. It does not extract metadata from an existing image. It requires `--apk-version`, never loads/publishes/signs, rejects `--no-load` and all explicit publication/signing flags (including empty/false forms), and ignores all `LUPETTO_*` publication/signing environment inputs.
 
-Lupetto checks the selected installed APK's name/version/architecture and requires the complete locked Wolfi APK identity set to match apko's architecture SPDX APK entries, including the supported `distro`/installed `origin` purl forms. Non-APK image, OS, and build-recipe entries are excluded. The supplemental index SPDX is **not** lock-validated. This validation does not independently compare every installed dependency against the image, prove SPDX completeness, or scan vulnerabilities.
+Lupetto checks the selected installed APK's name/version/architecture and requires the complete locked Wolfi APK identity set to match apko's architecture SPDX APK entries, as `distro` purls. The `origin` purls that newer package SBOMs add are optional per package but must also name locked APKs. Non-APK image, OS, and build-recipe entries are excluded. The supplemental index SPDX is **not** lock-validated. This validation does not independently compare every installed dependency against the image, prove SPDX completeness, or scan vulnerabilities.
 
 ## Retained evidence and failures
 
@@ -424,7 +424,7 @@ Every `build` and `sbom` run that passes argument validation produces one **vers
 - `request.entrypoint` (a string array) appears only when an [entrypoint](#image-entrypoint) was requested, and `request.caBundle` (`true`) only when the [CA bundle](#ca-certificate-bundle) was; records without them are unchanged.
 - `selection` appears once an APK is selected, `evidence` once SPDX is validated, `workspace` once one exists. `evidence.imageDigest` is the local OCI manifest digest, which equals the published digest.
 - Load references are intended names when loading is skipped; `readableReferenceConfirmed: false` with `loaded` means the readable tag could not be confirmed.
-- Publication workflows keep `failure.error` to a sanitized stage message; local-only workflows record the detailed local error (capped at 8 KiB).
+- Publication workflows keep `failure.error` to a sanitized stage message; local-only workflows record the detailed local error (capped at 8 KiB). Stderr always prints the detailed error of the local `build`, `load`, `readable-tag`, and `record` stages; registry and Cosign stages stay sanitized there too.
 
 The schema changes only with a new `version`; version 3–5 records from earlier releases are not migrated. Explorer accepts only version-6 build/SBOM records in inventory, kind `status` version-2 documents, and kind `discover`, `products`, `images`, and `inspect` version-1 documents; incompatible versions are explicit errors. Live build stdout must be a `build` record. Status version 2 preserves the original `ids` links and adds per-ID advisory severity, per-group maximum severity, and the enrichment summary; older Explorer binaries requiring status version 1 must be upgraded with the CLI.
 
