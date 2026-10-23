@@ -62,6 +62,7 @@ type Track struct {
 	Package           string            `json:"package"`
 	Selector          string            `json:"selector"`
 	State             string            `json:"state"`
+	ConfigChanges     []string          `json:"configChanges,omitempty"`
 	Error             string            `json:"error,omitempty"`
 	Latest            *PackageIdentity  `json:"latest,omitempty"`
 	Repository        string            `json:"repository,omitempty"`

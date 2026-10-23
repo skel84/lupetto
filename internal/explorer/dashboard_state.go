@@ -297,6 +297,9 @@ func joinTrack(track Track, inventory *ImagesDocument) ProductRow {
 	if track.Latest != nil && track.Newest != nil && track.Latest.Version != track.Newest.Version {
 		row.VerdictDetail = track.Newest.Version + " → " + track.Latest.Version
 	}
+	if track.State == "config-changed" && len(track.ConfigChanges) > 0 {
+		row.VerdictDetail = configChangeDetail(track.ConfigChanges)
+	}
 	if track.State == "not-built" {
 		for _, version := range row.Versions {
 			if len(version.LocalImages) > 0 || len(version.Builds) > 0 {
@@ -388,4 +391,23 @@ func liveStagesAt(active int, request BuildRequest) []BuildStage {
 		stages[active].Status = "running"
 	}
 	return stages
+}
+
+// configChangeDetail describes what a rebuild changes, from the status
+// track's configChanges; unknown values are shown as they are.
+func configChangeDetail(changes []string) string {
+	labels := make([]string, len(changes))
+	for i, change := range changes {
+		switch change {
+		case "entrypoint":
+			labels[i] = "entrypoint"
+		case "caBundle":
+			labels[i] = "CA bundle"
+		case "baseLayout":
+			labels[i] = "adds Wolfi base layout (scanner OS identity)"
+		default:
+			labels[i] = change
+		}
+	}
+	return "Rebuild changes: " + strings.Join(labels, ", ")
 }

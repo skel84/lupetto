@@ -922,3 +922,24 @@ func TestDashboardPublishLoadInvalidatesInventory(t *testing.T) {
 		t.Fatalf("inventory not re-read: %s", data)
 	}
 }
+
+func TestDashboardConfigChangeDetail(t *testing.T) {
+	track := fixtureTrack()
+	track.State = "config-changed"
+	track.ConfigChanges = []string{"entrypoint", "caBundle", "baseLayout", "future"}
+	row := joinTrack(track, nil)
+	if row.Verdict != "Configuration changed" || row.VerdictKind != "rebuild" || row.Action.Label != "Rebuild" || row.VerdictDetail != "Rebuild changes: entrypoint, CA bundle, adds Wolfi base layout (scanner OS identity), future" {
+		t.Fatalf("row: %+v", row)
+	}
+	// An update keeps its version detail; the rebuild applies the change too.
+	track = fixtureTrack()
+	track.State = "update-available"
+	track.ConfigChanges = []string{"baseLayout"}
+	if row := joinTrack(track, nil); strings.Contains(row.VerdictDetail, "Rebuild changes") {
+		t.Fatalf("update detail: %+v", row)
+	}
+	var decoded Track
+	if err := json.Unmarshal([]byte(`{"package":"metrics-server","selector":"0","state":"config-changed","configChanges":["baseLayout"]}`), &decoded); err != nil || strings.Join(decoded.ConfigChanges, ",") != "baseLayout" {
+		t.Fatalf("decoded=%+v err=%v", decoded, err)
+	}
+}
