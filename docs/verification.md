@@ -1622,3 +1622,19 @@ Checks run on the `v0.3.1-spdx-origin` branch after the [SPDX and stderr fixes](
 | Relative links and anchors in `README.md`, `CHANGELOG.md`, `docs/*.md`, `docs/release-notes/*.md`, and `AGENTS.md` | All resolve. |
 | `bash -n` on the 42 Bash-fenced blocks in `README.md`, `CHANGELOG.md`, `docs/*.md`, and the release notes | All pass (syntax only, not execution). |
 | `lupetto help` | Unchanged by these fixes; it does not describe SPDX entry kinds or failure sanitization. |
+
+The [release](#v031-release-2026-10-23) itself is recorded below.
+
+## v0.3.1 release (2026-10-23)
+
+With the maintainer's approval, the maintainer fast-forwarded `main` to `69bd006`, pushed it, and pushed the annotated tag `v0.3.1` ("lupetto v0.3.1") on that commit. The checks below are read-only against the published image, except the local build in it.
+
+| Check | Observed result |
+| --- | --- |
+| Release workflow run `39942200542` (tag push `v0.3.1`) | Completed `success`; `docker/build-push-action` pushed the image and `cosign sign --yes ghcr.io/skel84/lupetto@sha256:61df5b1a…6e85` ran on the pushed digest. |
+| `crane digest ghcr.io/skel84/lupetto:v0.3.1` | `sha256:61df5b1a688679bd03052faf814d876b3574584fbc6aea830f5a2bef1e206e85`. |
+| `lupetto verify --json --certificate-identity-regexp '^https://github.com/skel84/lupetto/' --certificate-oidc-issuer https://token.actions.githubusercontent.com ghcr.io/skel84/lupetto@sha256:61df5b1a…6e85` (CLI built from `69bd006`) | Exit 0; transparency log `verified`; signature `signed`; signer `https://github.com/skel84/lupetto/.github/workflows/release.yml@refs/tags/v0.3.1`, issuer `https://token.actions.githubusercontent.com`; attestation `absent` (the workflow signs but does not attest). |
+| `crane config` of the digest | `linux/amd64`; `Entrypoint` `/usr/local/bin/lupetto-explorer`, `Cmd` `--listen 0.0.0.0:8080 --products /etc/lupetto/products/products.yaml`. |
+| `docker run --rm --platform linux/amd64 --entrypoint lupetto <digest> build kubectl-1.33 1.33 --no-load --json` | Outcome `succeeded`, `kubectl-1.33@1.33.4-r3` for `x86_64`, `spdxValidated: true`: the build v0.3.0's image rejected. |
+
+`gh release create v0.3.1 --verify-tag --title "lupetto v0.3.1" --latest` published the [GitHub release](https://github.com/skel84/lupetto/releases/tag/v0.3.1) with `docs/release-notes/v0.3.1.md` at the tag as its body, its relative links rewritten to the tagged files. `gh release view v0.3.1` reports it as the latest, neither draft nor prerelease.
