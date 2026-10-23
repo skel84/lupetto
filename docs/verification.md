@@ -1609,3 +1609,16 @@ This records the evidence for the [optional SPDX origin entries](decisions.md#op
 **Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test ./... -count=1` and `go test -race ./... -count=1` passed; `git diff --check` clean.
 
 Not exercised: an aarch64 build, and a publication run against a live registry.
+
+## v0.3.1 release readiness (2026-10-23)
+
+Checks run on the `v0.3.1-spdx-origin` branch after the [SPDX and stderr fixes](#optional-spdx-origin-entries-v031), on darwin/amd64 with Go 1.27.1.
+
+| Check | Observed result |
+| --- | --- |
+| `gofmt -l .`, `go vet -composites=false ./...`, `go test ./... -count=1` | Empty, passed, passed. |
+| `go test -race ./... -count=1` | Passed. |
+| `git diff --check v0.3.0` | No whitespace errors. |
+| Relative links and anchors in `README.md`, `CHANGELOG.md`, `docs/*.md`, `docs/release-notes/*.md`, and `AGENTS.md` | All resolve. |
+| `bash -n` on the 42 Bash-fenced blocks in `README.md`, `CHANGELOG.md`, `docs/*.md`, and the release notes | All pass (syntax only, not execution). |
+| `lupetto help` | Unchanged by these fixes; it does not describe SPDX entry kinds or failure sanitization. |

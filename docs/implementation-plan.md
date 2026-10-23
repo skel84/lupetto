@@ -168,7 +168,8 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 
 - [x] Accept SPDX documents where only some APKs have `origin` purls, still requiring one `distro` purl per locked APK and rejecting extra, duplicate, or changed `origin` entries ([decision](decisions.md#optional-spdx-origin-entries-2026-10-23)). `build kubectl-1.33 1.33`, `helm --apk-version 4.0.1-r0`, and `flux --apk-version 2.7.5-r1` failed with the v0.3.0 code and now succeed with validated SPDX; a survey of 142 Wolfi APKs found 8 without origin entries and none without an SBOM ([evidence](verification.md#optional-spdx-origin-entries-v031)).
 - [x] Print the detailed cause of the local build, load, readable-tag, and record stages on stderr in publication workflows, keeping `failure.json` sanitized ([decision](decisions.md#local-stage-causes-on-stderr-2026-10-23)). A real publication build without apko printed `apko 1.4.5 is required: …` where v0.3.0 printed `build failed` ([evidence](verification.md#optional-spdx-origin-entries-v031)).
-- [ ] Tag `v0.3.1`, push it, and let the release workflow publish and sign the image. Waiting for the maintainer's approval.
+- [x] Changelog, [release notes](release-notes/v0.3.1.md), and documentation for both fixes; race tests, link, diff, and Bash-syntax checks ([evidence](verification.md#v031-release-readiness-2026-10-23)).
+- [ ] Tag `v0.3.1`, push it, and let the release workflow publish and sign the image. Approved by the maintainer; in progress.
 
 ### 4. Add Explorer as an optional application
 
