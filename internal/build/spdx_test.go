@@ -34,7 +34,12 @@ func TestValidateSPDXCompleteAPKSet(t *testing.T) {
 	}{
 		{"valid with non-APK and installed entries", []any{container, osEntry, melange, nginx, base, origin("nginx-stable", "1.30.2-r0"), origin("wolfi-baselayout", "20230201-r30")}, lock, true, ""},
 		{"missing dependency", []any{container, nginx}, lock, false, "missing locked APK"},
-		{"missing installed dependency", []any{nginx, base, origin("nginx-stable", "1.30.2-r0")}, lock, false, "missing installed APK"},
+		// Older package SBOMs carry only the distro entry, so origin entries are per package.
+		{"origin entry for only some packages", []any{nginx, base, origin("wolfi-baselayout", "20230201-r30")}, lock, true, ""},
+		{"origin entry without distro entry", []any{nginx, origin("wolfi-baselayout", "20230201-r30")}, lock, false, "missing locked APK"},
+		{"extra origin entry", []any{nginx, base, origin("extra", "1-r0")}, lock, false, "extra or duplicate"},
+		{"changed origin revision", []any{nginx, base, origin("nginx-stable", "1.30.2-r1")}, lock, false, "extra or duplicate"},
+		{"duplicate origin entry", []any{nginx, base, origin("nginx-stable", "1.30.2-r0"), map[string]any{"SPDXID": "SPDXRef-Package-apk-nginx-copy", "name": "nginx-stable", "versionInfo": "1.30.2-r0", "externalRefs": origin("nginx-stable", "1.30.2-r0")["externalRefs"]}}, lock, false, "extra or duplicate"},
 		{"extra dependency", []any{nginx, base, apk("extra", "1-r0", "x86_64")}, lock, false, "extra or duplicate"},
 		{"changed revision", []any{apk("nginx-stable", "1.30.2-r1", "x86_64"), base}, lock, false, "extra or duplicate"},
 		{"wrong architecture", []any{apk("nginx-stable", "1.30.2-r0", "aarch64"), base}, lock, false, "invalid SPDX APK"},
@@ -166,5 +171,33 @@ func TestValidateSPDXPercentEncodedIdentities(t *testing.T) {
 				t.Fatalf("accepted mismatched or malformed identity: digest=%q", digest)
 			}
 		})
+	}
+}
+
+// apko 1.4.5's real SPDX for kubectl-1.33 1.33.4-r3: kubectl's package SBOM
+// has only a distro entry, while wolfi-baselayout and ca-certificates-bundle
+// also have origin entries. v0.3.0 rejected it.
+func TestValidateSPDXKubectlWithoutOriginEntry(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "lock.json")
+	lock := `{"contents":{"packages":[{"name":"kubectl-1.33","version":"1.33.4-r3","architecture":"x86_64"},{"name":"wolfi-baselayout","version":"20230201-r30","architecture":"x86_64"},{"name":"ca-certificates-bundle","version":"20260909-r3","architecture":"x86_64"}]}}`
+	if err := os.WriteFile(lockPath, []byte(lock), 0600); err != nil {
+		t.Fatal(err)
+	}
+	spdxPath := filepath.Join("testdata", "kubectl-1.33-x86_64.spdx.json")
+	data, err := os.ReadFile(spdxPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := validateSPDX(lockPath, spdxPath, "x86_64")
+	if err != nil || digest != wolfi.SHA256Hex(data) {
+		t.Fatalf("digest=%q err=%v", digest, err)
+	}
+	// The same document must still fail when the lock names an APK it lacks.
+	if err := os.WriteFile(lockPath, []byte(strings.Replace(lock, `]}}`, `,{"name":"glibc","version":"2.44-r8","architecture":"x86_64"}]}}`, 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validateSPDX(lockPath, spdxPath, "x86_64"); err == nil || !strings.Contains(err.Error(), "missing locked APK glibc@2.44-r8") {
+		t.Fatalf("missing APK accepted: %v", err)
 	}
 }
