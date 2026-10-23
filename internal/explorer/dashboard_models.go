@@ -10,6 +10,8 @@ type Product struct {
 	Selectors  []string `json:"selectors"`
 	Entrypoint []string `json:"entrypoint,omitempty"`
 	CABundle   bool     `json:"caBundle,omitempty"`
+	// Upstream maps a selector to the image its Lupetto image replaces.
+	Upstream map[string]string `json:"upstream,omitempty"`
 }
 type ProductsDocument struct {
 	Kind     string    `json:"kind"`

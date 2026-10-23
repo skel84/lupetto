@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 
+	"github.com/distribution/reference"
 	"go.yaml.in/yaml/v3"
 	"lupetto/internal/imageconfig"
 	"lupetto/internal/wolfi"
@@ -26,7 +27,14 @@ type Product struct {
 	Entrypoint []string `yaml:"entrypoint,omitempty" json:"entrypoint,omitempty"`
 	// CABundle adds the CA certificate bundle to every selector's image.
 	CABundle bool `yaml:"caBundle,omitempty" json:"caBundle,omitempty"`
+	// Upstream maps a selector to the image reference that selector's Lupetto
+	// image replaces. Only the Explorer reads it, to compare vulnerabilities;
+	// it does not change what a build produces.
+	Upstream map[string]string `yaml:"upstream,omitempty" json:"upstream,omitempty"`
 }
+
+// MaxUpstreamReferenceBytes bounds one upstream image reference.
+const MaxUpstreamReferenceBytes = 512
 
 // Image returns the image configuration the product's tracks build with.
 func (p Product) Image() imageconfig.Options {
@@ -108,6 +116,16 @@ func checkYAMLTypes(node *yaml.Node) error {
 					}
 				}
 			}
+			if key.Value == "upstream" {
+				if value.Kind != yaml.MappingNode {
+					return errors.New("upstream must map quoted selectors to image references")
+				}
+				for _, element := range value.Content {
+					if element.Kind != yaml.ScalarNode || element.Tag != "!!str" {
+						return errors.New("upstream selectors and image references must be YAML strings")
+					}
+				}
+			}
 			if key.Value == "caBundle" && (value.Kind != yaml.ScalarNode || value.Tag != "!!bool") {
 				return errors.New("caBundle must be true or false")
 			}
@@ -163,6 +181,44 @@ func validateProducts(products Products, allowEmpty bool) error {
 			}
 			seen[key] = true
 		}
+		if err := validateUpstream(product); err != nil {
+			return fmt.Errorf("invalid products upstream for %s: %w", product.Package, err)
+		}
+	}
+	return nil
+}
+
+func validateUpstream(product Product) error {
+	for selector, ref := range product.Upstream {
+		found := false
+		for _, candidate := range product.Selectors {
+			found = found || candidate == selector
+		}
+		if !found {
+			return fmt.Errorf("selector %q is not one of the product's selectors", selector)
+		}
+		if err := ValidateUpstreamReference(ref); err != nil {
+			return fmt.Errorf("selector %q: %w", selector, err)
+		}
+	}
+	return nil
+}
+
+// ValidateUpstreamReference accepts an image reference with a tag or digest,
+// for example registry.k8s.io/metrics-server/metrics-server:v0.8.0. A bare
+// name is rejected because upstream images are version-specific.
+func ValidateUpstreamReference(ref string) error {
+	if len(ref) > MaxUpstreamReferenceBytes {
+		return fmt.Errorf("image reference exceeds %d bytes", MaxUpstreamReferenceBytes)
+	}
+	named, err := reference.ParseNormalizedNamed(ref)
+	if err != nil {
+		return errors.New("not a valid image reference")
+	}
+	_, tagged := named.(reference.Tagged)
+	_, digested := named.(reference.Digested)
+	if !tagged && !digested {
+		return errors.New("image reference needs a tag or digest")
 	}
 	return nil
 }

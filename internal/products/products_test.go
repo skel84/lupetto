@@ -172,3 +172,33 @@ func TestProductsKeepCABundleAcrossMutations(t *testing.T) {
 		t.Fatalf("products=%+v err=%v", document.Products, err)
 	}
 }
+
+func TestProductsUpstreamFollowsSelectors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "products.yaml")
+	original := "version: 1\nproducts:\n  - package: metrics-server\n    selectors: [\"0\", \"1\"]\n    upstream:\n      \"0\": registry.k8s.io/metrics-server/metrics-server:v0.8.0 # pinned\n      \"1\": registry.k8s.io/metrics-server/metrics-server:v1.0.0\n"
+	if err := os.WriteFile(path, []byte(original), 0640); err != nil {
+		t.Fatal(err)
+	}
+	document, err := Run(path, "add", "metrics-server", []string{"2"}, false)
+	if err != nil || len(document.Products[0].Upstream) != 2 {
+		t.Fatalf("add kept upstream: %+v %v", document.Products, err)
+	}
+	document, err = Run(path, "remove", "metrics-server", []string{"1"}, false)
+	if err != nil || len(document.Products[0].Upstream) != 1 || document.Products[0].Upstream["0"] != "registry.k8s.io/metrics-server/metrics-server:v0.8.0" {
+		t.Fatalf("remove one selector: %+v %v", document.Products, err)
+	}
+	data, _ := os.ReadFile(path)
+	if !bytes.Contains(data, []byte("# pinned")) || bytes.Contains(data, []byte("v1.0.0")) {
+		t.Fatalf("upstream after remove:\n%s", data)
+	}
+	document, err = Run(path, "remove", "metrics-server", []string{"0"}, false)
+	if err != nil || document.Products[0].Upstream != nil || strings.Join(document.Products[0].Selectors, ",") != "2" {
+		t.Fatalf("remove last upstream selector: %+v %v", document.Products, err)
+	}
+	if data, _ := os.ReadFile(path); bytes.Contains(data, []byte("upstream")) {
+		t.Fatalf("empty upstream mapping left behind:\n%s", data)
+	}
+	if _, err := Run(path, "remove", "metrics-server", nil, false); err != nil {
+		t.Fatal(err)
+	}
+}

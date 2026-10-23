@@ -61,3 +61,40 @@ func TestSecurityFeedFixedOnlyAndHTTPS(t *testing.T) {
 		}
 	}
 }
+
+func TestProductsUpstream(t *testing.T) {
+	legacy := "version: 1\nproducts:\n- package: metrics-server\n  selectors: [\"0\"]\n  caBundle: true\n"
+	products, err := ParseProducts(strings.NewReader(legacy))
+	if err != nil || products.Products[0].Upstream != nil {
+		t.Fatalf("products without upstream must keep working: %+v, %v", products, err)
+	}
+	valid := legacy + "  upstream:\n    \"0\": registry.k8s.io/metrics-server/metrics-server:v0.8.0\n"
+	products, err = ParseProducts(strings.NewReader(valid))
+	if err != nil || products.Products[0].Upstream["0"] != "registry.k8s.io/metrics-server/metrics-server:v0.8.0" {
+		t.Fatalf("valid upstream: %+v, %v", products, err)
+	}
+	digest := strings.Replace(valid, ":v0.8.0", "@sha256:"+strings.Repeat("a", 64), 1)
+	if _, err := ParseProducts(strings.NewReader(digest)); err != nil {
+		t.Fatalf("digest upstream rejected: %v", err)
+	}
+	if _, err := ParseProducts(strings.NewReader(strings.Replace(valid, "registry.k8s.io/metrics-server/metrics-server:v0.8.0", "busybox:1.37", 1))); err != nil {
+		t.Fatalf("Docker Hub short name rejected: %v", err)
+	}
+	for name, data := range map[string]string{
+		"unknown selector": strings.Replace(valid, "    \"0\":", "    \"1\":", 1),
+		"numeric selector": strings.Replace(valid, "    \"0\":", "    0:", 1),
+		"no tag":           strings.Replace(valid, ":v0.8.0", "", 1),
+		"bad reference":    strings.Replace(valid, "metrics-server:v0.8.0", "Metrics Server:v0.8.0", 1),
+		"too long":         strings.Replace(valid, ":v0.8.0", "/"+strings.Repeat("a", MaxUpstreamReferenceBytes)+":v1", 1),
+		"duplicate key":    valid + "    \"0\": busybox:1.37\n",
+		"list":             legacy + "  upstream: [busybox:1.37]\n",
+		"scalar":           legacy + "  upstream: busybox:1.37\n",
+		"nested":           legacy + "  upstream:\n    \"0\": {image: busybox:1.37}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseProducts(strings.NewReader(data)); err == nil {
+				t.Fatal("invalid upstream accepted")
+			}
+		})
+	}
+}

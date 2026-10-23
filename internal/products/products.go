@@ -144,6 +144,7 @@ func Run(path, action, name string, selectors []string, create bool) (Document, 
 			}
 			values.Content = kept
 			if len(kept) != 0 {
+				removeUpstream(product, kept)
 				remaining = append(remaining, product)
 			}
 		}
@@ -187,6 +188,35 @@ func Run(path, action, name string, selectors []string, create bool) (Document, 
 		}
 	}
 	return Document{Kind: "products", Version: 1, Products: parsed.Products, Changed: changed, Message: message}, nil
+}
+
+// removeUpstream drops upstream entries for selectors no longer tracked, and
+// the upstream mapping itself once it is empty, so the file stays valid.
+func removeUpstream(product *yaml.Node, selectors []*yaml.Node) {
+	upstream := mappingValue(product, "upstream")
+	if upstream == nil || upstream.Kind != yaml.MappingNode {
+		return
+	}
+	tracked := map[string]bool{}
+	for _, selector := range selectors {
+		tracked[selector.Value] = true
+	}
+	kept := make([]*yaml.Node, 0, len(upstream.Content))
+	for i := 0; i+1 < len(upstream.Content); i += 2 {
+		if tracked[upstream.Content[i].Value] {
+			kept = append(kept, upstream.Content[i], upstream.Content[i+1])
+		}
+	}
+	upstream.Content = kept
+	if len(kept) != 0 {
+		return
+	}
+	for i := 0; i+1 < len(product.Content); i += 2 {
+		if product.Content[i].Value == "upstream" {
+			product.Content = append(product.Content[:i], product.Content[i+2:]...)
+			return
+		}
+	}
 }
 
 func mappingValue(node *yaml.Node, key string) *yaml.Node {
