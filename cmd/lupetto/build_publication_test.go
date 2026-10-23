@@ -227,6 +227,29 @@ func TestBuildPublicationTypedPartialFailureAndV6FailureRecord(t *testing.T) {
 	}
 }
 
+// A publication workflow whose SPDX validation fails must still print the
+// validation cause on stderr even with --json, while failure.json keeps the
+// sanitized stage message.
+func TestBuildPublicationLocalCauseReachesStderr(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f := newPipelineFixture(t, "SPDX", cancel)
+	registry := addRegistryFixture(t, f, "", cancel)
+	var stdout, stderr bytes.Buffer
+	code := runWithBuild(ctx, append(publicationCLIArgs(registry.Host), "--json", "--no-load"), &stdout, &stderr, func(ctx context.Context, request cliRequest) (build.Result, error) {
+		return build.RunWith(ctx, request.Request, f.services)
+	})
+	want := "lupetto: build stage failed (workspace: " + f.workspace + "): validate SPDX against apko lock: extra or duplicate SPDX APK postgresql-17@17.10-r2"
+	if code != 1 || !strings.Contains(stderr.String(), want) {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	data := mustRead(t, filepath.Join(f.workspace, "failure.json"))
+	record, _ := readRecord(t, filepath.Join(f.workspace, "failure.json"))
+	if !bytes.Equal(stdout.Bytes(), data) || record.Failure == nil || record.Failure.Stage != "build" || record.Failure.Error != "build failed" {
+		t.Fatalf("stdout=%q record=%+v", stdout.String(), record.Failure)
+	}
+}
+
 func TestBuildPublicationEarlyToolFailureIsTypedAndSanitized(t *testing.T) {
 	request := build.Request{Publication: build.PublicationOptions{Registry: "localhost:5000", Repository: "team/images"}}
 	services := build.Services{Command: func(context.Context, string, ...string) ([]byte, error) {
@@ -234,15 +257,16 @@ func TestBuildPublicationEarlyToolFailureIsTypedAndSanitized(t *testing.T) {
 	}}
 	_, err := build.RunWith(context.Background(), request, services)
 	var wf *build.WorkflowFailure
-	if !errors.As(err, &wf) || wf.Result.Workspace != "" || wf.Result.Build != "failed" || wf.Result.DockerLoad != "not-attempted" || wf.Result.Publication.Status != "not-attempted" || strings.Contains(err.Error(), buildtest.PublicationCanary) || bytes.Contains(wf.Record, []byte(buildtest.PublicationCanary)) {
+	if !errors.As(err, &wf) || wf.Result.Workspace != "" || wf.Result.Build != "failed" || wf.Result.DockerLoad != "not-attempted" || wf.Result.Publication.Status != "not-attempted" || bytes.Contains(wf.Record, []byte(buildtest.PublicationCanary)) {
 		t.Fatalf("workflow=%+v err=%v", wf, err)
 	}
 	var record build.Record
 	if err := json.Unmarshal(wf.Record, &record); err != nil || record.Workspace != "" || record.Selection != nil || record.Evidence != nil || record.Failure.Error != "build failed" {
 		t.Fatalf("record=%s err=%v", wf.Record, err)
 	}
+	// The record stays sanitized; stderr still names the local build cause.
 	var stderr bytes.Buffer
-	if !reportWorkflowFailure(&stderr, err) || strings.Contains(stderr.String(), buildtest.PublicationCanary) || strings.Contains(stderr.String(), "could not be retained") {
+	if !reportWorkflowFailure(&stderr, err) || !strings.Contains(stderr.String(), "lupetto: build stage failed: apko 1.4.5 is required") || strings.Contains(stderr.String(), "could not be retained") {
 		t.Fatalf("stderr=%q", stderr.String())
 	}
 }

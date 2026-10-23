@@ -58,8 +58,12 @@ func TestBuildSigningEarlierApkoFailureKeepsRequestedNotAttempted(t *testing.T) 
 	}
 	result, err := RunWith(context.Background(), request, services)
 	var wf *WorkflowFailure
-	if !errors.As(err, &wf) || wf.Stage != "build" || wf.Result.Build != "failed" || result.Signing != "not-attempted" || result.Attestation != "not-attempted" || wf.Result.Signing != "not-attempted" || wf.Result.Attestation != "not-attempted" || strings.Contains(err.Error(), buildtest.SigningCanary) {
+	if !errors.As(err, &wf) || wf.Stage != "build" || wf.Result.Build != "failed" || result.Signing != "not-attempted" || result.Attestation != "not-attempted" || wf.Result.Signing != "not-attempted" || wf.Result.Attestation != "not-attempted" || bytes.Contains(wf.Record, []byte(buildtest.SigningCanary)) {
 		t.Fatalf("result=%+v workflow=%+v err=%v", result, wf, err)
+	}
+	// The local build stage keeps its detailed cause for stderr only.
+	if !strings.Contains(err.Error(), "apko 1.4.5 is required") {
+		t.Fatalf("lost local build cause: %v", err)
 	}
 }
 

@@ -198,23 +198,35 @@ func retainBuildResult(ctx context.Context, result Result) ([]byte, error) {
 
 // WorkflowFailure carries every post-validation failure with its stage
 // outcomes and the exact failure record bytes. For publication workflows the
-// cause is a sanitized stage error; local-only workflows keep the detailed
-// local message the CLI has always printed.
+// cause, and so the record, is a sanitized stage error; local-only workflows
+// keep the detailed local message the CLI has always printed.
 type WorkflowFailure struct {
-	Result      Result
-	Stage       string
-	Cause       error
+	Result Result
+	Stage  string
+	Cause  error
+	// Detail is the unsanitized cause of a sanitized local stage (one that
+	// runs no registry or Cosign operation). Error, and so stderr, reports it;
+	// the record keeps Cause.
+	Detail      error
 	SideEffects bool
 	Record      []byte
 	RecordErr   error
 }
 
 func (f *WorkflowFailure) Error() string {
-	if f.Result.Workspace == "" {
-		return fmt.Sprintf("%s stage failed: %v", f.Stage, f.Cause)
+	cause := f.Cause
+	if f.Detail != nil {
+		cause = f.Detail
 	}
-	return fmt.Sprintf("%s stage failed (workspace: %s): %v", f.Stage, f.Result.Workspace, f.Cause)
+	if f.Result.Workspace == "" {
+		return fmt.Sprintf("%s stage failed: %v", f.Stage, cause)
+	}
+	return fmt.Sprintf("%s stage failed (workspace: %s): %v", f.Stage, f.Result.Workspace, cause)
 }
+
+// localStages run no registry or Cosign operation, so their errors carry no
+// registry responses or credential-helper output.
+var localStages = map[string]bool{"build": true, "load": true, "readable-tag": true, "record": true}
 
 func (f *WorkflowFailure) Unwrap() error { return f.Cause }
 
@@ -226,6 +238,9 @@ func NewWorkflowFailure(result Result, stage string, cause error, sanitize bool)
 	f := &WorkflowFailure{Result: result, Stage: stage, Cause: cause,
 		SideEffects: stageEntered(result.DockerLoad) || stageEntered(result.Publication.Status) || stageEntered(result.Signing) || stageEntered(result.Attestation)}
 	if sanitize {
+		if localStages[stage] && cause != nil {
+			f.Detail = cause
+		}
 		f.Cause = safeStageError(nil, stage, cause)
 		var safe *publicationStageError
 		if errors.As(cause, &safe) {
