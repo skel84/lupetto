@@ -442,7 +442,7 @@ Continue with the [registry, signing, and verification guide](docs/registry-sign
 | [Implementation checklist](docs/implementation-plan.md) | Single progress record and CLI/Explorer release gates. |
 | [Verification](docs/verification.md) | Recorded observations, limitations, and remaining checks. |
 | [Registry, signing, and verification](docs/registry-signing.md) | Detailed operator instructions and security boundaries. |
-| [Changelog](CHANGELOG.md) | User-visible changes per release, with release notes for upgrades ([v0.2.0](docs/release-notes/v0.2.0.md), [v0.3.0](docs/release-notes/v0.3.0.md), unreleased). |
+| [Changelog](CHANGELOG.md) | User-visible changes per release, with release notes for upgrades ([v0.2.0](docs/release-notes/v0.2.0.md), [v0.3.0](docs/release-notes/v0.3.0.md)). |
 
 The rebuild is based on the operator-documentation request for a lost implementation. The overwritten older checkout is excluded from evidence/design; no historical source or executable claims are inferred from it. [AGENTS.md](AGENTS.md) contains repository instructions for coding agents.
 

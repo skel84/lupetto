@@ -2,7 +2,7 @@
 
 User-visible changes to the `lupetto` CLI, `lupetto-explorer`, and the combined container. Releases are git tags `vX.Y.Z`; the [release workflow](.github/workflows/release.yml) publishes the combined Explorer image for each tag.
 
-## v0.3.0 (unreleased)
+## v0.3.0 (2026-10-23)
 
 Vulnerability scanners can now identify every Lupetto image as Wolfi. See the [release notes](docs/release-notes/v0.3.0.md) for upgrade guidance.
 

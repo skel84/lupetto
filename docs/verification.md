@@ -1558,3 +1558,16 @@ The false clean is Trivy's; Grype without `os-release` lost only the APK matches
 **Gates.** `gofmt -l .` empty; `go vet -composites=false ./...` passed; `go test -race ./... -count=1` passed. The first `go test ./... -count=1` failed `TestSeverityRateWaitHonorsBudget` (`got unknown/pending, want high/nvd-cvss-v3.1`), a timing test this branch does not change; it failed once in 50 isolated runs both here and on `main`, and the full suite passed on rerun.
 
 Not exercised: an aarch64 build, signing or attesting an image with the base layout, Docker-loaded images with it, and a real image whose `os-release` is wrong (covered hermetically).
+
+## v0.3.0 release readiness (2026-10-23)
+
+Checks run on the `v0.3.0-baselayout` branch after the [base layout](#wolfi-base-layout-v030) change, on darwin/amd64 with Go 1.27.1.
+
+| Check | Observed result |
+| --- | --- |
+| `gofmt -l .`, `go vet -composites=false ./...`, `go test ./... -count=1` | Empty, passed, passed. |
+| `go test -race ./... -count=1` | Passed. |
+| `git diff --check v0.2.0` | No whitespace errors. |
+| Relative links and anchors in `README.md`, `CHANGELOG.md`, `docs/*.md`, `docs/release-notes/*.md`, `AGENTS.md`, and the Explorer contract | All resolve. |
+| `bash -n` on the 42 Bash-fenced blocks in `README.md`, `CHANGELOG.md`, `docs/*.md`, and the release notes | All pass (syntax only, not execution). |
+| `lupetto help` | States that every image gets `wolfi-baselayout` and its `/etc/os-release` is checked, and that a track is `config-changed` when its newest image lacks the base layout. |
