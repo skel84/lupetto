@@ -1664,3 +1664,18 @@ This records the evidence for the [upstream vulnerability comparison](decisions.
 | `go build -trimpath -ldflags='-s -w'` of `lupetto-explorer`, v0.3.1 and this branch | 10,085,456 and 87,451,152 bytes. |
 
 Not exercised: an aarch64 scan, private upstream registries with credentials, a Linux container's memory use (Docker was unavailable on this host, so the container image was not rebuilt), images near the 2 GiB default limit, and a database update during a running Explorer.
+
+## v0.4.0 release readiness (2026-10-23)
+
+Checks run on the `v0.4.0-upstream-vulns` branch after the [comparison](#upstream-vulnerability-comparison-v040) change, on darwin/amd64 with Go 1.27.1.
+
+| Check | Observed result |
+| --- | --- |
+| `gofmt -l .`, `go vet -composites=false ./...`, `go test ./... -count=1` | Empty, passed, passed. |
+| `go test -race ./... -count=1` | Passed. |
+| `git diff --check v0.3.1 HEAD` | No whitespace errors. |
+| Relative links and anchors in `README.md`, `CHANGELOG.md`, `docs/*.md`, `docs/release-notes/*.md`, and `AGENTS.md` | All resolve. |
+| `bash -n` on the 42 Bash-fenced blocks in `README.md`, `CHANGELOG.md`, `AGENTS.md`, the Explorer contract, `docs/*.md`, and the release notes | All pass (syntax only, not execution). |
+| `lupetto help`, `lupetto-explorer --help` | The CLI lists the optional `upstream` products setting, read only by Explorer; Explorer documents `--scan-interval` (0 turns scanning off), `--scan-max-image-size`, and the `grype.anchore.io` download, matching the README flag table. |
+
+Not run: a rebuild of the combined container (Docker was unavailable on this host); the release workflow builds it on tag push.

@@ -178,7 +178,7 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 - [x] Vulnerabilities and per-track pages and the Images link, checked in headless Chrome at desktop and phone widths in light and dark ([evidence](verification.md#upstream-vulnerability-comparison-v040)).
 - [x] `GET /metrics` without issue or digest labels, exempt from `--allowed-host` for GET and HEAD only; observed with a foreign Host on a real run ([evidence](verification.md#upstream-vulnerability-comparison-v040)).
 - [x] Egress, disk, memory, and binary-size documentation from measurements: peak 330 MiB, 10 MB → 87 MB stripped ([evidence](verification.md#upstream-vulnerability-comparison-v040)).
-- [ ] Release readiness: race tests, link, diff, and Bash-syntax checks on the final branch.
+- [x] Changelog, [release notes](release-notes/v0.4.0.md), and documentation; race tests, link, diff, and Bash-syntax checks ([evidence](verification.md#v040-release-readiness-2026-10-23)). The combined container was not rebuilt locally.
 - [ ] Tag `v0.4.0` and publish. Not authorized yet; needs the maintainer's approval.
 
 ### 4. Add Explorer as an optional application
