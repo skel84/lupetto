@@ -1,6 +1,7 @@
 package explorer
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -8,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -37,7 +39,10 @@ type Config struct {
 	// database directory (tests); empty means the data and cache defaults.
 	ScanResults, ScanCache string
 	// Version identifies the Explorer to the Grype database server.
-	Version    string
+	Version string
+	// Log receives operator messages, such as a products file that cannot be
+	// read; nil discards them.
+	Log        io.Writer
 	scanEngine scanEngine
 }
 
@@ -58,6 +63,7 @@ type Server struct {
 	signatures    signatureCache
 	jobs          jobRunner
 	vulns         *vulnScanner
+	productsLoad  productsLoad
 	ctx           context.Context
 	cancel        context.CancelFunc
 	mu            sync.Mutex
@@ -162,7 +168,7 @@ func (s *Server) refreshStatusLocked() bool {
 		defer s.wg.Done()
 		ctx, cancel := context.WithTimeout(s.ctx, 5*time.Minute)
 		defer cancel()
-		products, productsErr := s.cli.Products(ctx, s.config.Products, "list", "", nil)
+		products, productsErr := s.listProducts(ctx)
 		if productsErr == nil && len(products.Products) == 0 {
 			s.status.mu.Lock()
 			s.status.view = StatusView{Empty: true}
@@ -296,14 +302,25 @@ func (s *Server) base() BaseView {
 	return BaseView{CSRFToken: s.token, BuildsEnabled: s.config.EnableBuilds, Shell: s.shell()}
 }
 func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, model any) {
+	s.renderStatus(w, r, name, model, http.StatusOK)
+}
+
+// renderStatus renders like render with another HTTP status code.
+func (s *Server) renderStatus(w http.ResponseWriter, r *http.Request, name string, model any, code int) {
 	if r.URL.Query().Get("format") == "json" {
-		writeJSON(w, model)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(code)
+		_ = json.NewEncoder(w).Encode(model)
+		return
+	}
+	var page bytes.Buffer
+	if err := s.renderer.Render(&page, name, model); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.renderer.Render(w, name, model); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	w.WriteHeader(code)
+	_, _ = w.Write(page.Bytes())
 }
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -456,7 +473,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	// products file the build is refused rather than built without it.
 	if s.jobs.enabled {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-		products, err := s.cli.Products(ctx, s.config.Products, "list", "", nil)
+		products, err := s.listProducts(ctx)
 		cancel()
 		if err != nil {
 			http.Error(w, "cannot read the products file for the build's image configuration: "+err.Error(), http.StatusServiceUnavailable)

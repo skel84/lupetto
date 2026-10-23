@@ -1,7 +1,9 @@
 package explorer
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http/httptest"
 	"net/url"
@@ -64,6 +66,12 @@ func (e *fakeScanEngine) set(change func(*fakeScanEngine)) {
 	change(e)
 }
 
+func (e *fakeScanEngine) opened() []bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]bool(nil), e.opens...)
+}
+
 func (e *fakeScanEngine) scanned() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -122,6 +130,25 @@ type vulnFixture struct {
 	engine  *fakeScanEngine
 	update  func(fakeConfig)
 	results string
+	log     *lockedBuffer
+}
+
+// lockedBuffer collects Explorer's log from its background goroutines.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func vulnServer(t *testing.T, engine *fakeScanEngine) vulnFixture {
@@ -137,6 +164,8 @@ func vulnServer(t *testing.T, engine *fakeScanEngine) vulnFixture {
 	config.ScanResults = filepath.Join(dir, "vulnerabilities.json")
 	config.ScanCache = filepath.Join(dir, "cache")
 	config.scanEngine = engine
+	log := &lockedBuffer{}
+	config.Log = log
 	server, err := New(config)
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +181,7 @@ func vulnServer(t *testing.T, engine *fakeScanEngine) vulnFixture {
 	return vulnFixture{server, engine, func(c fakeConfig) {
 		c.Products = vulnProducts
 		update(c)
-	}, config.ScanResults}
+	}, config.ScanResults, log}
 }
 
 func (f vulnFixture) side(source string) *vulnscan.Side {
@@ -458,5 +487,61 @@ func TestIntervalText(t *testing.T) {
 		if got := intervalText(in); got != want {
 			t.Errorf("intervalText(%v) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestVulnProductsLoadFailureIsVisible(t *testing.T) {
+	f := vulnServer(t, &fakeScanEngine{findings: defaultFindings()})
+	broken := goodFake()
+	broken.Status, broken.ProductsExit = vulnStatus(vulnDigest), 1
+	f.update(broken)
+	f.server.Start()
+	eventually(t, func() bool {
+		at, _ := f.server.productsLoadState()
+		return !at.IsZero() && f.server.status.snapshot().Document != nil && f.idle()
+	})
+	f.refreshed(t)
+	eventually(t, f.idle)
+	if opens := f.engine.opened(); len(opens) != 0 {
+		t.Fatalf("database opened without a products file: %v", opens)
+	}
+
+	body := get(t, f.server, "/vulnerabilities", 200)
+	mustContain(t, body, "The products file couldn’t be read", "products file is read-only")
+	if strings.Contains(body, "No tracks") {
+		t.Error("an unreadable products file shown as no tracks")
+	}
+	var view VulnerabilitiesView
+	if err := json.Unmarshal([]byte(get(t, f.server, "/vulnerabilities?format=json", 200)), &view); err != nil || !strings.Contains(view.Scan.ProductsError, "products file is read-only") {
+		t.Fatalf("JSON productsError: %+v %v", view.Scan, err)
+	}
+	// Whether the track is configured is unknown: 503 with the cause, not 404.
+	detail := get(t, f.server, "/vulnerabilities/cmd:curl/1", 503)
+	mustContain(t, detail, "The products file couldn’t be read", "products file is read-only", "cmd:curl")
+	if strings.Contains(detail, "not in the products file") || strings.Contains(detail, "No results yet") {
+		t.Error("track page hides the products error")
+	}
+	if w := request(f.server, "GET", "/vulnerabilities/cmd:curl/1?format=json", nil); w.Code != 503 || !strings.Contains(w.Body.String(), `"productsError"`) {
+		t.Fatalf("track JSON: %d %s", w.Code, w.Body)
+	}
+	mustContain(t, get(t, f.server, "/metrics", 200), "lupetto_products_load_success 0", "lupetto_products_load_timestamp_seconds ")
+	// Every attempt failed the same way; the log says so once.
+	if log := f.log.String(); strings.Count(log, "could not be read: ") != 1 || !strings.Contains(log, "products file products.yaml could not be read: ") || !strings.Contains(log, "products file is read-only") {
+		t.Fatalf("log:\n%s", log)
+	}
+
+	fixed := goodFake()
+	fixed.Status = vulnStatus(vulnDigest)
+	f.update(fixed)
+	f.refreshed(t)
+	eventually(t, func() bool { return f.side("upstream") != nil && f.side("upstream").Success && f.idle() })
+	mustContain(t, get(t, f.server, "/metrics", 200), "lupetto_products_load_success 1")
+	if body := get(t, f.server, "/vulnerabilities", 200); strings.Contains(body, "couldn’t be read") {
+		t.Error("products error still shown after recovery")
+	}
+	get(t, f.server, "/vulnerabilities/cmd:curl/1", 200)
+	get(t, f.server, "/vulnerabilities/cmd:curl/2", 404)
+	if !strings.Contains(f.log.String(), "products file products.yaml can be read again") {
+		t.Fatalf("recovery not logged:\n%s", f.log.String())
 	}
 }

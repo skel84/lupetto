@@ -59,6 +59,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if info, ok := debug.ReadBuildInfo(); ok {
 		config.Version = info.Main.Version
 	}
+	config.Log = stderr
 	server, err := explorer.New(config)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err)

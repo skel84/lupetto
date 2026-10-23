@@ -4,7 +4,8 @@
 {{define "grype-sev"}}{{if eq . "negligible"}}<span class="sev sev-unknown">{{template "icon" "sev-unknown"}}Negligible</span>{{else}}{{template "sev-badge" .}}{{end}}{{end}}
 
 {{/* Root: VulnScanView. Scanner state, database and the Rescan form. */}}
-{{define "vuln-scan"}}{{if .StoreError}}<div class="banner warn" role="alert">{{template "icon-lg" "error"}}<div class="body"><p><strong>Earlier scan results couldn’t be read; they will be replaced by the next scan.</strong></p><pre class="errtext">{{.StoreError}}</pre></div></div>{{end}}
+{{define "vuln-scan"}}{{if .ProductsError}}<div class="banner error" role="alert">{{template "icon-lg" "error"}}<div class="body"><p><strong>The products file couldn’t be read.</strong> Tracks, upstream images and scans are unavailable until it can be; earlier results are kept. Check the <span class="mono">--products</span> path and its mount.</p><pre class="errtext">{{.ProductsError}}</pre></div></div>{{end}}
+{{if .StoreError}}<div class="banner warn" role="alert">{{template "icon-lg" "error"}}<div class="body"><p><strong>Earlier scan results couldn’t be read; they will be replaced by the next scan.</strong></p><pre class="errtext">{{.StoreError}}</pre></div></div>{{end}}
 {{if .SaveError}}<div class="banner warn" role="alert">{{template "icon-lg" "error"}}<div class="body"><p><strong>Scan results couldn’t be saved.</strong> They are kept in memory and lost if Explorer stops before a save succeeds.</p><pre class="errtext">{{.SaveError}}</pre></div></div>{{end}}
 {{if .DBError}}<div class="banner warn" role="alert">{{template "icon-lg" "error"}}<div class="body"><p><strong>The vulnerability database couldn’t be updated{{if not .DBCheckedAt.IsZero}} at {{template "time" .DBCheckedAt}}{{end}}.</strong>{{if .DB}} Scans use the installed database.{{else}} No database is installed, so nothing could be scanned.{{end}}</p><pre class="errtext">{{.DBError}}</pre></div></div>{{end}}
 <dl class="kv vuln-scan"><dt>Scanner</dt><dd>Grype {{.GrypeVersion}}, every {{.Interval}}</dd>
@@ -51,7 +52,7 @@
 <tr><td class="lead" data-label="Image">Upstream</td>{{with .Upstream}}<td class="num" data-label="Critical">{{.Critical}}</td><td class="num" data-label="High">{{.High}}</td><td class="num" data-label="Medium">{{.Medium}}</td><td class="num" data-label="Low">{{.Low}}</td><td class="num" data-label="Negligible">{{.Negligible}}</td><td class="num" data-label="Unknown">{{.Unknown}}</td><td class="num" data-label="Total"><strong>{{.Total}}</strong></td>{{end}}<td></td></tr>
 </tbody>{{end}}
 </table></div>
-{{else}}<div class="empty"><span class="art">{{template "icon-xl" "shield"}}</span><h2>No tracks</h2><p>Track a product to compare it with its upstream image. Add an <span class="mono">upstream</span> image per selector in the products file.</p></div>{{end}}
+{{else if not .Scan.ProductsError}}<div class="empty"><span class="art">{{template "icon-xl" "shield"}}</span><h2>No tracks</h2><p>Track a product to compare it with its upstream image. Add an <span class="mono">upstream</span> image per selector in the products file.</p></div>{{end}}
 {{template "vuln-note"}}
 </div>
 {{template "page-end" .}}
@@ -73,7 +74,7 @@
 <div class="actions"><form method="post" action="/vulnerabilities/scan"><input type="hidden" name="csrfToken" value="{{.CSRFToken}}"><button class="btn" type="submit"{{if .Scan.Running}} disabled{{end}}>{{template "icon" "rebuild"}}Rescan all</button></form></div></div>
 <div class="stack">
 {{template "vuln-scan" .Scan}}
-{{if .Row.DBMismatch}}<div class="banner warn" role="status">{{template "icon-lg" "info"}}<div class="body"><p><strong>The two scans used different database builds</strong>, so some differences may come from the database rather than the images.</p></div></div>{{end}}
+{{if not .Scan.ProductsError}}{{if .Row.DBMismatch}}<div class="banner warn" role="status">{{template "icon-lg" "info"}}<div class="body"><p><strong>The two scans used different database builds</strong>, so some differences may come from the database rather than the images.</p></div></div>{{end}}
 <div class="card table-wrap"><table class="data stackable vulns">{{template "vuln-thead"}}<tbody>
 <tr><td class="lead" data-label="Image">Lupetto{{with .Row.Lupetto.Reference}}<span class="verdict-sub mono">{{.}}</span>{{else}}<span class="verdict-sub">No published image</span>{{end}}</td>{{template "vuln-side-cells" .Row.Lupetto}}</tr>
 <tr><td class="lead" data-label="Image">Upstream{{if .Row.Upstream.Configured}}<span class="verdict-sub mono">{{.Row.Upstream.Reference}}</span>{{with .Row.Upstream.Digest}}<span class="verdict-sub">{{template "short-digest" .}}</span>{{end}}{{else}}<span class="verdict-sub">Not configured in the products file</span>{{end}}</td>{{template "vuln-side-cells" .Row.Upstream}}</tr>
@@ -84,7 +85,7 @@
 <section><div class="section-head"><h2>New</h2><span class="hint">{{len .New}} Lupetto issue{{if ne (len .New) 1}}s{{end}} not found upstream</span></div>{{template "vuln-issues" .New}}</section>
 {{else}}{{if .Source}}
 <section><div class="section-head"><h2>{{if eq .Source "upstream"}}Upstream{{else}}Lupetto{{end}} issues</h2><span class="hint">Only this side has a result, so nothing is compared</span></div>{{template "vuln-issues" .Issues}}</section>
-{{else}}<div class="empty"><span class="art">{{template "icon-xl" "shield"}}</span><h2>No results yet</h2><p>Neither image has been scanned successfully.</p></div>{{end}}{{end}}
+{{else}}<div class="empty"><span class="art">{{template "icon-xl" "shield"}}</span><h2>No results yet</h2><p>Neither image has been scanned successfully.</p></div>{{end}}{{end}}{{end}}
 {{template "vuln-note"}}
 </div>
 {{template "page-end" .}}

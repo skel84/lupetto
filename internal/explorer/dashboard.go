@@ -447,7 +447,7 @@ func (s *Server) downloadSPDX(w http.ResponseWriter, r *http.Request) {
 func (s *Server) tracking(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	d, err := s.cli.Products(ctx, s.config.Products, "list", "", nil)
+	d, err := s.listProducts(ctx)
 	view := TrackingView{BaseView: s.base(), Package: r.URL.Query().Get("package"), Selector: r.URL.Query().Get("selector"), Products: d}
 	if err != nil {
 		view.Error = err.Error()

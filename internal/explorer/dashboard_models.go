@@ -376,6 +376,9 @@ type VulnScanView struct {
 	// SaveError reports that the last results save failed; results are kept
 	// in memory until a save succeeds or Explorer stops.
 	SaveError string `json:"saveError,omitempty"`
+	// ProductsError reports that the products file could not be read for
+	// this page: tracks, upstream images, and scans are unavailable.
+	ProductsError string `json:"productsError,omitempty"`
 }
 
 type VulnRow struct {

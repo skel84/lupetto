@@ -220,7 +220,7 @@ func (s *Server) scanPass(all bool) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
-	products, err := s.cli.Products(ctx, s.config.Products, "list", "", nil)
+	products, err := s.listProducts(ctx)
 	cancel()
 	if err != nil {
 		return
@@ -316,15 +316,16 @@ func (s *Server) vulnScanView() VulnScanView {
 	return VulnScanView{GrypeVersion: vulnscan.GrypeVersion, Interval: intervalText(v.interval), Running: v.running, Current: v.current, DB: state.DB, DBCheckedAt: state.DBCheckedAt, DBError: state.DBError, StoreError: v.storeErr, SaveError: v.saveErr}
 }
 
-// vulnRows builds one row per tracked selector, in products-file order.
-func (s *Server) vulnRows(ctx context.Context) ([]VulnRow, *vulnscan.State, bool) {
+// vulnRows builds one row per tracked selector, in products-file order. When
+// the products file cannot be read there are no rows and the error says why.
+func (s *Server) vulnRows(ctx context.Context) ([]VulnRow, *vulnscan.State, bool, error) {
 	status := s.status.snapshot()
 	state := s.vulns.store.Snapshot()
-	products, err := s.cli.Products(ctx, s.config.Products, "list", "", nil)
-	var list []Product
-	if err == nil {
-		list = products.Products
+	products, err := s.listProducts(ctx)
+	if err != nil {
+		return nil, &state, status.Document == nil, err
 	}
+	list := products.Products
 	now := time.Now()
 	var rows []VulnRow
 	for _, track := range vulnTracks(status.Document, list) {
@@ -343,7 +344,7 @@ func (s *Server) vulnRows(ctx context.Context) ([]VulnRow, *vulnscan.State, bool
 		}
 		rows = append(rows, row)
 	}
-	return rows, &state, status.Document == nil
+	return rows, &state, status.Document == nil, nil
 }
 
 func vulnSide(side *vulnscan.Side, reference string, now time.Time, interval time.Duration) VulnSide {
@@ -403,8 +404,11 @@ func (s *Server) vulnerabilities(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	rows, _, statusMissing := s.vulnRows(ctx)
+	rows, _, statusMissing, err := s.vulnRows(ctx)
 	view := VulnerabilitiesView{BaseView: s.base(), Scan: s.vulnScanView(), Rows: rows, StatusMissing: statusMissing}
+	if err != nil {
+		view.Scan.ProductsError = err.Error()
+	}
 	for _, row := range rows {
 		if row.Delta == nil {
 			continue
@@ -429,8 +433,15 @@ func (s *Server) vulnerabilityTrack(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	rows, state, _ := s.vulnRows(ctx)
+	rows, state, _, err := s.vulnRows(ctx)
 	pkg, selector := r.PathValue("package"), r.PathValue("selector")
+	if err != nil {
+		// Whether the track is configured is unknown, so this is not a 404.
+		view := VulnTrackView{BaseView: s.base(), Scan: s.vulnScanView(), Row: VulnRow{Package: pkg, Selector: selector}}
+		view.Scan.ProductsError = err.Error()
+		s.renderStatus(w, r, "vulnerability", view, http.StatusServiceUnavailable)
+		return
+	}
 	for _, row := range rows {
 		if row.Package != pkg || row.Selector != selector {
 			continue

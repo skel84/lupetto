@@ -25,6 +25,8 @@ var (
 	metricDBBuilt          = prometheus.NewDesc("lupetto_vulnerability_db_built_timestamp_seconds", "Build time of the newest vulnerability database loaded.", nil, nil)
 	metricTrackState       = prometheus.NewDesc("lupetto_track_state", "1 for the track's state in the last successful status check, 0 for the other states.", []string{"package", "selector", "state"}, nil)
 	metricStatusTimestamp  = prometheus.NewDesc("lupetto_status_timestamp_seconds", "Time of the last successful status check.", nil, nil)
+	metricProductsLoaded   = prometheus.NewDesc("lupetto_products_load_success", "1 if the last read of the products file succeeded, 0 if it failed.", nil, nil)
+	metricProductsLoadTime = prometheus.NewDesc("lupetto_products_load_timestamp_seconds", "Time of the last read of the products file, successful or not.", nil, nil)
 	vulnerabilityMetricSet = []*prometheus.Desc{metricVulnerabilities, metricScanTimestamp, metricScanSuccess, metricResultStale, metricResultDBBuilt, metricDBBuilt}
 )
 
@@ -33,6 +35,8 @@ type metricsCollector struct{ server *Server }
 func (c metricsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- metricTrackState
 	ch <- metricStatusTimestamp
+	ch <- metricProductsLoaded
+	ch <- metricProductsLoadTime
 	if c.server.vulns != nil {
 		for _, desc := range vulnerabilityMetricSet {
 			ch <- desc
@@ -43,6 +47,14 @@ func (c metricsCollector) Describe(ch chan<- *prometheus.Desc) {
 // Collect reads only cached status and stored scan results; a scrape never
 // runs the CLI or a scan.
 func (c metricsCollector) Collect(ch chan<- prometheus.Metric) {
+	if at, err := c.server.productsLoadState(); !at.IsZero() {
+		loaded := 1.0
+		if err != "" {
+			loaded = 0
+		}
+		ch <- prometheus.MustNewConstMetric(metricProductsLoaded, prometheus.GaugeValue, loaded)
+		ch <- prometheus.MustNewConstMetric(metricProductsLoadTime, prometheus.GaugeValue, seconds(at))
+	}
 	status := c.server.status.snapshot()
 	newest := map[string]string{}
 	if document := status.Document; document != nil {
