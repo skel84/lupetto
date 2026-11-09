@@ -2,6 +2,14 @@
 
 User-visible changes to the `lupetto` CLI, `lupetto-explorer`, and the combined container. Releases are git tags `vX.Y.Z`; the [release workflow](.github/workflows/release.yml) publishes the combined Explorer image for each tag.
 
+## v0.4.2 (2026-11-09)
+
+Fixes `lupetto status` missing security fixes in subpackages. See the [release notes](docs/release-notes/v0.4.2.md).
+
+### Fixed
+
+- **Security fixes in subpackages make a track `fixes-available`.** Wolfi's security feed lists fixes under the origin package (`expat`), while an image's installed database names the subpackage (`libexpat1`). `status` looked the feed up by installed name only, so a subpackage fix never triggered a rebuild. It now checks the feed under the installed name and the APK origin. The installed-package cache moves to version 2, so v0.4.1 entries are read again once.
+
 ## v0.4.1 (2026-10-23)
 
 Fixes Explorer with a products file mounted from a Kubernetes ConfigMap. See the [release notes](docs/release-notes/v0.4.1.md).

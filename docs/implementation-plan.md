@@ -187,6 +187,11 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 - [x] Explorer shows a products-load failure on the Vulnerabilities page and as `503` on track pages, logs it once and its recovery, and exports `lupetto_products_load_success`; checked with a real Explorer and in headless Chrome ([evidence](verification.md#products-file-symlinks-and-load-failures-v041)).
 - [x] Tag `v0.4.1` and let the release workflow publish it. Approved by the maintainer; workflow run `39969625783` succeeded, `ghcr.io/skel84/lupetto@sha256:9c57b889…dd02` verifies keylessly for exactly `release.yml@refs/tags/v0.4.1`, and the GitHub release is published ([evidence](verification.md#v041-release-2026-10-23)). The published container was not run locally.
 
+**v0.4.2 subpackage security fixes** ([changelog](../CHANGELOG.md), [release notes](release-notes/v0.4.2.md)):
+
+- [x] `lupetto status` matches security-feed fixes to installed subpackages through their APK origin, and the installed cache moves to version 2 ([evidence](verification.md#subpackage-security-fixes-v042)).
+- [ ] Tag `v0.4.2` and let the release workflow publish it.
+
 ### 4. Add Explorer as an optional application
 
 - [ ] Decide Explorer product/repository/module packaging without introducing a CLI dependency on Explorer.

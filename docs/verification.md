@@ -1736,3 +1736,17 @@ With the maintainer's approval, `main` was fast-forwarded from `8c1d490` to `c1d
 `gh release create v0.4.1 --verify-tag --title "lupetto v0.4.1" --latest` published the [GitHub release](https://github.com/skel84/lupetto/releases/tag/v0.4.1) with `docs/release-notes/v0.4.1.md` at the tag as its body, its relative link rewritten to the tagged file. The repository's latest release is `v0.4.1`, neither draft nor prerelease.
 
 Not exercised: running the published container on Kubernetes with a ConfigMap mount (Docker was unavailable on this host); the fix itself was exercised with the darwin build [above](#products-file-symlinks-and-load-failures-v041).
+
+## Subpackage security fixes (v0.4.2)
+
+This records the evidence for the subpackage fix, observed 2026-11-09 on darwin/arm64 with Go 1.27.1 on the `fix/security-feed-origin` branch.
+
+| Check | Observed result |
+| --- | --- |
+| `internal/status` `TestMissingFixMatchesSubpackageByOrigin` | An installed `libexpat1 2.9.0-r0` with origin `expat`, a feed entry `expat 2.10.0-r0`, and `libexpat1 2.10.0-r1` available give one missing fix named `libexpat1`. Fails on v0.4.1 code (no fix found). |
+| `internal/wolfi` `TestReadInstalledPackages` | The fixture's `o:nginx` is read into `Origin`. |
+| v0.4.1 `lupetto status` in a production pipeline run on the real registry | `openjdk-25-default-jvm 25` is `current` with `libexpat1 2.9.0-r0` listed under `outdated` and no `missingFixes` (reproduces the report). |
+| Branch `lupetto status --products <one track> --arch amd64 --severity-budget 0 --json` against the same registry | `openjdk-25-default-jvm 25` is `fixes-available` with `libexpat1` fixed in `2.10.0-r0` (CVE-2026-113351, CVE-2026-115506, GHSA-6r6q-9jmv-gg3h, GHSA-j83x-34mv-v962), reachable by the track. |
+| `gofmt -l internal cmd`, `go vet -composites=false ./...`, `go test ./... -count=1`, `go test -race ./... -count=1` | Empty, passed, passed, passed. |
+
+Not exercised: the combined container, and a full products file with this build.
