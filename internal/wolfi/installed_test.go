@@ -33,7 +33,7 @@ func TestReadInstalledPackagesFullSet(t *testing.T) {
 	if err != nil || len(packages) != 3 {
 		t.Fatalf("packages=%+v err=%v", packages, err)
 	}
-	want := []InstalledPackage{{"nginx-stable", "1.30.2-r0", "x86_64"}, {"musl", "1.2.5-r10", "x86_64"}, {"ca-certificates", "20260601-r0", "noarch"}}
+	want := []InstalledPackage{{Name: "nginx-stable", Version: "1.30.2-r0", Arch: "x86_64", Origin: "nginx"}, {Name: "musl", Version: "1.2.5-r10", Arch: "x86_64"}, {Name: "ca-certificates", Version: "20260601-r0", Arch: "noarch"}}
 	for i := range want {
 		if packages[i] != want[i] {
 			t.Fatalf("package %d=%+v want=%+v", i, packages[i], want[i])

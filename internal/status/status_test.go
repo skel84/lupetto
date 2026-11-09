@@ -164,6 +164,16 @@ func TestMissingFixRequiresSameNameArchitectureAndAvailableVersion(t *testing.T)
 	}
 }
 
+func TestMissingFixMatchesSubpackageByOrigin(t *testing.T) {
+	installed := wolfi.ParseInstalledPackages([]byte("P:libexpat1\nV:2.9.0-r0\nA:x86_64\no:expat\n\n"))
+	feed := SecurityFeed{"expat": {"2.10.0-r0": {"CVE-2026-0001"}}}
+	latest, _ := latestPackages([]wolfi.Package{{Name: "libexpat1", Version: "2.10.0-r1", Arch: "x86_64"}})
+	_, fixes := compareInstalled(installed, latest, feed)
+	if len(fixes) != 1 || fixes[0].Name != "libexpat1" || fixes[0].FixedVersion != "2.10.0-r0" {
+		t.Fatalf("origin fix missing: %+v", fixes)
+	}
+}
+
 func TestFileCachePrivacyDigestAndCorruption(t *testing.T) {
 	cache, err := NewFileCache(filepath.Join(t.TempDir(), "cache"))
 	if err != nil {

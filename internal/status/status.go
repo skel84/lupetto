@@ -315,6 +315,22 @@ func latestPackages(packages []wolfi.Package) (map[string]wolfi.Package, error) 
 	return latest, nil
 }
 
+// feedEntries returns the security feed entries for an installed package,
+// including those listed under its origin: Wolfi's feed names source
+// packages, so a fix in expat applies to the installed libexpat1.
+func feedEntries(feed SecurityFeed, pkg wolfi.InstalledPackage) map[string][]string {
+	if pkg.Origin == "" || pkg.Origin == pkg.Name || len(feed[pkg.Origin]) == 0 {
+		return feed[pkg.Name]
+	}
+	entries := map[string][]string{}
+	for _, name := range []string{pkg.Name, pkg.Origin} {
+		for fixed, ids := range feed[name] {
+			entries[fixed] = append(entries[fixed], ids...)
+		}
+	}
+	return entries
+}
+
 func compareInstalled(installed []wolfi.InstalledPackage, latest map[string]wolfi.Package, feed SecurityFeed) ([]OutdatedPackage, []MissingFix) {
 	outdated, fixes := []OutdatedPackage{}, []MissingFix{}
 	for _, pkg := range installed {
@@ -325,7 +341,7 @@ func compareInstalled(installed []wolfi.InstalledPackage, latest map[string]wolf
 		if compareVersion(available.Version, pkg.Version) > 0 {
 			outdated = append(outdated, OutdatedPackage{Name: pkg.Name, Architecture: pkg.Arch, InstalledVersion: pkg.Version, LatestVersion: available.Version})
 		}
-		for fixed, identifiers := range feed[pkg.Name] {
+		for fixed, identifiers := range feedEntries(feed, pkg) {
 			if fixed == "0" {
 				continue
 			}

@@ -15,6 +15,9 @@ const MaxInstalledDatabaseBytes = 8 << 20
 // Records retain database order; this reader does not validate them against a lock.
 type InstalledPackage struct {
 	Name, Version, Arch string
+	// Origin is the source package a subpackage was built from (libexpat1 ->
+	// expat). Wolfi's security feed lists fixes under the origin name.
+	Origin string `json:",omitempty"`
 }
 
 // ParseInstalledPackages reads the full installed APK identity set, not just
@@ -34,6 +37,8 @@ func ParseInstalledPackages(data []byte) []InstalledPackage {
 				pkg.Version = line[2:]
 			case 'A':
 				pkg.Arch = line[2:]
+			case 'o':
+				pkg.Origin = line[2:]
 			}
 		}
 		if pkg.Name != "" {

@@ -78,7 +78,7 @@ func (cache *FileCache) Load(ctx context.Context, digest string) ([]wolfi.Instal
 		return nil, false, errors.New("installed cache size or read failure")
 	}
 	var record cachedInstalled
-	if json.Unmarshal(data, &record) != nil || record.Version != 1 || record.Digest != digest {
+	if json.Unmarshal(data, &record) != nil || record.Version != 2 || record.Digest != digest {
 		return nil, false, errors.New("invalid installed cache record")
 	}
 	packagesData, err := json.Marshal(record.Packages)
@@ -100,7 +100,7 @@ func (cache *FileCache) Store(ctx context.Context, digest string, packages []wol
 	if err != nil {
 		return errors.New("installed cache encoding failed")
 	}
-	data, err := json.Marshal(cachedInstalled{Version: 1, Digest: digest, SHA256: wolfi.SHA256Hex(packagesData), Packages: packages})
+	data, err := json.Marshal(cachedInstalled{Version: 2, Digest: digest, SHA256: wolfi.SHA256Hex(packagesData), Packages: packages})
 	if err != nil || len(data) > MaxCacheBytes {
 		return errors.New("installed cache encoding or size failure")
 	}
