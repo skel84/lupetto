@@ -190,7 +190,7 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 **v0.4.2 subpackage security fixes** ([changelog](../CHANGELOG.md), [release notes](release-notes/v0.4.2.md)):
 
 - [x] `lupetto status` matches security-feed fixes to installed subpackages through their APK origin, and the installed cache moves to version 2 ([evidence](verification.md#subpackage-security-fixes-v042)).
-- [ ] Tag `v0.4.2` and let the release workflow publish it.
+- [x] Tag `v0.4.2` and let the release workflow publish it. Approved by the maintainer; workflow run `42666205829` succeeded, `ghcr.io/skel84/lupetto@sha256:1d1809ed…075c` verifies keylessly for exactly `release.yml@refs/tags/v0.4.2`, and the GitHub release is published ([evidence](verification.md#v042-release-2026-11-09)).
 
 ### 4. Add Explorer as an optional application
 

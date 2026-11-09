@@ -1752,3 +1752,16 @@ This records the evidence for the subpackage fix, observed 2026-11-09 on darwin/
 | `gofmt -l internal cmd`, `go vet -composites=false ./...`, `go test ./... -count=1`, `go test -race ./... -count=1` | Empty, passed, passed, passed. |
 
 Not exercised: the combined container, and a full products file with this build.
+
+## v0.4.2 release (2026-11-09)
+
+With the maintainer's approval, `main` was fast-forwarded from `58ce642` to `a3210d6` (the [subpackage fix](#subpackage-security-fixes-v042), its review follow-up, and the dated changelog) and pushed, and the annotated tag `v0.4.2` ("lupetto v0.4.2") was pushed on that commit.
+
+| Check | Observed result |
+| --- | --- |
+| Release workflow run `42666205829` (tag push `v0.4.2`) | Completed `success`. |
+| `crane digest ghcr.io/skel84/lupetto:v0.4.2` | `sha256:1d1809edf23ba0bc5fd0f5cc7431ffefe9bd0c0228bae3c3e45023514208075c`. |
+| `cosign verify` with identity `https://github.com/skel84/lupetto/.github/workflows/release.yml@refs/tags/v0.4.2` and issuer `https://token.actions.githubusercontent.com` | Exit 0; certificate verified against the trusted CA. |
+| `crane config` of the digest | `amd64`; `Entrypoint` `/usr/local/bin/lupetto-explorer`. |
+
+`gh release create v0.4.2 --verify-tag --title "lupetto v0.4.2" --latest` published the [GitHub release](https://github.com/skel84/lupetto/releases/tag/v0.4.2) with `docs/release-notes/v0.4.2.md` as its body, its relative link rewritten to the tagged file.
