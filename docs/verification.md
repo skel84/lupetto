@@ -1745,6 +1745,8 @@ This records the evidence for the subpackage fix, observed 2026-11-09 on darwin/
 | --- | --- |
 | `internal/status` `TestMissingFixMatchesSubpackageByOrigin` | An installed `libexpat1 2.9.0-r0` with origin `expat`, a feed entry `expat 2.10.0-r0`, and `libexpat1 2.10.0-r1` available give one missing fix named `libexpat1`. Fails on v0.4.1 code (no fix found). |
 | `internal/wolfi` `TestReadInstalledPackages` | The fixture's `o:nginx` is read into `Origin`. |
+| `internal/status` `TestMalformedSecdbFixedVersionIsReportedWithoutGuessingOrGlobalFailure` | An unevaluated feed entry for `opa-envoy` is assigned to a track that installs only the subpackage `opa-envoy-lib` with that origin. Fails on the first branch commit (no track issue). |
+| `internal/status` `TestFileCachePrivacyDigestAndCorruption` | A valid version 1 cache record loads as a miss without an error, so `status` reads the image again instead of failing with "installed cache read failed". Fails on the first branch commit. |
 | v0.4.1 `lupetto status` in a production pipeline run on the real registry | `openjdk-25-default-jvm 25` is `current` with `libexpat1 2.9.0-r0` listed under `outdated` and no `missingFixes` (reproduces the report). |
 | Branch `lupetto status --products <one track> --arch amd64 --severity-budget 0 --json` against the same registry | `openjdk-25-default-jvm 25` is `fixes-available` with `libexpat1` fixed in `2.10.0-r0` (CVE-2026-113351, CVE-2026-115506, GHSA-6r6q-9jmv-gg3h, GHSA-j83x-34mv-v962), reachable by the track. |
 | `gofmt -l internal cmd`, `go vet -composites=false ./...`, `go test ./... -count=1`, `go test -race ./... -count=1` | Empty, passed, passed, passed. |

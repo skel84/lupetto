@@ -78,8 +78,12 @@ func (cache *FileCache) Load(ctx context.Context, digest string) ([]wolfi.Instal
 		return nil, false, errors.New("installed cache size or read failure")
 	}
 	var record cachedInstalled
-	if json.Unmarshal(data, &record) != nil || record.Version != 2 || record.Digest != digest {
+	if json.Unmarshal(data, &record) != nil || record.Digest != digest || record.Version < 1 || record.Version > 2 {
 		return nil, false, errors.New("invalid installed cache record")
+	}
+	if record.Version == 1 {
+		// Version 1 records lack package origins: read the image again.
+		return nil, false, nil
 	}
 	packagesData, err := json.Marshal(record.Packages)
 	if err != nil || wolfi.SHA256Hex(packagesData) != record.SHA256 {

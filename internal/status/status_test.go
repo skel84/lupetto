@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -201,6 +202,12 @@ func TestFileCachePrivacyDigestAndCorruption(t *testing.T) {
 	os.WriteFile(file, data, 0600)
 	if _, _, err := cache.Load(context.Background(), digest); err == nil {
 		t.Fatal("corrupt cache silently accepted")
+	}
+	// A version 1 record (written before origins were read) is a miss, not an error.
+	v1 := fmt.Sprintf(`{"version":1,"digest":%q,"sha256":%q,"packages":[{"Name":"curl","Version":"8.1-r0","Arch":"x86_64"}]}`, digest, wolfi.SHA256Hex([]byte(`[{"Name":"curl","Version":"8.1-r0","Arch":"x86_64"}]`)))
+	os.WriteFile(file, []byte(v1), 0600)
+	if _, found, err := cache.Load(context.Background(), digest); err != nil || found {
+		t.Fatalf("version 1 record: %v %v", found, err)
 	}
 	if _, _, err := cache.Load(context.Background(), "../../escape"); err == nil {
 		t.Fatal("invalid digest accepted")

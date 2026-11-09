@@ -198,12 +198,12 @@ func RunWith(ctx context.Context, products Products, options Options, services S
 			})
 			track.Outdated, track.MissingFixes = compareInstalled(installed, latestByIdentity, feed)
 			for _, issue := range document.Security.UnevaluatedFixes {
-				for _, pkg := range track.Installed {
-					if issue.Name != pkg.Name {
+				for _, pkg := range installed {
+					if issue.Name != pkg.Name && issue.Name != pkg.Origin {
 						continue
 					}
 					installedIssue := issue
-					installedIssue.InstalledVersion, installedIssue.Architecture = pkg.Version, pkg.Architecture
+					installedIssue.InstalledVersion, installedIssue.Architecture = pkg.Version, pkg.Arch
 					track.UnevaluatedFixes = append(track.UnevaluatedFixes, installedIssue)
 				}
 			}

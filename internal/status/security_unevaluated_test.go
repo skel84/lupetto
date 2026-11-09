@@ -39,7 +39,7 @@ func TestMalformedSecdbFixedVersionIsReportedWithoutGuessingOrGlobalFailure(t *t
 		},
 		installed: map[string][]wolfi.InstalledPackage{
 			opa.Digest:  {{Name: "opa-envoy", Version: opa.Version, Arch: "x86_64"}, baseLayout},
-			curl.Digest: {{Name: "curl", Version: curl.Version, Arch: "x86_64"}, {Name: "opa-envoy", Version: opa.Version, Arch: "x86_64"}, baseLayout},
+			curl.Digest: {{Name: "curl", Version: curl.Version, Arch: "x86_64"}, {Name: "opa-envoy-lib", Version: opa.Version, Arch: "x86_64", Origin: "opa-envoy"}, baseLayout},
 		},
 	}
 	packages := []wolfi.Package{
