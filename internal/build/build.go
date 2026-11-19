@@ -40,11 +40,13 @@ type Result struct {
 	PackageName, Version, Arch, IndexSHA256                          string
 	Workspace, ImageDir, ImageDigest, LockPath, SPDXPath, SPDXSHA256 string
 	Selected, Validated                                              bool
-	ImageReference, BuildReference                                   string
-	Build, DockerLoad, DockerImageID                                 string
-	ReadableConfirmed                                                bool
-	Signing, Attestation                                             string
-	Publication                                                      PublicationOutcome
+	// Packages are the additional APKs pinned for request.Image.Packages.
+	Packages                         []RecordPackage
+	ImageReference, BuildReference   string
+	Build, DockerLoad, DockerImageID string
+	ReadableConfirmed                bool
+	Signing, Attestation             string
+	Publication                      PublicationOutcome
 	// Record holds the exact version-6 document written to result.json.
 	Record []byte
 }
@@ -169,13 +171,28 @@ func RunWith(ctx context.Context, request Request, services Services) (Result, e
 		return buildFail(err)
 	}
 	buildStage(ctx, "Selecting exact APK")
-	packages, err := wolfi.ParseAPKINDEX(verifiedIndex, request.PackageName)
+	packages, err := wolfi.ParseAPKINDEX(verifiedIndex, "")
 	if err != nil {
 		return buildFail(err)
 	}
 	selected, err := wolfi.SelectPackage(packages, request.PackageName, request.Selector, request.Version, arch)
 	if err != nil {
 		return buildFail(err)
+	}
+	// ponytail: additional packages take their highest version, also when
+	// --apk-version pins an older selected APK; pin them per version if an
+	// older build ever needs matching subpackages.
+	var extras []wolfi.Package
+	for _, name := range request.Image.Packages {
+		extra, err := wolfi.SelectPackage(packages, name, "", "", arch)
+		if err != nil {
+			return buildFail(err)
+		}
+		if extra.Name == selected.Name || slices.ContainsFunc(extras, func(pkg wolfi.Package) bool { return pkg.Name == extra.Name }) {
+			return buildFail(fmt.Errorf("package %s resolves to %s, which this build already selects", name, extra.Name))
+		}
+		extras = append(extras, extra)
+		result.Packages = append(result.Packages, RecordPackage{Name: extra.Name, Version: extra.Version})
 	}
 	result.PackageName, result.Version, result.Arch, result.IndexSHA256, result.Selected = selected.Name, selected.Version, arch, indexDigest, true
 	imageReference, err := readableImageReference(selected, arch)
@@ -192,13 +209,16 @@ func RunWith(ctx context.Context, request Request, services Services) (Result, e
 		}
 	}
 	buildMessage(ctx, "Selected %s@%s; local reference %s; build reference %s", selected.Name, selected.Version, imageReference, buildReference)
+	for _, extra := range extras {
+		buildMessage(ctx, "Selected additional package %s@%s", extra.Name, extra.Version)
+	}
 	configPath := filepath.Join(workspace, "apko.yaml")
 	now := services.Now
 	if now == nil {
 		now = time.Now
 	}
 	created := now().UTC().Truncate(time.Second)
-	config := apkoConfig(keyPath, selected, arch, created, indexDigest, request.Image)
+	config := apkoConfig(keyPath, selected, arch, created, indexDigest, request.Image, extras...)
 	if err := os.WriteFile(configPath, []byte(config), 0600); err != nil {
 		return buildFail(fmt.Errorf("retain apko config: %w", err))
 	}
@@ -207,7 +227,7 @@ func RunWith(ctx context.Context, request Request, services Services) (Result, e
 	if err := runApko(ctx, services.Command, "lock", "--arch", arch, "--output", lockPath, configPath); err != nil {
 		return buildFail(err)
 	}
-	if err := checkSelectedLock(lockPath, selected); err != nil {
+	if err := checkSelectedLock(lockPath, append([]wolfi.Package{selected}, extras...)...); err != nil {
 		return buildFail(err)
 	}
 
@@ -228,7 +248,7 @@ func RunWith(ctx context.Context, request Request, services Services) (Result, e
 		return buildFail(err)
 	}
 	buildStage(ctx, "Checking installed APK")
-	imageDigest, err := checkImage(imageDir, selected, request.Image)
+	imageDigest, err := checkImage(imageDir, selected, request.Image, extras...)
 	if err != nil {
 		return buildFail(err)
 	}
@@ -304,7 +324,9 @@ func runApko(ctx context.Context, command CommandFunc, args ...string) error {
 	return nil
 }
 
-func checkSelectedLock(path string, selected wolfi.Package) error {
+// checkSelectedLock requires exactly one lock entry, with the APKINDEX
+// version and checksum, for each selected APK.
+func checkSelectedLock(path string, selected ...wolfi.Package) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read apko lock: %w", err)
@@ -319,18 +341,20 @@ func checkSelectedLock(path string, selected wolfi.Package) error {
 	if err := json.Unmarshal(data, &lock); err != nil {
 		return fmt.Errorf("decode apko lock: %w", err)
 	}
-	matches := 0
-	for _, pkg := range lock.Contents.Packages {
-		if pkg.Name != selected.Name {
-			continue
+	for _, selected := range selected {
+		matches := 0
+		for _, pkg := range lock.Contents.Packages {
+			if pkg.Name != selected.Name {
+				continue
+			}
+			matches++
+			if pkg.Version != selected.Version || pkg.Architecture != selected.Arch || pkg.Checksum != selected.Checksum {
+				return fmt.Errorf("apko lock does not match selected %s@%s and APKINDEX checksum", selected.Name, selected.Version)
+			}
 		}
-		matches++
-		if pkg.Version != selected.Version || pkg.Architecture != selected.Arch || pkg.Checksum != selected.Checksum {
-			return fmt.Errorf("apko lock does not match selected %s@%s and APKINDEX checksum", selected.Name, selected.Version)
+		if matches != 1 {
+			return fmt.Errorf("apko lock has %d entries for selected %s@%s", matches, selected.Name, selected.Version)
 		}
-	}
-	if matches != 1 {
-		return fmt.Errorf("apko lock has %d entries for selected %s@%s", matches, selected.Name, selected.Version)
 	}
 	return nil
 }
@@ -360,9 +384,9 @@ func readOCIBlob(dir, digest string, maxBytes int64) ([]byte, error) {
 }
 
 // checkImage returns the validated local OCI manifest digest. It checks the
-// installed selected APK and base layout, that the config carries exactly the
+// installed selected and additional APKs and the base layout, that the config carries exactly the
 // requested image options, and the files the image requires in the layer.
-func checkImage(dir string, selected wolfi.Package, image imageconfig.Options) (string, error) {
+func checkImage(dir string, selected wolfi.Package, image imageconfig.Options, extras ...wolfi.Package) (string, error) {
 	if _, err := os.Stat(filepath.Join(dir, "oci-layout")); err != nil {
 		return "", fmt.Errorf("OCI layout missing: %w", err)
 	}
@@ -421,18 +445,20 @@ func checkImage(dir string, selected wolfi.Package, image imageconfig.Options) (
 	if err != nil {
 		return "", err
 	}
-	found := false
-	for _, pkg := range installed {
-		if pkg.Name == selected.Name {
-			if pkg.Version != selected.Version || pkg.Arch != selected.Arch {
-				return "", fmt.Errorf("OCI image contains a different version or architecture of %s", selected.Name)
+	for _, want := range append([]wolfi.Package{selected}, extras...) {
+		found := false
+		for _, pkg := range installed {
+			if pkg.Name == want.Name {
+				if pkg.Version != want.Version || pkg.Arch != want.Arch {
+					return "", fmt.Errorf("OCI image contains a different version or architecture of %s", want.Name)
+				}
+				found = true
+				break
 			}
-			found = true
-			break
 		}
-	}
-	if !found {
-		return "", fmt.Errorf("OCI image does not contain selected %s@%s", selected.Name, selected.Version)
+		if !found {
+			return "", fmt.Errorf("OCI image does not contain selected %s@%s", want.Name, want.Version)
+		}
 	}
 	if !slices.ContainsFunc(installed, func(pkg wolfi.InstalledPackage) bool { return pkg.Name == imageconfig.BaseLayoutPackage }) {
 		return "", fmt.Errorf("OCI image of %s@%s does not contain %s", selected.Name, selected.Version, imageconfig.BaseLayoutPackage)

@@ -1,9 +1,9 @@
 // Package imageconfig owns the image configuration that a build applies beyond
 // its selected APK and dependency closure. Every image gets the Wolfi base
-// layout. The optional per-track settings are the OCI entrypoint and the CA
-// certificate bundle; the build writes them into the image and its manifest
-// annotations, and status reads those annotations back to detect a changed
-// track.
+// layout. The optional per-track settings are the OCI entrypoint, the CA
+// certificate bundle, additional APKs, and a numeric user; the build writes
+// them into the image and its manifest annotations, and status reads those
+// annotations back to detect a changed track.
 package imageconfig
 
 import (
@@ -11,7 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -24,6 +26,18 @@ const EntrypointAnnotation = "lupetto.image.entrypoint"
 // CABundleAnnotation is "true" when the build added the CA certificate
 // bundle; it is absent otherwise.
 const CABundleAnnotation = "lupetto.image.ca-bundle"
+
+// PackagesAnnotation records the additional APK names, sorted, as a compact
+// JSON array. UserAnnotation records the OCI config user. Each is present only
+// when set.
+const (
+	PackagesAnnotation = "lupetto.image.packages"
+	UserAnnotation     = "lupetto.image.user"
+)
+
+// UserName names the account a build adds for Options.User, so programs that
+// look up their uid (PostgreSQL's initdb, for one) find a passwd entry.
+const UserName = "nonroot"
 
 // CABundlePackage is the Wolfi APK that provides CABundlePath. It is added
 // unpinned; apko's lock records the exact version installed.
@@ -45,6 +59,15 @@ const (
 const (
 	maxEntrypointElements = 32
 	maxElementBytes       = 1024
+	maxPackages           = 32
+	maxID                 = 1<<31 - 1
+)
+
+// packageNamePattern matches an APK name or namespaced provider; it mirrors
+// wolfi.RequestedNamePattern because this package has no in-module imports.
+var (
+	packageNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+._-]*(?::[A-Za-z0-9][A-Za-z0-9+._-]*)*$`)
+	userPattern        = regexp.MustCompile(`^([1-9][0-9]*)(?::(0|[1-9][0-9]*))?$`)
 )
 
 // Options is the non-package image configuration of one build or track.
@@ -57,6 +80,14 @@ type Options struct {
 	// already; the option records and checks that the track requires it rather
 	// than relying on Wolfi's dependency graph.
 	CABundle bool
+	// Packages are further top-level APKs, each pinned by the build to its
+	// highest version in the same signed index as the selected APK. Nil
+	// means none.
+	Packages []string
+	// User is the OCI config user, "uid" or "uid:gid" (gid defaults to uid);
+	// the build also adds a UserName account with those IDs. Empty means
+	// none, so the image runs as root.
+	User string
 }
 
 // ValidateEntrypoint checks a requested entrypoint. The executable must be a
@@ -87,9 +118,70 @@ func ValidateEntrypoint(entrypoint []string) error {
 // Validate checks every set option.
 func (o Options) Validate() error {
 	if o.Entrypoint != nil {
-		return ValidateEntrypoint(o.Entrypoint)
+		if err := ValidateEntrypoint(o.Entrypoint); err != nil {
+			return err
+		}
+	}
+	if o.Packages != nil {
+		if err := ValidatePackages(o.Packages); err != nil {
+			return err
+		}
+	}
+	if o.User != "" {
+		if _, _, err := ParseUser(o.User); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// ValidatePackages checks additional APK names: at least one, at most 32,
+// each an APK name or provider, none repeated.
+func ValidatePackages(packages []string) error {
+	if len(packages) == 0 || len(packages) > maxPackages {
+		return fmt.Errorf("packages must list 1 to %d APK names", maxPackages)
+	}
+	for i, name := range packages {
+		if len(name) > maxElementBytes || !packageNamePattern.MatchString(name) {
+			return fmt.Errorf("invalid package or provider name %q", name)
+		}
+		if slices.Contains(packages[:i], name) {
+			return fmt.Errorf("package %s is listed twice", name)
+		}
+	}
+	return nil
+}
+
+// ParseUser returns the uid and gid of a "uid" or "uid:gid" user. The uid must
+// not be 0: an image runs as root without a user.
+func ParseUser(user string) (uid, gid int, err error) {
+	match := userPattern.FindStringSubmatch(user)
+	if match == nil {
+		return 0, 0, errors.New(`user must be a numeric "uid" or "uid:gid" with a non-zero uid, such as 65532 or 65532:65532`)
+	}
+	uid, err = strconv.Atoi(match[1])
+	gid = uid
+	if err == nil && match[2] != "" {
+		gid, err = strconv.Atoi(match[2])
+	}
+	if err != nil || uid > maxID || gid > maxID {
+		return 0, 0, fmt.Errorf("user IDs must be at most %d", maxID)
+	}
+	return uid, gid, nil
+}
+
+// sortedPackages returns a sorted copy: the order of additional packages does
+// not change the image.
+func (o Options) sortedPackages() []string {
+	if o.Packages == nil {
+		return nil
+	}
+	return slices.Sorted(slices.Values(o.Packages))
+}
+
+// SamePackages reports whether o and other add the same APKs.
+func (o Options) SamePackages(other Options) bool {
+	return slices.Equal(o.sortedPackages(), other.sortedPackages())
 }
 
 // Annotations returns the manifest annotations recording o; none when o is
@@ -102,6 +194,13 @@ func (o Options) Annotations() map[string]string {
 	}
 	if o.CABundle {
 		annotations[CABundleAnnotation] = "true"
+	}
+	if o.Packages != nil {
+		data, _ := json.Marshal(o.sortedPackages())
+		annotations[PackagesAnnotation] = string(data)
+	}
+	if o.User != "" {
+		annotations[UserAnnotation] = o.User
 	}
 	return annotations
 }
@@ -124,12 +223,25 @@ func FromAnnotations(annotations map[string]string) (Options, error) {
 		}
 		options.CABundle = true
 	}
+	if value, ok := annotations[PackagesAnnotation]; ok {
+		var packages []string
+		if err := json.Unmarshal([]byte(value), &packages); err != nil || ValidatePackages(packages) != nil {
+			return Options{}, errors.New("invalid " + PackagesAnnotation + " annotation")
+		}
+		options.Packages = packages
+	}
+	if value, ok := annotations[UserAnnotation]; ok {
+		if _, _, err := ParseUser(value); err != nil {
+			return Options{}, errors.New("invalid " + UserAnnotation + " annotation")
+		}
+		options.User = value
+	}
 	return options, nil
 }
 
 // Equal reports whether a and b configure the same image.
 func (o Options) Equal(other Options) bool {
-	return slices.Equal(o.Entrypoint, other.Entrypoint) && o.CABundle == other.CABundle
+	return slices.Equal(o.Entrypoint, other.Entrypoint) && o.CABundle == other.CABundle && o.SamePackages(other) && o.User == other.User
 }
 
 // ApkoCommand renders the entrypoint as apko's entrypoint.command string.

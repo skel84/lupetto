@@ -312,7 +312,7 @@ func TestBuildLocalLoadAndSkippedStageOrchestration(t *testing.T) {
 			if !reflect.DeepEqual(record.Request, build.RecordRequest{Package: "postgresql-17", APKVersion: "17.10-r1", Load: status == "loaded"}) || record.Stages.Build.Status != "completed" || record.Stages.Publication != (build.RecordPublication{Status: "skipped"}) || record.Stages.Signing.Status != "skipped" || record.Stages.Attestation.Status != "skipped" {
 				t.Fatalf("request/stages=%+v %+v", record.Request, record.Stages)
 			}
-			if record.Selection == nil || *record.Selection != (build.RecordSelection{Package: "postgresql-17", Version: "17.10-r1", Architecture: record.Selection.Architecture, IndexSHA256: record.Selection.IndexSHA256}) || record.Selection.IndexSHA256 == "" || record.Selection.Architecture == "" || record.Evidence.ApkoVersion != build.ApkoVersion || record.Evidence.ImageDirectory == "" || record.Evidence.ImageDigest != f.manifestDigest || record.Evidence.LockPath == "" || record.Evidence.SPDXPath == "" {
+			if record.Selection == nil || !reflect.DeepEqual(*record.Selection, build.RecordSelection{Package: "postgresql-17", Version: "17.10-r1", Architecture: record.Selection.Architecture, IndexSHA256: record.Selection.IndexSHA256}) || record.Selection.IndexSHA256 == "" || record.Selection.Architecture == "" || record.Evidence.ApkoVersion != build.ApkoVersion || record.Evidence.ImageDirectory == "" || record.Evidence.ImageDigest != f.manifestDigest || record.Evidence.LockPath == "" || record.Evidence.SPDXPath == "" {
 				t.Fatalf("selected APK/artifact evidence lost: %+v %+v", record.Selection, record.Evidence)
 			}
 			if _, ok := raw["failure"]; ok {

@@ -19,16 +19,22 @@ import (
 )
 
 // apkoConfig renders the build's apko configuration. Every build lists the
-// Wolfi base layout after the selected APK; image options only append lines.
+// Wolfi base layout after the selected and additional APKs; image options only
+// append lines.
 // The rendering is deterministic, so apko composes the same image and digest
 // from the same lock and build date.
-func apkoConfig(keyPath string, selected wolfi.Package, arch string, created time.Time, indexDigest string, image imageconfig.Options) string {
+func apkoConfig(keyPath string, selected wolfi.Package, arch string, created time.Time, indexDigest string, image imageconfig.Options, extras ...wolfi.Package) string {
 	var config strings.Builder
 	fmt.Fprintf(&config, "contents:\n  keyring:\n    - %s\n  repositories:\n    - %s\n  packages:\n    - %s\n", strconv.Quote(keyPath), wolfi.Repository, strconv.Quote(selected.Name+"="+selected.Version))
-	if selected.Name != imageconfig.BaseLayoutPackage {
+	pinned := map[string]bool{selected.Name: true}
+	for _, extra := range extras {
+		fmt.Fprintf(&config, "    - %s\n", strconv.Quote(extra.Name+"="+extra.Version))
+		pinned[extra.Name] = true
+	}
+	if !pinned[imageconfig.BaseLayoutPackage] {
 		fmt.Fprintf(&config, "    - %s\n", strconv.Quote(imageconfig.BaseLayoutPackage))
 	}
-	if image.CABundle && selected.Name != imageconfig.CABundlePackage {
+	if image.CABundle && !pinned[imageconfig.CABundlePackage] {
 		fmt.Fprintf(&config, "    - %s\n", strconv.Quote(imageconfig.CABundlePackage))
 	}
 	fmt.Fprintf(&config, "archs:\n  - %s\nannotations:\n  org.opencontainers.image.version: %s\n  org.opencontainers.image.created: %s\n  lupetto.apk.name: %s\n  lupetto.apk.version: %s\n  lupetto.apk.architecture: %s\n  lupetto.index.sha256: %s\n", arch, strconv.Quote(selected.Version), strconv.Quote(created.Format(time.RFC3339)), strconv.Quote(selected.Name), strconv.Quote(selected.Version), strconv.Quote(selected.Arch), strconv.Quote(indexDigest))
@@ -39,25 +45,36 @@ func apkoConfig(keyPath string, selected wolfi.Package, arch string, created tim
 	if image.Entrypoint != nil {
 		fmt.Fprintf(&config, "entrypoint:\n  command: %s\n", strconv.Quote(imageconfig.ApkoCommand(image.Entrypoint)))
 	}
+	if image.User != "" {
+		// Validate already accepted the user, so it parses.
+		uid, gid, _ := imageconfig.ParseUser(image.User)
+		fmt.Fprintf(&config, "accounts:\n  groups:\n    - groupname: %s\n      gid: %d\n  users:\n    - username: %s\n      uid: %d\n      gid: %d\n  run-as: %s\n", imageconfig.UserName, gid, imageconfig.UserName, uid, gid, strconv.Quote(image.User))
+	}
 	return config.String()
 }
 
 // checkImageConfig requires the OCI config to carry exactly the requested
-// entrypoint (none when none was requested), so apko's command splitting can
-// never silently change it.
+// entrypoint and user (none when none was requested), so apko's command
+// splitting or account handling can never silently change them.
 func checkImageConfig(dir, digest string, image imageconfig.Options) error {
 	data, err := readOCIBlob(dir, digest, 4<<20)
 	if err != nil {
 		return fmt.Errorf("read OCI config: %w", err)
 	}
 	var config struct {
-		Config struct{ Entrypoint []string }
+		Config struct {
+			Entrypoint []string
+			User       string
+		}
 	}
 	if err := json.Unmarshal(data, &config); err != nil {
 		return fmt.Errorf("decode OCI config: %w", err)
 	}
 	if !slices.Equal(config.Config.Entrypoint, image.Entrypoint) {
 		return fmt.Errorf("OCI image config entrypoint %q does not match requested %q", config.Config.Entrypoint, image.Entrypoint)
+	}
+	if config.Config.User != image.User {
+		return fmt.Errorf("OCI image config user %q does not match requested %q", config.Config.User, image.User)
 	}
 	return nil
 }

@@ -302,3 +302,134 @@ func TestRunRejectsInvalidEntrypointBeforeExternalBoundaries(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestApkoConfigPackagesAndUser(t *testing.T) {
+	created := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	selected := wolfi.Package{Name: "busybox-static", Version: "1.38.0-r3", Arch: "x86_64"}
+	extras := []wolfi.Package{{Name: "postgresql-18-contrib", Version: "18.1-r0", Arch: "x86_64"}, {Name: "ca-certificates-bundle", Version: "20260909-r3", Arch: "x86_64"}}
+	image := imageconfig.Options{CABundle: true, Packages: []string{"postgresql-18-contrib", "ca-certificates-bundle"}, User: "26:0"}
+	got := apkoConfig("/data/builds/image-1/wolfi-signing.rsa.pub", selected, "x86_64", created, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", image, extras...)
+	// Additional APKs are pinned after the selected one, and a pinned CA
+	// bundle is not listed again unpinned.
+	want := strings.Replace(baseConfig, "    - \"wolfi-baselayout\"\n", "    - \"postgresql-18-contrib=18.1-r0\"\n    - \"ca-certificates-bundle=20260909-r3\"\n    - \"wolfi-baselayout\"\n", 1) +
+		"  lupetto.image.ca-bundle: \"true\"\n" +
+		"  lupetto.image.packages: \"[\\\"ca-certificates-bundle\\\",\\\"postgresql-18-contrib\\\"]\"\n" +
+		"  lupetto.image.user: \"26:0\"\n" +
+		"accounts:\n  groups:\n    - groupname: nonroot\n      gid: 0\n  users:\n    - username: nonroot\n      uid: 26\n      gid: 0\n  run-as: \"26:0\"\n"
+	if got != want {
+		t.Fatalf("config:\n%s\nwant:\n%s", got, want)
+	}
+	var config struct {
+		Accounts struct {
+			RunAs string `yaml:"run-as"`
+			Users []struct {
+				UID, GID uint32
+			} `yaml:"users"`
+		} `yaml:"accounts"`
+	}
+	if err := yaml.Unmarshal([]byte(got), &config); err != nil || config.Accounts.RunAs != "26:0" || len(config.Accounts.Users) != 1 || config.Accounts.Users[0].UID != 26 {
+		t.Fatalf("accounts=%+v err=%v", config.Accounts, err)
+	}
+	// A uid-only user gets a group with the same ID.
+	got = apkoConfig("/k", selected, "x86_64", created, "d", imageconfig.Options{User: "65532"})
+	if !strings.HasSuffix(got, "      gid: 65532\n  users:\n    - username: nonroot\n      uid: 65532\n      gid: 65532\n  run-as: \"65532\"\n") {
+		t.Fatalf("uid-only config:\n%s", got)
+	}
+}
+
+func TestCheckImagePackagesAndUser(t *testing.T) {
+	selected := wolfi.Package{Name: "valkey-9.1", Version: "9.1.2-r1", Arch: "x86_64"}
+	extra := wolfi.Package{Name: "valkey-9.1-cli", Version: "9.1.2-r1", Arch: "x86_64"}
+	files := []fixtureFile{{header: tar.Header{Name: "etc/os-release", Typeflag: tar.TypeReg, Mode: 0644}, body: fixtureOSRelease}}
+	installed := "P:valkey-9.1\nV:9.1.2-r1\nA:x86_64\n\nP:wolfi-baselayout\nV:20230201-r30\nA:x86_64\n\n"
+	dir, _ := makeOCIImage(t, installed+"P:valkey-9.1-cli\nV:9.1.2-r1\nA:x86_64\n\n", files, map[string]any{"User": "65532"})
+	if _, err := checkImage(dir, selected, imageconfig.Options{Packages: []string{"valkey-9.1-cli"}, User: "65532"}, extra); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := checkImage(dir, selected, imageconfig.Options{Packages: []string{"valkey-9.1-cli"}, User: "65532:65532"}, extra); err == nil || !strings.Contains(err.Error(), `OCI image config user "65532" does not match requested "65532:65532"`) {
+		t.Fatalf("different user: err=%v", err)
+	}
+	dir, _ = makeOCIImage(t, installed+"P:valkey-9.1-cli\nV:9.1.1-r0\nA:x86_64\n\n", files, nil)
+	if _, err := checkImage(dir, selected, imageconfig.Options{}, extra); err == nil || !strings.Contains(err.Error(), "different version or architecture of valkey-9.1-cli") {
+		t.Fatalf("different additional version: err=%v", err)
+	}
+	dir, _ = makeOCIImage(t, installed, files, nil)
+	if _, err := checkImage(dir, selected, imageconfig.Options{}, extra); err == nil || !strings.Contains(err.Error(), "does not contain selected valkey-9.1-cli@9.1.2-r1") {
+		t.Fatalf("missing additional package: err=%v", err)
+	}
+	// An image without a requested user fails, and one with an unrequested user too.
+	if _, err := checkImage(dir, selected, imageconfig.Options{User: "26"}); err == nil || !strings.Contains(err.Error(), "OCI image config user") {
+		t.Fatalf("missing user: err=%v", err)
+	}
+	dir, _ = makeOCIImage(t, installed, files, map[string]any{"User": "26"})
+	if _, err := checkImage(dir, selected, imageconfig.Options{}); err == nil || !strings.Contains(err.Error(), "OCI image config user") {
+		t.Fatalf("unrequested user: err=%v", err)
+	}
+}
+
+// TestRunResolvesAdditionalPackages drives the pipeline up to apko build:
+// additional packages are pinned to their highest version in the same signed
+// index, checked in the lock, and recorded.
+func TestRunResolvesAdditionalPackages(t *testing.T) {
+	index, key := wolfitest.MakeSignedIndexFor(t, "P:postgresql-18\nV:18.1-r0\nA:x86_64\nC:pg\n\nP:postgresql-18-contrib\nV:18.0-r2\nA:x86_64\nC:old\n\nP:postgresql-18-contrib\nV:18.1-r0\nA:x86_64\nC:contrib\n\nP:psql-18\nV:18.1-r0\nA:x86_64\nC:psql\np:cmd:psql=18.1-r0\n\n")
+	run := func(packages []string, lock []map[string]string) (Result, []byte, error) {
+		stopped := errors.New("stop before real composition")
+		data := t.TempDir()
+		var config []byte
+		result, err := RunWith(context.Background(), Request{PackageName: "postgresql-18", Selector: "18", Arch: "x86_64", NoLoad: true, Image: imageconfig.Options{Packages: packages, User: "26"}}, Services{
+			DataDir:    func() (string, error) { return data, nil },
+			PublicFile: func(context.Context, string, int64) ([]byte, error) { return index, nil },
+			SigningKey: func(context.Context) ([]byte, error) { return key, nil },
+			Command: func(ctx context.Context, executable string, args ...string) ([]byte, error) {
+				switch args[0] {
+				case "version":
+					return []byte("GitVersion:    " + ApkoVersion + "\n"), nil
+				case "lock":
+					data, _ := json.Marshal(map[string]any{"contents": map[string]any{"packages": lock}})
+					return nil, os.WriteFile(args[4], data, 0600)
+				case "build":
+					config, _ = os.ReadFile(args[len(args)-3])
+					return nil, stopped
+				}
+				t.Fatalf("unexpected command %v", args)
+				return nil, nil
+			},
+		})
+		if errors.Is(err, stopped) {
+			err = nil
+		}
+		return result, config, err
+	}
+	pg := map[string]string{"name": "postgresql-18", "version": "18.1-r0", "architecture": "x86_64", "checksum": "pg"}
+	contrib := map[string]string{"name": "postgresql-18-contrib", "version": "18.1-r0", "architecture": "x86_64", "checksum": "contrib"}
+	psql := map[string]string{"name": "psql-18", "version": "18.1-r0", "architecture": "x86_64", "checksum": "psql"}
+	result, config, err := run([]string{"postgresql-18-contrib", "cmd:psql"}, []map[string]string{pg, contrib, psql})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(config), "    - \"postgresql-18=18.1-r0\"\n    - \"postgresql-18-contrib=18.1-r0\"\n    - \"psql-18=18.1-r0\"\n    - \"wolfi-baselayout\"\n") || !strings.Contains(string(config), "  run-as: \"26\"\n") {
+		t.Fatalf("config:\n%s", config)
+	}
+	record, err := json.Marshal(result.RecordDocument(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"packages":["postgresql-18-contrib","cmd:psql"]`, `"user":"26"`, `"packages":[{"name":"postgresql-18-contrib","version":"18.1-r0"},{"name":"psql-18","version":"18.1-r0"}]`} {
+		if !strings.Contains(string(record), want) {
+			t.Fatalf("record lacks %s:\n%s", want, record)
+		}
+	}
+	// The lock must hold the exact pinned bytes of every additional package.
+	if _, _, err := run([]string{"postgresql-18-contrib"}, []map[string]string{pg, {"name": "postgresql-18-contrib", "version": "18.1-r0", "architecture": "x86_64", "checksum": "changed"}}); err == nil || !strings.Contains(err.Error(), "apko lock does not match selected postgresql-18-contrib@18.1-r0") {
+		t.Fatalf("substituted additional package: err=%v", err)
+	}
+	if _, _, err := run([]string{"postgresql-18-contrib"}, []map[string]string{pg}); err == nil || !strings.Contains(err.Error(), "apko lock has 0 entries for selected postgresql-18-contrib@18.1-r0") {
+		t.Fatalf("missing additional package in lock: err=%v", err)
+	}
+	if _, _, err := run([]string{"postgresql-18-dev"}, nil); err == nil || !strings.Contains(err.Error(), "unavailable package: postgresql-18-dev") {
+		t.Fatalf("unavailable additional package: err=%v", err)
+	}
+	if _, _, err := run([]string{"psql-18", "cmd:psql"}, nil); err == nil || !strings.Contains(err.Error(), "package cmd:psql resolves to psql-18, which this build already selects") {
+		t.Fatalf("duplicate resolution: err=%v", err)
+	}
+}

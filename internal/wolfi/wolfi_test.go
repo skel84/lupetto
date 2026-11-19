@@ -181,3 +181,17 @@ func TestParseAPKINDEXRejectsInvalidArchive(t *testing.T) {
 		t.Fatal("invalid gzip accepted")
 	}
 }
+
+func TestSelectPackageWithoutSelectorTakesHighest(t *testing.T) {
+	packages := []Package{
+		{Name: "apache2", Version: "2.4.65-r1", Arch: "x86_64", Checksum: "a"},
+		{Name: "apache2", Version: "2.4.66-r0", Arch: "x86_64", Checksum: "b"},
+		{Name: "apache2", Version: "2.4.67-r0", Arch: "aarch64", Checksum: "c"},
+	}
+	if selected, err := SelectPackage(packages, "apache2", "", "", "x86_64"); err != nil || selected.Version != "2.4.66-r0" {
+		t.Fatalf("selected=%+v err=%v", selected, err)
+	}
+	if _, err := SelectPackage(packages, "nginx", "", "", "x86_64"); err == nil || err.Error() != "unavailable package: nginx for x86_64 in current Wolfi APKINDEX" {
+		t.Fatalf("err=%v", err)
+	}
+}

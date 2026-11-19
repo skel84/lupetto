@@ -152,6 +152,12 @@ func makeOCIWith(t *testing.T, version string, entries []tar.Header, entrypoint 
 // APK database and files.
 func makeOCILayer(t *testing.T, installed string, files []fixtureFile, entrypoint []string) (string, string) {
 	t.Helper()
+	return makeOCIImage(t, installed, files, map[string]any{"Entrypoint": entrypoint})
+}
+
+// makeOCIImage is makeOCILayer with an arbitrary OCI config "config" object.
+func makeOCIImage(t *testing.T, installed string, files []fixtureFile, imageConfig map[string]any) (string, string) {
+	t.Helper()
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "blobs", "sha256"), 0700); err != nil {
 		t.Fatal(err)
@@ -181,7 +187,7 @@ func makeOCILayer(t *testing.T, installed string, files []fixtureFile, entrypoin
 		t.Fatal(err)
 	}
 	layerDigest := buildtest.WriteOCIBlob(t, dir, layer.Bytes())
-	config, _ := json.Marshal(map[string]any{"architecture": "amd64", "os": "linux", "config": map[string]any{"Entrypoint": entrypoint}})
+	config, _ := json.Marshal(map[string]any{"architecture": "amd64", "os": "linux", "config": imageConfig})
 	configDigest := buildtest.WriteOCIBlob(t, dir, config)
 	manifest, _ := json.Marshal(map[string]any{"config": map[string]any{"digest": configDigest}, "layers": []any{map[string]any{"digest": layerDigest}}})
 	manifestDigest := buildtest.WriteOCIBlob(t, dir, manifest)

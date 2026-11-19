@@ -246,7 +246,8 @@ func matchesRequestedPackage(pkg Package, requested string) bool {
 
 // SelectPackage resolves requested (an APK name or version-matched provider)
 // to one exact APK: the exact version when given, otherwise the highest APK
-// version whose upstream numbers match the dotted numeric selector. When
+// version whose upstream numbers match the dotted numeric selector, or the
+// highest version of all when both are empty. When
 // several distinct APKs rank equally, the one named exactly requested wins
 // (the APK itself over packages that provide its name at the same version);
 // otherwise the request is ambiguous.
@@ -267,7 +268,7 @@ func SelectPackage(packages []Package, requested, selector, version, arch string
 			continue
 		}
 		upstream := upstreamNumbers.FindString(pkg.Version)
-		if upstream != selector && !strings.HasPrefix(upstream, selector+".") {
+		if selector != "" && upstream != selector && !strings.HasPrefix(upstream, selector+".") {
 			continue
 		}
 		parsed, err := apkcompare.ParseVersion(pkg.Version)
@@ -287,6 +288,9 @@ func SelectPackage(packages []Package, requested, selector, version, arch string
 	if len(candidates) == 0 {
 		if version != "" {
 			selector = version
+		}
+		if selector == "" {
+			return Package{}, fmt.Errorf("unavailable package: %s for %s in current Wolfi APKINDEX", requested, arch)
 		}
 		return Package{}, fmt.Errorf("unavailable version: %s %s for %s in current Wolfi APKINDEX", requested, selector, arch)
 	}

@@ -46,6 +46,9 @@ type RecordRequest struct {
 	Entrypoint []string `json:"entrypoint,omitempty"`
 	// CABundle is omitted unless the CA bundle was requested.
 	CABundle bool `json:"caBundle,omitempty"`
+	// Packages and User are omitted unless requested.
+	Packages []string `json:"packages,omitempty"`
+	User     string   `json:"user,omitempty"`
 }
 
 type RecordSelection struct {
@@ -53,6 +56,13 @@ type RecordSelection struct {
 	Version      string `json:"version"`
 	Architecture string `json:"architecture"`
 	IndexSHA256  string `json:"indexSHA256"`
+	// Packages are the exact additional APKs, omitted when none were requested.
+	Packages []RecordPackage `json:"packages,omitempty"`
+}
+
+type RecordPackage struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
 }
 
 type RecordEvidence struct {
@@ -113,6 +123,7 @@ func InitialResult(request Request) Result {
 			Package: request.PackageName, Selector: request.Selector, APKVersion: request.Version,
 			Load: !request.NoLoad, Publish: request.Publication.Enabled(), Sign: request.Signing.Enabled(),
 			Entrypoint: request.Image.Entrypoint, CABundle: request.Image.CABundle,
+			Packages: request.Image.Packages, User: request.Image.User,
 		},
 		Build:       "not-attempted",
 		DockerLoad:  requestedStatus(!request.NoLoad),
@@ -144,7 +155,7 @@ func (r Result) RecordDocument(failure *RecordFailure) Record {
 		record.Outcome = "failed"
 	}
 	if r.Selected {
-		record.Selection = &RecordSelection{Package: r.PackageName, Version: r.Version, Architecture: r.Arch, IndexSHA256: r.IndexSHA256}
+		record.Selection = &RecordSelection{Package: r.PackageName, Version: r.Version, Architecture: r.Arch, IndexSHA256: r.IndexSHA256, Packages: r.Packages}
 	}
 	if r.Validated {
 		record.Evidence = &RecordEvidence{ApkoVersion: ApkoVersion, ImageDirectory: r.ImageDir, ImageDigest: r.ImageDigest,

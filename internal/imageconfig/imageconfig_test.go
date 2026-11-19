@@ -105,3 +105,45 @@ func TestCABundleOption(t *testing.T) {
 		}
 	}
 }
+
+func TestPackagesAndUser(t *testing.T) {
+	options := Options{Packages: []string{"php-8.4-fpm", "apache2", "cmd:psql"}, User: "65532:0"}
+	if err := options.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	annotations := options.Annotations()
+	if annotations[PackagesAnnotation] != `["apache2","cmd:psql","php-8.4-fpm"]` || annotations[UserAnnotation] != "65532:0" {
+		t.Fatalf("annotations=%v", annotations)
+	}
+	parsed, err := FromAnnotations(annotations)
+	if err != nil || !parsed.Equal(options) {
+		t.Fatalf("round trip=%+v err=%v", parsed, err)
+	}
+	if (Options{Packages: []string{"a"}}).Equal(Options{Packages: []string{"b"}}) || (Options{User: "1"}).Equal(Options{User: "1:1"}) {
+		t.Fatal("different options compared equal")
+	}
+	for user, ids := range map[string][2]int{"1": {1, 1}, "26:0": {26, 0}, "65532:65532": {65532, 65532}, "2147483647": {2147483647, 2147483647}} {
+		if uid, gid, err := ParseUser(user); err != nil || uid != ids[0] || gid != ids[1] {
+			t.Errorf("ParseUser(%q) = %d %d %v", user, uid, gid, err)
+		}
+	}
+	for _, user := range []string{"0", "0:1", "01", "1:01", "-1", "1:", ":1", "root", "1:2:3", "2147483648", "1:2147483648", " 1"} {
+		if _, _, err := ParseUser(user); err == nil {
+			t.Errorf("ParseUser(%q) accepted", user)
+		}
+	}
+	tooMany := make([]string, maxPackages+1)
+	for i := range tooMany {
+		tooMany[i] = "p" + strings.Repeat("x", i)
+	}
+	for _, packages := range [][]string{{}, {""}, {"-x"}, {"a b"}, {"a", "a"}, tooMany} {
+		if err := ValidatePackages(packages); err == nil {
+			t.Errorf("ValidatePackages(%q) accepted", packages)
+		}
+	}
+	for _, annotations := range []map[string]string{{PackagesAnnotation: "[]"}, {PackagesAnnotation: "apache2"}, {UserAnnotation: "root"}} {
+		if _, err := FromAnnotations(annotations); err == nil {
+			t.Errorf("FromAnnotations(%v) accepted", annotations)
+		}
+	}
+}

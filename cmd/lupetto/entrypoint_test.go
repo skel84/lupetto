@@ -50,3 +50,30 @@ func TestParseBuildCABundle(t *testing.T) {
 		}
 	}
 }
+
+func TestParseBuildPackagesAndUser(t *testing.T) {
+	request, err := parseBuild([]string{"postgresql-18", "18", "--package", "postgresql-18-contrib", "--package=cmd:psql", "--user", "26"})
+	if err != nil || strings.Join(request.Image.Packages, " ") != "postgresql-18-contrib cmd:psql" || request.Image.User != "26" {
+		t.Fatalf("request=%+v err=%v", request.Image, err)
+	}
+	if request, err := parseBuild([]string{"curl", "8"}); err != nil || request.Image.Packages != nil || request.Image.User != "" {
+		t.Fatalf("default=%+v err=%v", request.Image, err)
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"tool", "1", "--package"}, "requires an APK name"},
+		{[]string{"tool", "1", "--package", "--user=1"}, "requires an APK name"},
+		{[]string{"tool", "1", "--package=a", "--package=a"}, "listed twice"},
+		{[]string{"tool", "1", "--package=tool"}, "must not repeat the selected package"},
+		{[]string{"tool", "1", "--package=a b"}, "invalid package"},
+		{[]string{"tool", "1", "--user"}, "requires a value"},
+		{[]string{"tool", "1", "--user=0"}, "non-zero uid"},
+		{[]string{"tool", "1", "--user=1", "--user=2"}, "only once"},
+	} {
+		if request, err := parseBuild(tc.args); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("parseBuild(%q) = %+v err=%v; want %q", tc.args, request.Image, err, tc.want)
+		}
+	}
+}

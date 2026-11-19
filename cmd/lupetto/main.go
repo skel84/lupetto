@@ -8,15 +8,17 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"slices"
 	"strings"
 	"syscall"
 
 	"lupetto/internal/build"
+	"lupetto/internal/imageconfig"
 	"lupetto/internal/storage"
 	"lupetto/internal/wolfi"
 )
 
-const usage = "Usage:\n  lupetto doctor\n  lupetto discover <package-or-provider> [--arch <arch>]\n  lupetto discover --json [<package-or-provider>] [--arch <arch>]\n  lupetto build <package-or-provider> <major[.minor[.patch]]> [--arch <arch>] [--entrypoint <element>]... [--ca-bundle] [--no-load] [--json] [--registry <authority> --repository <prefix>] [(--cosign-key <key> | --cosign-identity-token <file>) [--cosign-signing-config <file>] [--cosign-allow-http[=true|false]]] [--require-signing[=true|false]]\n  lupetto build <package-or-provider> --apk-version <exact-version> [--arch <arch>] [--entrypoint <element>]... [--ca-bundle] [--no-load] [--json] [--registry <authority> --repository <prefix>] [(--cosign-key <key> | --cosign-identity-token <file>) [--cosign-signing-config <file>] [--cosign-allow-http[=true|false]]] [--require-signing[=true|false]]\n  lupetto sbom <package-or-provider> --apk-version <exact-version> [--arch <arch>] [--entrypoint <element>]... [--ca-bundle] [--json]\n\nDiscover, build, and sbom target the host architecture unless --arch selects x86_64 (amd64) or aarch64 (arm64); one run builds one architecture.\nDiscover lists exact versions from the current signed Wolfi APKINDEX for the target architecture.\nDiscover --json prints a kind discover, version-1 document; without a name it lists each package's latest version and description.\nListed versions are not guaranteed buildable; builds validate apko dependencies and installed packages.\nA numeric selector chooses the highest matching APK version/revision; an exact version includes -rN.\nThe package name must match an APK name or a version-matched provider; ambiguous build matches fail.\nBuild and sbom compose a local OCI layout and validate apko SPDX against the lock.\nRepeat --entrypoint once per element, in order, to set the image ENTRYPOINT (the default is none); the first element is an absolute executable path\nthat must exist in the package closure, and an element starting with - needs the --entrypoint=<element> form. It is recorded in the image annotations and result record.\nEvery image also gets the Wolfi wolfi-baselayout APK (version pinned by the apko lock); the build checks that its /etc/os-release identifies the image as Wolfi to vulnerability scanners.\n--ca-bundle requires the Wolfi ca-certificates-bundle APK (version pinned by the apko lock) so /etc/ssl/certs/ca-certificates.crt exists; the base layout normally brings it in, and the flag adds, checks, and records the requirement the same way.\nBuild and sbom log stages and live tool diagnostics to stderr, with an ASCII spinner on interactive terminals.\nFor build and sbom, --json prints the version-6 result record (also retained as result.json or failure.json) to stdout instead of the summary.\nBuild loads Docker by default; --no-load skips loading. SBOM always skips loading.\nBuild and sbom create a private workspace under <data>/lupetto/builds, where <data> is LUPETTO_DATA_DIR (an absolute path) or the OS user data directory.\nBuild optionally publishes with --registry / LUPETTO_REGISTRY and --repository / LUPETTO_REPOSITORY.\nEach explicit flag independently overrides its environment input; both publication settings are required, and empty string flags are invalid.\nRegistry is an authority (not a URL); repository is a nested lower-case prefix such as team/lupetto/images.\nPublication pushes the validated OCI layout directly to the registry (with or without --no-load), using Docker's credential store/configuration (DOCKER_CONFIG or ~/.docker/config.json).\nThe pushed manifest, tag, config, and layers are read back by digest and verified before the immutable digest is reported.\nPlain HTTP registry access is used only for literal localhost or loopback IP registries.\nBuild optionally signs and attests the validated architecture SPDX to that same immutable digest using Cosign v3.1.3.\nSigning requires --cosign-key / LUPETTO_COSIGN_KEY and publication; there is no implicit keyless path.\nAn optional --cosign-signing-config / LUPETTO_COSIGN_SIGNING_CONFIG selects an upstream config file, not a Lupetto key store.\n--cosign-allow-http / LUPETTO_COSIGN_ALLOW_HTTP accepts only true or false; a valueless flag means true.\nExplicit false overrides environment true. HTTP allowance is restricted to literal localhost or loopback IP registries.\nPublishing without a Cosign key prints one warning on stderr: the image is pushed with no signature or SPDX attestation.\n--require-signing / LUPETTO_REQUIRE_SIGNING (true or false; a valueless flag means true; explicit false overrides environment true)\nrefuses that as invalid configuration (exit 2) before any tool, network, or workspace work; it does not affect builds that do not publish.\nSigning on literal loopback requires explicit effective HTTP consent, including when HTTPS might be available.\nProduction defaults preserve upstream HTTPS/TUF/transparency-log services; custom signing configs can change services.\nFor a local/offline exception, generate a no-service config with cosign signing-config create --out <file> (without --with-default-services).\nInherit COSIGN_PASSWORD only from the process environment; never pass or retain passwords, key/config contents, or Cosign diagnostics.\nRegistry error bodies and Cosign tool diagnostics are discarded. Publication, image signing, and SPDX attestation are reported separately.\nSBOM rejects publication and signing flags (including false/empty forms) and ignores publication and signing environment inputs."
+const usage = "Usage:\n  lupetto doctor\n  lupetto discover <package-or-provider> [--arch <arch>]\n  lupetto discover --json [<package-or-provider>] [--arch <arch>]\n  lupetto build <package-or-provider> <major[.minor[.patch]]> [--arch <arch>] [--entrypoint <element>]... [--ca-bundle] [--package <name>]... [--user <uid[:gid]>] [--no-load] [--json] [--registry <authority> --repository <prefix>] [(--cosign-key <key> | --cosign-identity-token <file>) [--cosign-signing-config <file>] [--cosign-allow-http[=true|false]]] [--require-signing[=true|false]]\n  lupetto build <package-or-provider> --apk-version <exact-version> [--arch <arch>] [--entrypoint <element>]... [--ca-bundle] [--package <name>]... [--user <uid[:gid]>] [--no-load] [--json] [--registry <authority> --repository <prefix>] [(--cosign-key <key> | --cosign-identity-token <file>) [--cosign-signing-config <file>] [--cosign-allow-http[=true|false]]] [--require-signing[=true|false]]\n  lupetto sbom <package-or-provider> --apk-version <exact-version> [--arch <arch>] [--entrypoint <element>]... [--ca-bundle] [--package <name>]... [--user <uid[:gid]>] [--json]\n\nDiscover, build, and sbom target the host architecture unless --arch selects x86_64 (amd64) or aarch64 (arm64); one run builds one architecture.\nDiscover lists exact versions from the current signed Wolfi APKINDEX for the target architecture.\nDiscover --json prints a kind discover, version-1 document; without a name it lists each package's latest version and description.\nListed versions are not guaranteed buildable; builds validate apko dependencies and installed packages.\nA numeric selector chooses the highest matching APK version/revision; an exact version includes -rN.\nThe package name must match an APK name or a version-matched provider; ambiguous build matches fail.\nBuild and sbom compose a local OCI layout and validate apko SPDX against the lock.\nRepeat --entrypoint once per element, in order, to set the image ENTRYPOINT (the default is none); the first element is an absolute executable path\nthat must exist in the package closure, and an element starting with - needs the --entrypoint=<element> form. It is recorded in the image annotations and result record.\nEvery image also gets the Wolfi wolfi-baselayout APK (version pinned by the apko lock); the build checks that its /etc/os-release identifies the image as Wolfi to vulnerability scanners.\n--ca-bundle requires the Wolfi ca-certificates-bundle APK (version pinned by the apko lock) so /etc/ssl/certs/ca-certificates.crt exists; the base layout normally brings it in, and the flag adds, checks, and records the requirement the same way.\nRepeat --package once per additional top-level APK (an APK name or version-matched provider) to install with the selected one; each is pinned to its highest version in the same signed APKINDEX\n(also with --apk-version, which pins only the selected APK), checked in the apko lock and the image, and recorded in the result record and the lupetto.image.packages annotation.\n--user sets the image USER to a numeric uid or uid:gid (non-zero uid; gid defaults to uid) and adds a nonroot account with those IDs to /etc/passwd and /etc/group; it is recorded in the lupetto.image.user annotation.\nBuild and sbom log stages and live tool diagnostics to stderr, with an ASCII spinner on interactive terminals.\nFor build and sbom, --json prints the version-6 result record (also retained as result.json or failure.json) to stdout instead of the summary.\nBuild loads Docker by default; --no-load skips loading. SBOM always skips loading.\nBuild and sbom create a private workspace under <data>/lupetto/builds, where <data> is LUPETTO_DATA_DIR (an absolute path) or the OS user data directory.\nBuild optionally publishes with --registry / LUPETTO_REGISTRY and --repository / LUPETTO_REPOSITORY.\nEach explicit flag independently overrides its environment input; both publication settings are required, and empty string flags are invalid.\nRegistry is an authority (not a URL); repository is a nested lower-case prefix such as team/lupetto/images.\nPublication pushes the validated OCI layout directly to the registry (with or without --no-load), using Docker's credential store/configuration (DOCKER_CONFIG or ~/.docker/config.json).\nThe pushed manifest, tag, config, and layers are read back by digest and verified before the immutable digest is reported.\nPlain HTTP registry access is used only for literal localhost or loopback IP registries.\nBuild optionally signs and attests the validated architecture SPDX to that same immutable digest using Cosign v3.1.3.\nSigning requires --cosign-key / LUPETTO_COSIGN_KEY and publication; there is no implicit keyless path.\nAn optional --cosign-signing-config / LUPETTO_COSIGN_SIGNING_CONFIG selects an upstream config file, not a Lupetto key store.\n--cosign-allow-http / LUPETTO_COSIGN_ALLOW_HTTP accepts only true or false; a valueless flag means true.\nExplicit false overrides environment true. HTTP allowance is restricted to literal localhost or loopback IP registries.\nPublishing without a Cosign key prints one warning on stderr: the image is pushed with no signature or SPDX attestation.\n--require-signing / LUPETTO_REQUIRE_SIGNING (true or false; a valueless flag means true; explicit false overrides environment true)\nrefuses that as invalid configuration (exit 2) before any tool, network, or workspace work; it does not affect builds that do not publish.\nSigning on literal loopback requires explicit effective HTTP consent, including when HTTPS might be available.\nProduction defaults preserve upstream HTTPS/TUF/transparency-log services; custom signing configs can change services.\nFor a local/offline exception, generate a no-service config with cosign signing-config create --out <file> (without --with-default-services).\nInherit COSIGN_PASSWORD only from the process environment; never pass or retain passwords, key/config contents, or Cosign diagnostics.\nRegistry error bodies and Cosign tool diagnostics are discarded. Publication, image signing, and SPDX attestation are reported separately.\nSBOM rejects publication and signing flags (including false/empty forms) and ignores publication and signing environment inputs."
 
 var (
 	apkVersion      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+~:-]*-r[0-9]+$`)
@@ -137,7 +139,11 @@ func runWithBuild(ctx context.Context, args []string, stdout, stderr io.Writer, 
 			return 0
 		}
 		fmt.Fprintln(stdout, "Build completed")
-		fmt.Fprintf(stdout, "Selected %s@%s (APKINDEX sha256:%s)\nOCI image: %s\nValidated SPDX: %s (sha256:%s)\nBuild evidence: %s\n", result.PackageName, result.Version, result.IndexSHA256, result.ImageDir, result.SPDXPath, result.SPDXSHA256, result.Workspace)
+		fmt.Fprintf(stdout, "Selected %s@%s (APKINDEX sha256:%s)\n", result.PackageName, result.Version, result.IndexSHA256)
+		for _, pkg := range result.Packages {
+			fmt.Fprintf(stdout, "Additional package %s@%s\n", pkg.Name, pkg.Version)
+		}
+		fmt.Fprintf(stdout, "OCI image: %s\nValidated SPDX: %s (sha256:%s)\nBuild evidence: %s\n", result.ImageDir, result.SPDXPath, result.SPDXSHA256, result.Workspace)
 		fmt.Fprintf(stdout, "Image reference: %s\nBuild reference: %s\n", result.ImageReference, result.BuildReference)
 		if result.DockerLoad == "loaded" {
 			fmt.Fprintf(stdout, "Docker loaded: %s (image ID: %s)\n", result.ImageReference, result.DockerImageID)
@@ -177,7 +183,7 @@ func writeJSONRecord(stdout, stderr io.Writer, record []byte) bool {
 func parseBuild(args []string) (cliRequest, error) {
 	var request cliRequest
 	var positional []string
-	seenVersion, seenArch := false, false
+	seenVersion, seenArch, seenUser := false, false, false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
@@ -282,6 +288,33 @@ func parseBuild(args []string) (cliRequest, error) {
 				return cliRequest{}, fmt.Errorf("%s must be true or false", flagName)
 			}
 			*target = build.OptionalBool{Value: value == "true", Set: true}
+		case arg == "--package" || strings.HasPrefix(arg, "--package="):
+			value, inline := strings.CutPrefix(arg, "--package=")
+			if !inline {
+				i++
+				if i == len(args) || strings.HasPrefix(args[i], "-") {
+					return cliRequest{}, fmt.Errorf("--package requires an APK name")
+				}
+				value = args[i]
+			}
+			request.Image.Packages = append(request.Image.Packages, value)
+		case arg == "--user" || strings.HasPrefix(arg, "--user="):
+			if seenUser {
+				return cliRequest{}, fmt.Errorf("--user may be specified only once")
+			}
+			seenUser = true
+			value, inline := strings.CutPrefix(arg, "--user=")
+			if !inline {
+				i++
+				if i == len(args) {
+					return cliRequest{}, fmt.Errorf("--user requires a value")
+				}
+				value = args[i]
+			}
+			if _, _, err := imageconfig.ParseUser(value); err != nil {
+				return cliRequest{}, err
+			}
+			request.Image.User = value
 		case arg == "--entrypoint" || strings.HasPrefix(arg, "--entrypoint="):
 			// Repeat once per element, in order; an element starting with "-"
 			// needs the inline --entrypoint=<element> form.
@@ -310,6 +343,9 @@ func parseBuild(args []string) (cliRequest, error) {
 	request.PackageName = positional[0]
 	if !wolfi.RequestedNamePattern.MatchString(request.PackageName) {
 		return cliRequest{}, fmt.Errorf("invalid package or provider name")
+	}
+	if slices.Contains(request.Image.Packages, request.PackageName) {
+		return cliRequest{}, fmt.Errorf("--package must not repeat the selected package %s", request.PackageName)
 	}
 	if seenVersion {
 		if len(positional) != 1 {
