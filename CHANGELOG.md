@@ -2,7 +2,9 @@
 
 User-visible changes to the `lupetto` CLI, `lupetto-explorer`, and the combined container. Releases are git tags `vX.Y.Z`; the [release workflow](.github/workflows/release.yml) publishes the combined Explorer image for each tag.
 
-## Unreleased
+## v0.5.0 (2026-11-19)
+
+Adds additional packages and a numeric image user to products. See the [release notes](docs/release-notes/v0.5.0.md).
 
 ### Added
 

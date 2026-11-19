@@ -195,6 +195,7 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 **Additional packages and image user** ([decision](decisions.md#additional-packages-and-image-user-2026-11-19)):
 
 - [x] Optional per-product `packages` and `user`, repeatable `build`/`sbom` `--package` and `--user`, exact resolution of every additional APK in the same signed index with lock and image checks, `lupetto.image.packages`/`lupetto.image.user` annotations, `request.packages`/`request.user`/`selection.packages` record fields, `config-changed` status, and Explorer pass-through. Proof: focused hermetic tests and a real signed and attested `postgresql-18` build with additional packages and `--user 26` published to a loopback registry, verified, compared by `status`, and run under Docker ([evidence](verification.md#additional-packages-and-image-user)).
+- [ ] Tag `v0.5.0` and let the release workflow publish it ([changelog](../CHANGELOG.md), [release notes](release-notes/v0.5.0.md)).
 
 ### 4. Add Explorer as an optional application
 
