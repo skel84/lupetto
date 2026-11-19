@@ -1787,3 +1787,16 @@ This records the evidence for [additional packages and the image user](decisions
 | `gofmt -l internal cmd`, `go vet -composites=false ./...`, `go test ./... -count=1`, `go test -race ./... -count=1` | Empty, passed, passed, passed. |
 
 Not exercised: `aarch64`/`x86_64` cross-architecture builds with additional packages, Explorer in a browser (its form is unchanged; only argument pass-through changed, covered by the HTTP test), and the combined container.
+
+## v0.5.0 release (2026-11-19)
+
+With the maintainer's approval, `main` was fast-forwarded from `fcf97f5` to `052a8b4` (pull request #1: [additional packages and the image user](#additional-packages-and-image-user), its review fixes, and the dated changelog) and pushed, and the annotated tag `v0.5.0` ("lupetto v0.5.0") was pushed on that commit.
+
+| Check | Observed result |
+| --- | --- |
+| Release workflow run `44504013781` (tag push `v0.5.0`) | Completed `success`. |
+| `crane digest ghcr.io/skel84/lupetto:v0.5.0` | `sha256:a23a9a0ee0f95ad37dd45b676336d3683c6ce56faf9feec0f82db9227f807afe`. |
+| `cosign verify` with identity `https://github.com/skel84/lupetto/.github/workflows/release.yml@refs/tags/v0.5.0` and issuer `https://token.actions.githubusercontent.com` | Exit 0; claims validated, transparency-log entry verified offline, certificate verified against the trusted CA. |
+| `crane config` of the digest | `amd64`; `Entrypoint` `/usr/local/bin/lupetto-explorer`. |
+
+`gh release create v0.5.0 --verify-tag --title "lupetto v0.5.0" --latest` published the [GitHub release](https://github.com/skel84/lupetto/releases/tag/v0.5.0) with `docs/release-notes/v0.5.0.md` as its body, its relative link rewritten to the tagged file.
