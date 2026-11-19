@@ -332,7 +332,7 @@ func TestApkoConfigPackagesAndUser(t *testing.T) {
 	}
 	// A uid-only user gets a group with the same ID.
 	got = apkoConfig("/k", selected, "x86_64", created, "d", imageconfig.Options{User: "65532"})
-	if !strings.HasSuffix(got, "      gid: 65532\n  users:\n    - username: nonroot\n      uid: 65532\n      gid: 65532\n  run-as: \"65532\"\n") {
+	if !strings.HasSuffix(got, "      gid: 65532\n  users:\n    - username: nonroot\n      uid: 65532\n      gid: 65532\n  run-as: \"65532:65532\"\n") {
 		t.Fatalf("uid-only config:\n%s", got)
 	}
 }
@@ -342,12 +342,20 @@ func TestCheckImagePackagesAndUser(t *testing.T) {
 	extra := wolfi.Package{Name: "valkey-9.1-cli", Version: "9.1.2-r1", Arch: "x86_64"}
 	files := []fixtureFile{{header: tar.Header{Name: "etc/os-release", Typeflag: tar.TypeReg, Mode: 0644}, body: fixtureOSRelease}}
 	installed := "P:valkey-9.1\nV:9.1.2-r1\nA:x86_64\n\nP:wolfi-baselayout\nV:20230201-r30\nA:x86_64\n\n"
-	dir, _ := makeOCIImage(t, installed+"P:valkey-9.1-cli\nV:9.1.2-r1\nA:x86_64\n\n", files, map[string]any{"User": "65532"})
-	if _, err := checkImage(dir, selected, imageconfig.Options{Packages: []string{"valkey-9.1-cli"}, User: "65532"}, extra); err != nil {
-		t.Fatal(err)
+	// The config always carries an explicit uid:gid, whichever form was requested.
+	dir, _ := makeOCIImage(t, installed+"P:valkey-9.1-cli\nV:9.1.2-r1\nA:x86_64\n\n", files, map[string]any{"User": "65532:65532"})
+	for _, user := range []string{"65532", "65532:65532"} {
+		if _, err := checkImage(dir, selected, imageconfig.Options{Packages: []string{"valkey-9.1-cli"}, User: user}, extra); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := checkImage(dir, selected, imageconfig.Options{Packages: []string{"valkey-9.1-cli"}, User: "65532:65532"}, extra); err == nil || !strings.Contains(err.Error(), `OCI image config user "65532" does not match requested "65532:65532"`) {
+	if _, err := checkImage(dir, selected, imageconfig.Options{Packages: []string{"valkey-9.1-cli"}, User: "65532:0"}, extra); err == nil || !strings.Contains(err.Error(), `OCI image config user "65532:65532" does not match requested "65532:0"`) {
 		t.Fatalf("different user: err=%v", err)
+	}
+	// A bare uid would take its group from the first passwd entry with that uid.
+	dir, _ = makeOCIImage(t, installed+"P:valkey-9.1-cli\nV:9.1.2-r1\nA:x86_64\n\n", files, map[string]any{"User": "65532"})
+	if _, err := checkImage(dir, selected, imageconfig.Options{Packages: []string{"valkey-9.1-cli"}, User: "65532"}, extra); err == nil || !strings.Contains(err.Error(), `OCI image config user "65532" does not match requested "65532:65532"`) {
+		t.Fatalf("bare uid: err=%v", err)
 	}
 	dir, _ = makeOCIImage(t, installed+"P:valkey-9.1-cli\nV:9.1.1-r0\nA:x86_64\n\n", files, nil)
 	if _, err := checkImage(dir, selected, imageconfig.Options{}, extra); err == nil || !strings.Contains(err.Error(), "different version or architecture of valkey-9.1-cli") {
@@ -407,7 +415,7 @@ func TestRunResolvesAdditionalPackages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(config), "    - \"postgresql-18=18.1-r0\"\n    - \"postgresql-18-contrib=18.1-r0\"\n    - \"psql-18=18.1-r0\"\n    - \"wolfi-baselayout\"\n") || !strings.Contains(string(config), "  run-as: \"26\"\n") {
+	if !strings.Contains(string(config), "    - \"postgresql-18=18.1-r0\"\n    - \"postgresql-18-contrib=18.1-r0\"\n    - \"psql-18=18.1-r0\"\n    - \"wolfi-baselayout\"\n") || !strings.Contains(string(config), "  run-as: \"26:26\"\n") {
 		t.Fatalf("config:\n%s", config)
 	}
 	record, err := json.Marshal(result.RecordDocument(nil))

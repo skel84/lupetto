@@ -48,9 +48,20 @@ func apkoConfig(keyPath string, selected wolfi.Package, arch string, created tim
 	if image.User != "" {
 		// Validate already accepted the user, so it parses.
 		uid, gid, _ := imageconfig.ParseUser(image.User)
-		fmt.Fprintf(&config, "accounts:\n  groups:\n    - groupname: %s\n      gid: %d\n  users:\n    - username: %s\n      uid: %d\n      gid: %d\n  run-as: %s\n", imageconfig.UserName, gid, imageconfig.UserName, uid, gid, strconv.Quote(image.User))
+		fmt.Fprintf(&config, "accounts:\n  groups:\n    - groupname: %s\n      gid: %d\n  users:\n    - username: %s\n      uid: %d\n      gid: %d\n  run-as: %s\n", imageconfig.UserName, gid, imageconfig.UserName, uid, gid, strconv.Quote(ociUser(image)))
 	}
 	return config.String()
+}
+
+// ociUser is the image config user: always an explicit uid:gid, because a
+// bare uid takes its group from the first passwd entry with that uid, which
+// may be a base-layout account (uid 5 is sync, gid 0) rather than nonroot.
+func ociUser(image imageconfig.Options) string {
+	if image.User == "" {
+		return ""
+	}
+	uid, gid, _ := imageconfig.ParseUser(image.User)
+	return fmt.Sprintf("%d:%d", uid, gid)
 }
 
 // checkImageConfig requires the OCI config to carry exactly the requested
@@ -73,8 +84,8 @@ func checkImageConfig(dir, digest string, image imageconfig.Options) error {
 	if !slices.Equal(config.Config.Entrypoint, image.Entrypoint) {
 		return fmt.Errorf("OCI image config entrypoint %q does not match requested %q", config.Config.Entrypoint, image.Entrypoint)
 	}
-	if config.Config.User != image.User {
-		return fmt.Errorf("OCI image config user %q does not match requested %q", config.Config.User, image.User)
+	if config.Config.User != ociUser(image) {
+		return fmt.Errorf("OCI image config user %q does not match requested %q", config.Config.User, ociUser(image))
 	}
 	return nil
 }
