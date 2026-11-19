@@ -26,6 +26,7 @@ var (
 	packagePattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+._-]*(?::[A-Za-z0-9][A-Za-z0-9+._-]*)*$`)
 	selectorPattern = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)*$`)
 	versionPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+~:-]*-r[0-9]+$`)
+	userPattern     = regexp.MustCompile(`^[0-9]{1,10}(?::[0-9]{1,10})?$`)
 )
 
 func ValidateBuild(request BuildRequest) error {
@@ -53,6 +54,17 @@ func ValidateBuild(request BuildRequest) error {
 			return errors.New("invalid entrypoint element")
 		}
 	}
+	if len(request.Packages) > 32 {
+		return errors.New("invalid packages: at most 32")
+	}
+	for _, name := range request.Packages {
+		if !validPackage(name) {
+			return errors.New("invalid package in packages: use an APK name or provider, not a flag")
+		}
+	}
+	if request.User != "" && !userPattern.MatchString(request.User) {
+		return errors.New("invalid user: expected a numeric uid or uid:gid")
+	}
 	return nil
 }
 func validPackage(name string) bool { return len(name) <= 256 && packagePattern.MatchString(name) }
@@ -72,6 +84,12 @@ func buildArgs(request BuildRequest) []string {
 	}
 	if request.CABundle {
 		args = append(args, "--ca-bundle")
+	}
+	for _, name := range request.Packages {
+		args = append(args, "--package="+name)
+	}
+	if request.User != "" {
+		args = append(args, "--user="+request.User)
 	}
 	return append(args, "--json")
 }

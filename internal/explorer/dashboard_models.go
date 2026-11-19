@@ -12,6 +12,8 @@ type Product struct {
 	Selectors  []string `json:"selectors"`
 	Entrypoint []string `json:"entrypoint,omitempty"`
 	CABundle   bool     `json:"caBundle,omitempty"`
+	Packages   []string `json:"packages,omitempty"`
+	User       string   `json:"user,omitempty"`
 	// Upstream maps a selector to the image its Lupetto image replaces.
 	Upstream map[string]string `json:"upstream,omitempty"`
 }

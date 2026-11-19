@@ -405,6 +405,10 @@ func configChangeDetail(changes []string) string {
 			labels[i] = "CA bundle"
 		case "baseLayout":
 			labels[i] = "adds Wolfi base layout (scanner OS identity)"
+		case "packages":
+			labels[i] = "additional packages"
+		case "user":
+			labels[i] = "user"
 		default:
 			labels[i] = change
 		}

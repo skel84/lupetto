@@ -208,7 +208,7 @@ LogChunk { Offset, NextOffset int64; Text string; Truncated, Done bool }
 ```
 TrackingView     { BaseView; Package, Selector string; Products *ProductsDocument; Error, Message string }
 ProductsDocument { Kind string; Version int; Products []Product; Changed bool; Message string }
-Product          { Package string; Selectors []string; Entrypoint []string; CABundle bool; Upstream map[string]string }
+Product          { Package string; Selectors []string; Entrypoint []string; CABundle bool; Packages []string; User string; Upstream map[string]string }
 ```
 
 - `GET /products/track[?package=&selector=]` prefills the form. It is the no-JavaScript fallback for the "Track a product" dialog: every opener is `<a href="/products/track…" data-opens="track-dialog" [data-package="…"]>`; with JavaScript the page's `<dialog id="track-dialog">` opens instead (`[data-closes]` closes it).

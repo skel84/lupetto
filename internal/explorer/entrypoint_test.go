@@ -59,3 +59,31 @@ func TestValidateBuildEntrypoint(t *testing.T) {
 		}
 	}
 }
+
+func TestHTTPBuildUsesTrackedProductPackagesAndUser(t *testing.T) {
+	config := goodFake()
+	config.Products = `{"kind":"products","version":1,"products":[{"package":"cmd:curl","selectors":["1"],"packages":["postgresql-18-contrib","-x"],"user":"26:26"}],"changed":false,"message":"synthetic"}`
+	server, _, calls := testServer(t, config, true)
+	if w := request(server, "POST", "/builds", buildForm(server)); w.Code != 400 {
+		t.Fatalf("flag-like package: response = %d %s", w.Code, w.Body.String())
+	}
+	config.Products = strings.Replace(config.Products, `,"-x"`, "", 1)
+	server, _, calls = testServer(t, config, true)
+	if w := request(server, "POST", "/builds", buildForm(server)); w.Code != 303 {
+		t.Fatalf("response = %d %s", w.Code, w.Body.String())
+	}
+	eventually(t, func() bool { _, log, ok := server.jobs.detail("1", 0); return ok && log.Done })
+	data, _ := os.ReadFile(calls)
+	if !strings.Contains(string(data), "build|cmd:curl|1.2|--no-load|--package=postgresql-18-contrib|--user=26:26|--json\n") {
+		t.Fatal(string(data))
+	}
+}
+
+func TestValidateBuildPackagesAndUser(t *testing.T) {
+	for _, request := range []BuildRequest{{Packages: []string{"-x"}}, {Packages: make([]string, 33)}, {User: "root"}, {User: "1 2"}, {User: "--user"}} {
+		request.Package, request.Selector = "curl", "1"
+		if err := ValidateBuild(request); err == nil {
+			t.Errorf("accepted %+v", request)
+		}
+	}
+}

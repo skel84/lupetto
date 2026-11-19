@@ -482,6 +482,7 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		for _, product := range products.Products {
 			if product.Package == buildRequest.Package {
 				buildRequest.Entrypoint, buildRequest.CABundle = product.Entrypoint, product.CABundle
+				buildRequest.Packages, buildRequest.User = product.Packages, product.User
 			}
 		}
 	}
