@@ -93,6 +93,12 @@ func TestHTTPBuildUsesTrackedProductPackagesAndUser(t *testing.T) {
 	if w := request(server, "POST", "/builds", form); w.Code != 409 || !strings.Contains(w.Body.String(), "different image options") {
 		t.Fatalf("ambiguous: response = %d %s", w.Code, w.Body.String())
 	}
+	// The same packages in another order agree.
+	config.Products = `{"kind":"products","version":1,"products":[{"package":"cmd:curl","selectors":["1"],"packages":["busybox","openssl"]},{"package":"cmd:curl","selectors":["2"],"packages":["openssl","busybox"]}],"changed":false,"message":"synthetic"}`
+	server, _, _ = testServer(t, config, true)
+	if w := request(server, "POST", "/builds", buildForm(server)); w.Code != 303 {
+		t.Fatalf("reordered packages: response = %d %s", w.Code, w.Body.String())
+	}
 }
 
 func TestValidateBuildPackagesAndUser(t *testing.T) {

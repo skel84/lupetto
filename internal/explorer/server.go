@@ -524,8 +524,9 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/builds/"+job.ID, http.StatusSeeOther)
 }
 
+// Package order is not significant, as in the CLI's status comparison.
 func sameImageOptions(a, b Product) bool {
-	return slices.Equal(a.Entrypoint, b.Entrypoint) && a.CABundle == b.CABundle && slices.Equal(a.Packages, b.Packages) && a.User == b.User
+	return slices.Equal(a.Entrypoint, b.Entrypoint) && a.CABundle == b.CABundle && slices.Equal(slices.Sorted(slices.Values(a.Packages)), slices.Sorted(slices.Values(b.Packages))) && a.User == b.User
 }
 func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 	if !s.authorize(w, r) {
