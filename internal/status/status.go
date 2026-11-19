@@ -115,7 +115,7 @@ func RunWith(ctx context.Context, products Products, options Options, services S
 	installedSets := map[string][]wolfi.InstalledPackage{}
 	for _, product := range products.Products {
 		for _, selector := range product.Selectors {
-			track := Track{Package: product.Package, Selector: selector, State: NotBuilt, Entrypoint: product.Entrypoint, CABundle: product.CABundle, Images: []Image{}, Installed: []Identity{}, Outdated: []OutdatedPackage{}, MissingFixes: []MissingFix{}, UnevaluatedFixes: []UnevaluatedFix{}}
+			track := Track{Package: product.Package, Selector: selector, State: NotBuilt, Entrypoint: product.Entrypoint, CABundle: product.CABundle, Packages: product.Packages, User: product.User, Images: []Image{}, Installed: []Identity{}, Outdated: []OutdatedPackage{}, MissingFixes: []MissingFix{}, UnevaluatedFixes: []UnevaluatedFix{}}
 			selected, err := wolfi.SelectPackage(packages, product.Package, selector, "", services.Architecture)
 			if err != nil {
 				track.State, track.Error = Error, "unavailable index version for track"
@@ -251,8 +251,8 @@ func globalError(ctx context.Context, message string) error {
 }
 
 // configChanges lists what a rebuild would change in the newest image's
-// configuration: the product's entrypoint or CA bundle setting differs from
-// the image's annotations, or the image lacks the base layout every build now
+// configuration: the product's entrypoint, CA bundle, additional packages, or
+// user differs from the image's annotations, or the image lacks the base layout every build now
 // adds. The installed APK set is the evidence for the base layout, so images
 // that got it through their closure need no rebuild.
 func configChanges(built, wanted imageconfig.Options, installed []wolfi.InstalledPackage) []string {
@@ -262,6 +262,12 @@ func configChanges(built, wanted imageconfig.Options, installed []wolfi.Installe
 	}
 	if built.CABundle != wanted.CABundle {
 		changes = append(changes, ChangeCABundle)
+	}
+	if !built.SamePackages(wanted) {
+		changes = append(changes, ChangePackages)
+	}
+	if built.User != wanted.User {
+		changes = append(changes, ChangeUser)
 	}
 	if !slices.ContainsFunc(installed, func(pkg wolfi.InstalledPackage) bool { return pkg.Name == imageconfig.BaseLayoutPackage }) {
 		changes = append(changes, ChangeBaseLayout)

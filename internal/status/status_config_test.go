@@ -185,3 +185,83 @@ func TestRunBaseLayoutState(t *testing.T) {
 		})
 	}
 }
+
+func TestRunPackagesAndUserState(t *testing.T) {
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	index := signedIndexReader(t, "P:postgresql-18\nV:18.1-r0\nA:x86_64\nC:Q1a\n\nP:postgresql-18-contrib\nV:18.1-r0\nA:x86_64\nC:Q1b\n\nP:libxml2\nV:2.15.1-r1\nA:x86_64\nC:Q1c\n\n")
+	// The feed names the origin, so a fix applies to the installed subpackage.
+	security := func(context.Context) (SecurityFeed, string, error) {
+		return SecurityFeed{"libxml2-src": {"2.15.1-r1": {"CVE-2025-0001"}}}, strings.Repeat("a", 64), nil
+	}
+	packages := []string{"postgresql-18-contrib"}
+	built := imageconfig.Options{Packages: packages, User: "26"}.Annotations()
+	for _, scenario := range []struct {
+		name        string
+		annotations map[string]string
+		packages    []string
+		user        string
+		libxml2     string
+		contrib     string
+		want        string
+		changes     string
+	}{
+		{"requested and built", built, packages, "26", "2.15.1-r1", "18.1-r0", Current, ""},
+		{"packages added", map[string]string{imageconfig.UserAnnotation: "26"}, packages, "26", "2.15.1-r1", "18.1-r0", ConfigChanged, ChangePackages},
+		{"packages removed", built, nil, "26", "2.15.1-r1", "18.1-r0", ConfigChanged, ChangePackages},
+		{"user changed", built, packages, "26:26", "2.15.1-r1", "18.1-r0", ConfigChanged, ChangeUser},
+		{"user removed", built, packages, "", "2.15.1-r1", "18.1-r0", ConfigChanged, ChangeUser},
+		{"newer additional package alone", built, packages, "26", "2.15.1-r1", "18.0-r0", Current, ""},
+		{"fix in an additional package's dependency", built, packages, "26", "2.15.1-r0", "18.1-r0", FixesAvailable, ""},
+		{"malformed packages annotation", map[string]string{imageconfig.PackagesAnnotation: "postgresql-18-contrib"}, packages, "", "2.15.1-r1", "18.1-r0", Error, ""},
+		{"malformed user annotation", map[string]string{imageconfig.UserAnnotation: "0"}, nil, "", "2.15.1-r1", "18.1-r0", Error, ""},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			image := testImage("18.1-r0", "a", now)
+			image.Name = "postgresql-18"
+			image.Annotations = scenario.annotations
+			installed := []wolfi.InstalledPackage{{Name: "postgresql-18", Version: "18.1-r0", Arch: "x86_64"}, {Name: "postgresql-18-contrib", Version: scenario.contrib, Arch: "x86_64", Origin: "postgresql-18"}, {Name: "libxml2", Version: scenario.libxml2, Arch: "x86_64", Origin: "libxml2-src"}, baseLayout}
+			registry := &testRegistry{listings: map[string]RegistryListing{"team/images/postgresql-18": {Images: []Image{image}}}, installed: map[string][]wolfi.InstalledPackage{image.Digest: installed}}
+			products := Products{Version: 1, Products: []Product{{Package: "postgresql-18", Selectors: []string{"18"}, Packages: scenario.packages, User: scenario.user}}}
+			services := Services{Architecture: "x86_64", ReadIndex: index, ReadSecurity: security, Registry: registry, Cache: &testCache{sets: map[string][]wolfi.InstalledPackage{}}, Now: func() time.Time { return now }}
+			document, err := RunWith(context.Background(), products, Options{Registry: "registry.example.invalid", Repository: "team/images"}, services)
+			if err != nil || len(document.Tracks) != 1 {
+				t.Fatalf("document=%+v err=%v", document, err)
+			}
+			track := document.Tracks[0]
+			if track.State != scenario.want || strings.Join(track.ConfigChanges, ",") != scenario.changes {
+				t.Fatalf("state=%s changes=%v error=%q want %s %s", track.State, track.ConfigChanges, track.Error, scenario.want, scenario.changes)
+			}
+			data, _ := json.Marshal(track)
+			if strings.Contains(string(data), `"packages":[`) != (scenario.packages != nil) || strings.Contains(string(data), `"user":`) != (scenario.user != "") {
+				t.Fatalf("track packages/user presence: %s", data)
+			}
+		})
+	}
+}
+
+func TestParseProductsPackagesAndUser(t *testing.T) {
+	products, err := ParseProducts(strings.NewReader("version: 1\nproducts:\n  - package: postgresql-18\n    selectors: [\"18\"]\n    packages: [postgresql-18-contrib, \"cmd:psql\"]\n    user: 26:26\n  - package: curl\n    selectors: [\"8\"]\n"))
+	if err != nil || strings.Join(products.Products[0].Packages, " ") != "postgresql-18-contrib cmd:psql" || products.Products[0].Image().User != "26:26" || products.Products[1].Packages != nil || products.Products[1].User != "" {
+		t.Fatalf("products=%+v err=%v", products, err)
+	}
+	for _, invalid := range []string{
+		"packages: postgresql-18-contrib",
+		"packages: []",
+		"packages: [postgresql-18]",
+		"packages: [a, a]",
+		"packages: [\"--flag\"]",
+		"packages: [1]",
+		"user: 26",
+		"user: \"0\"",
+		"user: \"root\"",
+		"user: \"26:\"",
+		"user: \"026\"",
+		"user: \"4294967296\"",
+		"user: \"\"",
+	} {
+		document := "version: 1\nproducts:\n  - package: postgresql-18\n    selectors: [\"18\"]\n    " + invalid + "\n"
+		if _, err := ParseProducts(strings.NewReader(document)); err == nil {
+			t.Errorf("accepted %s", invalid)
+		}
+	}
+}

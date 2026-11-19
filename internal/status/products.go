@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"slices"
 
 	"github.com/distribution/reference"
 	"go.yaml.in/yaml/v3"
@@ -27,6 +28,11 @@ type Product struct {
 	Entrypoint []string `yaml:"entrypoint,omitempty" json:"entrypoint,omitempty"`
 	// CABundle adds the CA certificate bundle to every selector's image.
 	CABundle bool `yaml:"caBundle,omitempty" json:"caBundle,omitempty"`
+	// Packages are further top-level APKs installed with Package in every
+	// selector's image.
+	Packages []string `yaml:"packages,omitempty" json:"packages,omitempty"`
+	// User is the numeric "uid" or "uid:gid" every selector's image runs as.
+	User string `yaml:"user,omitempty" json:"user,omitempty"`
 	// Upstream maps a selector to the image reference that selector's Lupetto
 	// image replaces. Only the Explorer reads it, to compare vulnerabilities;
 	// it does not change what a build produces.
@@ -38,7 +44,7 @@ const MaxUpstreamReferenceBytes = 512
 
 // Image returns the image configuration the product's tracks build with.
 func (p Product) Image() imageconfig.Options {
-	return imageconfig.Options{Entrypoint: p.Entrypoint, CABundle: p.CABundle}
+	return imageconfig.Options{Entrypoint: p.Entrypoint, CABundle: p.CABundle, Packages: p.Packages, User: p.User}
 }
 
 type Products struct {
@@ -129,15 +135,20 @@ func checkYAMLTypes(node *yaml.Node) error {
 			if key.Value == "caBundle" && (value.Kind != yaml.ScalarNode || value.Tag != "!!bool") {
 				return errors.New("caBundle must be true or false")
 			}
-			if key.Value == "entrypoint" {
+			if key.Value == "entrypoint" || key.Value == "packages" {
 				if value.Kind != yaml.SequenceNode {
-					return errors.New("entrypoint must be a YAML list of strings")
+					return fmt.Errorf("%s must be a YAML list of strings", key.Value)
 				}
 				for _, element := range value.Content {
 					if element.Kind != yaml.ScalarNode || element.Tag != "!!str" {
-						return errors.New("entrypoint elements must be YAML strings")
+						return fmt.Errorf("%s elements must be YAML strings", key.Value)
 					}
 				}
+			}
+			// An unquoted 65532 is an integer; require the string form. An
+			// empty user would read as unset, so it is rejected too.
+			if key.Value == "user" && (value.Kind != yaml.ScalarNode || value.Tag != "!!str" || value.Value == "") {
+				return errors.New(`user must be a quoted string such as "65532" or "65532:65532"`)
 			}
 		}
 	}
@@ -169,7 +180,10 @@ func validateProducts(products Products, allowEmpty bool) error {
 			return errors.New("each product requires at least one selector")
 		}
 		if err := product.Image().Validate(); err != nil {
-			return fmt.Errorf("invalid products entrypoint for %s: %w", product.Package, err)
+			return fmt.Errorf("invalid products image configuration for %s: %w", product.Package, err)
+		}
+		if product.Packages != nil && slices.Contains(product.Packages, product.Package) {
+			return fmt.Errorf("invalid products packages for %s: the product's own package is listed", product.Package)
 		}
 		for _, selector := range product.Selectors {
 			if !selectorPattern.MatchString(selector) {

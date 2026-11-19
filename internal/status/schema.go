@@ -22,6 +22,8 @@ const (
 	ChangeEntrypoint = "entrypoint"
 	ChangeCABundle   = "caBundle"
 	ChangeBaseLayout = "baseLayout"
+	ChangePackages   = "packages"
+	ChangeUser       = "user"
 )
 
 type Identity struct {
@@ -92,6 +94,8 @@ type Track struct {
 	State      string   `json:"state"`
 	Entrypoint []string `json:"entrypoint,omitempty"`
 	CABundle   bool     `json:"caBundle,omitempty"`
+	Packages   []string `json:"packages,omitempty"`
+	User       string   `json:"user,omitempty"`
 	// ConfigChanges lists how the newest image's configuration differs from
 	// what a build would now produce. It is omitted when nothing differs and
 	// can accompany update-available as well as config-changed.
