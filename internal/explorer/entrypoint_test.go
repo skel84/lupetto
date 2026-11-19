@@ -77,6 +77,22 @@ func TestHTTPBuildUsesTrackedProductPackagesAndUser(t *testing.T) {
 	if !strings.Contains(string(data), "build|cmd:curl|1.2|--no-load|--package=postgresql-18-contrib|--user=26:26|--json\n") {
 		t.Fatal(string(data))
 	}
+	// Another entry of the same package must not lend its options to the
+	// tracked selector, and untracked builds refuse disagreeing entries.
+	config.Products = `{"kind":"products","version":1,"products":[{"package":"cmd:curl","selectors":["1.2"],"packages":["busybox"],"user":"65532"},{"package":"cmd:curl","selectors":["2"]}],"changed":false,"message":"synthetic"}`
+	server, _, calls = testServer(t, config, true)
+	if w := request(server, "POST", "/builds", buildForm(server)); w.Code != 303 {
+		t.Fatalf("response = %d %s", w.Code, w.Body.String())
+	}
+	eventually(t, func() bool { _, log, ok := server.jobs.detail("1", 0); return ok && log.Done })
+	if data, _ := os.ReadFile(calls); !strings.Contains(string(data), "build|cmd:curl|1.2|--no-load|--package=busybox|--user=65532|--json\n") {
+		t.Fatal(string(data))
+	}
+	form := buildForm(server)
+	form.Set("selector", "3")
+	if w := request(server, "POST", "/builds", form); w.Code != 409 || !strings.Contains(w.Body.String(), "different image options") {
+		t.Fatalf("ambiguous: response = %d %s", w.Code, w.Body.String())
+	}
 }
 
 func TestValidateBuildPackagesAndUser(t *testing.T) {

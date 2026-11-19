@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -479,11 +480,27 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "cannot read the products file for the build's image configuration: "+err.Error(), http.StatusServiceUnavailable)
 			return
 		}
+		// The entry tracking the selector wins; otherwise the package's
+		// entries must agree, so no build takes another track's options.
+		var matches []Product
 		for _, product := range products.Products {
 			if product.Package == buildRequest.Package {
-				buildRequest.Entrypoint, buildRequest.CABundle = product.Entrypoint, product.CABundle
-				buildRequest.Packages, buildRequest.User = product.Packages, product.User
+				if slices.Contains(product.Selectors, buildRequest.Selector) {
+					matches = []Product{product}
+					break
+				}
+				matches = append(matches, product)
 			}
+		}
+		for _, product := range matches {
+			if !sameImageOptions(product, matches[0]) {
+				http.Error(w, "the products file gives "+buildRequest.Package+" different image options per selector; build a tracked selector", http.StatusConflict)
+				return
+			}
+		}
+		if len(matches) > 0 {
+			buildRequest.Entrypoint, buildRequest.CABundle = matches[0].Entrypoint, matches[0].CABundle
+			buildRequest.Packages, buildRequest.User = matches[0].Packages, matches[0].User
 		}
 	}
 	if buildRequest.Mode == "publish" {
@@ -505,6 +522,10 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/builds/"+job.ID, http.StatusSeeOther)
+}
+
+func sameImageOptions(a, b Product) bool {
+	return slices.Equal(a.Entrypoint, b.Entrypoint) && a.CABundle == b.CABundle && slices.Equal(a.Packages, b.Packages) && a.User == b.User
 }
 func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 	if !s.authorize(w, r) {
