@@ -192,6 +192,10 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 - [x] `lupetto status` matches security-feed fixes to installed subpackages through their APK origin, and the installed cache moves to version 2 ([evidence](verification.md#subpackage-security-fixes-v042)).
 - [x] Tag `v0.4.2` and let the release workflow publish it. Approved by the maintainer; workflow run `42666205829` succeeded, `ghcr.io/skel84/lupetto@sha256:1d1809ed…075c` verifies keylessly for exactly `release.yml@refs/tags/v0.4.2`, and the GitHub release is published ([evidence](verification.md#v042-release-2026-11-09)).
 
+**Additional packages and image user** ([decision](decisions.md#additional-packages-and-image-user-2026-11-19)):
+
+- [x] Optional per-product `packages` and `user`, repeatable `build`/`sbom` `--package` and `--user`, exact resolution of every additional APK in the same signed index with lock and image checks, `lupetto.image.packages`/`lupetto.image.user` annotations, `request.packages`/`request.user`/`selection.packages` record fields, `config-changed` status, and Explorer pass-through. Proof: focused hermetic tests and a real signed and attested `postgresql-18` build with additional packages and `--user 26` published to a loopback registry, verified, compared by `status`, and run under Docker ([evidence](verification.md#additional-packages-and-image-user)).
+
 ### 4. Add Explorer as an optional application
 
 - [ ] Decide Explorer product/repository/module packaging without introducing a CLI dependency on Explorer.

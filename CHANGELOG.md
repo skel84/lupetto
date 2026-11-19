@@ -2,6 +2,14 @@
 
 User-visible changes to the `lupetto` CLI, `lupetto-explorer`, and the combined container. Releases are git tags `vX.Y.Z`; the [release workflow](.github/workflows/release.yml) publishes the combined Explorer image for each tag.
 
+## Unreleased
+
+### Added
+
+- **Additional packages per product.** A product's optional `packages` list (and the repeatable `--package` flag on `build` and `sbom`) installs further top-level APKs beside the selected one, for example `postgresql-18-contrib` beside `postgresql-18`. Each is pinned to its highest version in the same signed APKINDEX, checked in the apko lock and the image, recorded in `request.packages`, `selection.packages`, and the `lupetto.image.packages` annotation, and covered by the validated SPDX document. `status` reports a changed list as `config-changed` (`configChanges: ["packages"]`). ([decision](docs/decisions.md#additional-packages-and-image-user-2026-11-19))
+- **Image user.** A product's optional `user` (and `--user` on `build` and `sbom`) sets the image `USER` to a numeric `uid` or `uid:gid` and adds a `nonroot` account with those IDs, so charts that set `runAsNonRoot` without `runAsUser` can run Lupetto images. Recorded in `request.user` and the `lupetto.image.user` annotation; `status` reports a change as `config-changed` (`configChanges: ["user"]`).
+- Explorer passes a tracked product's `packages` and `user` to its builds.
+
 ## v0.4.2 (2026-11-09)
 
 Fixes `lupetto status` missing security fixes in subpackages. See the [release notes](docs/release-notes/v0.4.2.md).
