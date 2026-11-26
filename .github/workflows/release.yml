@@ -4,6 +4,12 @@
 #   cosign verify ghcr.io/<owner>/lupetto@sha256:... \
 #     --certificate-identity-regexp '^https://github.com/<owner>/lupetto/' \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+# The same identity attests govulncheck's OpenVEX report of the source, which
+# says per Go advisory whether the code calls the vulnerable symbols. It is
+# report-only: a failed scan never blocks the release. Read it with
+#   cosign verify-attestation --type openvex ghcr.io/<owner>/lupetto@sha256:... \
+#     --certificate-identity-regexp '^https://github.com/<owner>/lupetto/' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 name: release
 on:
   push:
@@ -32,3 +38,14 @@ jobs:
           tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
       - uses: sigstore/cosign-installer@v3
       - run: cosign sign --yes "ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}"
+      # The runner's Go fetches the exact go.mod toolchain; cgo off as in the Containerfile, and the
+      # ubuntu-latest runner is linux/amd64 like the image.
+      - continue-on-error: true
+        timeout-minutes: 10
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          export GOTOOLCHAIN="go$(sed -n 's/^go //p' go.mod)"
+          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -format openvex ./... > govulncheck.openvex.json
+          cosign attest --yes --type openvex --predicate govulncheck.openvex.json \
+            "ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}"

@@ -2,6 +2,12 @@
 
 User-visible changes to the `lupetto` CLI, `lupetto-explorer`, and the combined container. Releases are git tags `vX.Y.Z`; the [release workflow](.github/workflows/release.yml) publishes the combined Explorer image for each tag.
 
+## Unreleased
+
+### Added
+
+- The release workflow attests govulncheck's OpenVEX report (`--type openvex`) on the image digest with the same keyless identity as the signature, recording which Go advisories the shipped (no-cgo, linux/amd64) code reaches. Best-effort and report-only: if the scan or the attestation fails, the release still publishes and the digest has no OpenVEX attestation.
+
 ## v0.5.0 (2026-11-19)
 
 Adds additional packages and a numeric image user to products. See the [release notes](docs/release-notes/v0.5.0.md).
