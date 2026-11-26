@@ -2,7 +2,15 @@
 
 User-visible changes to the `lupetto` CLI, `lupetto-explorer`, and the combined container. Releases are git tags `vX.Y.Z`; the [release workflow](.github/workflows/release.yml) publishes the combined Explorer image for each tag.
 
-## Unreleased
+## v0.5.1 (2026-11-26)
+
+Security update of the toolchain, Go dependencies, and container base. Behaviour, records, and the products-file format are unchanged from v0.5.0. See the [release notes](docs/release-notes/v0.5.1.md).
+
+### Security
+
+- Builds with Go 1.27.4, fixing the reachable standard-library vulnerabilities of Go 1.27.1 in `net/http`, `crypto/tls`, `crypto/x509`, `html/template`, `net/textproto`, and `os`.
+- Updates `github.com/andybalholm/brotli` to v1.2.7 (GO-2026-6888, CVE-2026-111497), `github.com/klauspost/compress` to v1.20.2 (GO-2026-6865), `github.com/containerd/containerd/v2` to v2.4.2 (GO-2026-7007), and OpenTelemetry to v1.47.0 (GO-2026-6974).
+- The combined container uses a current Wolfi base, so its Brotli libraries are no longer affected by CVE-2026-111497. apko 1.4.5, `docker-cli` 28.5.0, and Cosign v3.1.3 stay pinned.
 
 ### Added
 

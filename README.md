@@ -8,7 +8,7 @@ This guide describes the current CLI/source contract. The [verification record](
 
 ## Prerequisites and installation
 
-Run from this checkout with **Go 1.27.1**. Install the CLI independently of Explorer:
+Run from this checkout with **Go 1.27.4**. Install the CLI independently of Explorer:
 
 ```bash
 go install ./cmd/lupetto
@@ -574,7 +574,7 @@ Responses set CSP `default-src 'self'; frame-ancestors 'none'`, `X-Content-Type-
 
 ### Combined container
 
-Build the verified **linux/amd64** image from this checkout. The multi-stage `Containerfile` uses Go 1.27.1 with CGO disabled, a digest-pinned Wolfi base, exact Wolfi `apko=1.4.5-r0` and `docker-cli=28.5.0-r0`, upstream Cosign **v3.1.3** checked against a pinned SHA-256, and CA certificates. It embeds the Explorer templates/static assets present at build time; no image is published by this command.
+Build the verified **linux/amd64** image from this checkout. The multi-stage `Containerfile` uses Go 1.27.4 with CGO disabled, a digest-pinned Wolfi base, exact Wolfi `apko=1.4.5-r0` and `docker-cli=28.5.0-r0`, upstream Cosign **v3.1.3** checked against a pinned SHA-256, and CA certificates. It embeds the Explorer templates/static assets present at build time; no image is published by this command.
 
 ```bash
 docker build --platform linux/amd64 -f Containerfile -t lupetto-explorer:local .

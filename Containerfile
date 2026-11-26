@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # linux/amd64 is the verified deployment target; no cross-platform image is claimed.
-FROM golang:1.27.1-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS build
+FROM golang:1.27.4-alpine@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS build
 WORKDIR /src
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local
 COPY go.mod go.sum ./
@@ -16,7 +16,7 @@ RUN test "$(go env GOARCH)" = amd64 \
     && echo '4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71  /out/cosign' | sha256sum -c - \
     && chmod 0755 /out/cosign
 
-FROM cgr.dev/chainguard/wolfi-base@sha256:d59fd2d1d21e913b12a8d56064e9aaf61f818289bd18b17132a0c4fde2358cea
+FROM cgr.dev/chainguard/wolfi-base@sha256:c902a861151182e4ce2de29b8632ba3f7d75b68c35880580f16e353819e524d3
 RUN echo 'https://packages.wolfi.dev/os' > /etc/apk/repositories \
     && apk add --no-cache apko=1.4.5-r0 docker-cli=28.5.0-r0 ca-certificates-bundle \
     && mkdir -p /var/cache/lupetto/home /var/lib/lupetto /etc/lupetto/docker /etc/lupetto/products \
