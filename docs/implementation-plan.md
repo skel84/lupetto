@@ -197,6 +197,11 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 - [x] Optional per-product `packages` and `user`, repeatable `build`/`sbom` `--package` and `--user`, exact resolution of every additional APK in the same signed index with lock and image checks, `lupetto.image.packages`/`lupetto.image.user` annotations, `request.packages`/`request.user`/`selection.packages` record fields, `config-changed` status, and Explorer pass-through. Proof: focused hermetic tests and a real signed and attested `postgresql-18` build with additional packages and `--user 26` published to a loopback registry, verified, compared by `status`, and run under Docker ([evidence](verification.md#additional-packages-and-image-user)).
 - [x] Tag `v0.5.0` and let the release workflow publish it ([changelog](../CHANGELOG.md), [release notes](release-notes/v0.5.0.md)). Approved by the maintainer; workflow run `44504013781` succeeded, `ghcr.io/skel84/lupetto@sha256:a23a9a0e…7afe` verifies keylessly for exactly `release.yml@refs/tags/v0.5.0`, and the GitHub release is published ([evidence](verification.md#v050-release-2026-11-19)). The published container was not run locally.
 
+**v0.5.1 security update** ([changelog](../CHANGELOG.md), [release notes](release-notes/v0.5.1.md)):
+
+- [x] Go 1.27.4, updated Go dependencies, and a current Wolfi container base; `govulncheck ./...` reports only GO-2026-6905 (`github.com/blakesmith/ar`, no fixed version).
+- [ ] Tag `v0.5.1` and let the release workflow publish it.
+
 ### 4. Add Explorer as an optional application
 
 - [ ] Decide Explorer product/repository/module packaging without introducing a CLI dependency on Explorer.
