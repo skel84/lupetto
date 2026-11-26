@@ -199,7 +199,7 @@ Contract: [dashboard decision](decisions.md#registry-comparison-dashboard-user-a
 
 **v0.5.1 security update** ([changelog](../CHANGELOG.md), [release notes](release-notes/v0.5.1.md)):
 
-- [x] Go 1.27.4, updated Go dependencies, and a current Wolfi container base; `govulncheck ./...` reports only GO-2026-6905 (`github.com/blakesmith/ar`, no fixed version).
+- [x] Go 1.27.4, updated Go dependencies, and a current Wolfi container base; `govulncheck ./...` reports only GO-2026-6905 at symbol level (`github.com/blakesmith/ar`, no fixed version).
 - [ ] Tag `v0.5.1` and let the release workflow publish it.
 
 ### 4. Add Explorer as an optional application
