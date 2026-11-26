@@ -1800,3 +1800,18 @@ With the maintainer's approval, `main` was fast-forwarded from `fcf97f5` to `052
 | `crane config` of the digest | `amd64`; `Entrypoint` `/usr/local/bin/lupetto-explorer`. |
 
 `gh release create v0.5.0 --verify-tag --title "lupetto v0.5.0" --latest` published the [GitHub release](https://github.com/skel84/lupetto/releases/tag/v0.5.0) with `docs/release-notes/v0.5.0.md` as its body, its relative link rewritten to the tagged file.
+
+## v0.5.1 release (2026-11-26)
+
+Pull request #2 ([Go, dependencies, and container base](release-notes/v0.5.1.md)) was squash-merged to `main` as `03ff600`, on top of `6f1f56f` (pull request #3, the OpenVEX attestation), and the annotated tag `v0.5.1` ("lupetto v0.5.1") was pushed on that commit. Before the merge, `go vet -composites=false ./...` and `go test ./...` passed with Go 1.27.4, and `govulncheck ./...` reported only GO-2026-6905 (`github.com/blakesmith/ar`, no fixed version).
+
+| Check | Observed result |
+| --- | --- |
+| Release workflow run `45867488649` (tag push `v0.5.1`) | Completed `success`, including the govulncheck OpenVEX step. |
+| `crane digest ghcr.io/skel84/lupetto:v0.5.1` | `sha256:c4dbd0174eda2c253e89fe35f73d298a86fd45a1e625f7ace7c02dab9dc0d234`; its `linux/amd64` manifest is `sha256:c80df2079c58c47c5742c34417fe3ca8e5f513f9559135cac5ac4d6866071390`. |
+| `cosign verify` with identity `https://github.com/skel84/lupetto/.github/workflows/release.yml@refs/tags/v0.5.1` and issuer `https://token.actions.githubusercontent.com` | Exit 0; claims validated, transparency-log entry verified offline. |
+| `cosign verify-attestation --type openvex` with the same identity | Exit 0; GO-2026-6905 `affected`, GO-2026-5932, GO-2026-6860, and GO-2026-6866 `not_affected`. |
+| `crane config` of the `linux/amd64` manifest | `amd64`; `Entrypoint` `/usr/local/bin/lupetto-explorer`. |
+| `grype registry:ghcr.io/skel84/lupetto@sha256:c80df207…` | No match for CVE-2026-111497 or GO-2026-6888 (v0.5.0: the three `libbrotli*` 1.2.0-r5 packages and `andybalholm/brotli` v1.2.0). Critical 12, high 87 (v0.5.0: 19, 111), all in the pinned `docker-cli`, apko, and Cosign binaries and packages. |
+
+`gh release create v0.5.1 --verify-tag --title "lupetto v0.5.1" --latest` published the [GitHub release](https://github.com/skel84/lupetto/releases/tag/v0.5.1) with `docs/release-notes/v0.5.1.md` as its body, its relative link rewritten to the tagged file.
