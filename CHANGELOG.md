@@ -6,7 +6,7 @@ User-visible changes to the `lupetto` CLI, `lupetto-explorer`, and the combined 
 
 ### Added
 
-- The release workflow attests govulncheck's OpenVEX report (`--type openvex`) on each image digest with the same keyless identity as the signature, recording which Go advisories the code reaches. Report-only: a failed scan does not block the release.
+- The release workflow attests govulncheck's OpenVEX report (`--type openvex`) on the image digest with the same keyless identity as the signature, recording which Go advisories the shipped (no-cgo, linux/amd64) code reaches. Best-effort and report-only: if the scan or the attestation fails, the release still publishes and the digest has no OpenVEX attestation.
 
 ## v0.5.0 (2026-11-19)
 
